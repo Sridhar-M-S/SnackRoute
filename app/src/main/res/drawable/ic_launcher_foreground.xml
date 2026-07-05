@@ -1,0 +1,50 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Subtle Drop Shadow of the Snack Bag -->
+    <group android:translateX="2" android:translateY="3">
+        <path
+            android:fillColor="#1F000000"
+            android:pathData="M 36,28 L 40,24 L 44,28 L 48,24 L 52,28 L 56,24 L 60,28 L 64,24 L 68,28 L 72,24 L 72,80 L 68,84 L 64,80 L 60,84 L 56,80 L 52,84 L 48,80 L 44,84 L 40,80 L 36,84 Z" />
+    </group>
+
+    <!-- Snack Bag Body (with subtle gradient from top-left to bottom-right) -->
+    <path
+        android:pathData="M 36,28 L 40,24 L 44,28 L 48,24 L 52,28 L 56,24 L 60,28 L 64,24 L 68,28 L 72,24 L 72,80 L 68,84 L 64,80 L 60,84 L 56,80 L 52,84 L 48,80 L 44,84 L 40,80 L 36,84 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="36"
+                android:startY="24"
+                android:endX="72"
+                android:endY="84"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF8A00"/>
+                <item android:offset="1.0" android:color="#FF5D00"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Top and Bottom Crimp/Ribbed Lines -->
+    <path
+        android:pathData="M 38,25 L 38,30 M 42,25 L 42,30 M 46,25 L 46,30 M 50,25 L 50,30 M 54,25 L 54,30 M 58,25 L 58,30 M 62,25 L 62,30 M 66,25 L 66,30 M 70,25 L 70,30 M 38,78 L 38,83 M 42,78 L 42,83 M 46,78 L 46,83 M 50,78 L 50,83 M 54,78 L 54,83 M 58,78 L 58,83 M 62,78 L 62,83 M 66,78 L 66,83 M 70,78 L 70,83"
+        android:strokeColor="#C14500"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"/>
+
+    <!-- Dynamic Route Sweep (swooping line indicating logistics/distribution) -->
+    <path
+        android:pathData="M 22,78 C 30,86 45,90 54,90 C 72,90 88,74 88,54 C 88,40 78,30 68,22"
+        android:strokeColor="#44FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- Location Pin / Navigation Symbol (White, perfectly centered on bag) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,38 C 49,38 45,42 45,47 C 45,54 54,64 54,64 C 54,64 63,54 63,47 C 63,42 59,38 54,38 Z M 54,51 C 51.8,51 50,49.2 50,47 C 50,44.8 51.8,43 54,43 C 56.2,43 58,44.8 58,47 C 58,49.2 56.2,51 54,51 Z" />
+
+</vector>
