@@ -20,6 +20,23 @@ jobs:
           mkdir -p gradle/wrapper
           curl -Lo gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v9.3.1/gradle/wrapper/gradle-wrapper.jar
 
+      - name: Decode or Generate Debug Keystore
+        run: |
+          if [ -f debug.keystore.base64 ]; then
+            echo "Decoding debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          else
+            echo "debug.keystore.base64 not found! Generating a new fallback debug keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, O=Android, C=US"
+          fi
+
+      - name: Disable in-process compilation for KSP compatibility
+        run: |
+          if [ -f gradle.properties ]; then
+            echo "Removing kotlin.compiler.execution.strategy=in-process for GitHub Action build..."
+            sed -i '/kotlin.compiler.execution.strategy/d' gradle.properties
+          fi
+
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
