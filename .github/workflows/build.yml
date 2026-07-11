@@ -15,6 +15,11 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Validate and Heal Gradle Wrapper
+        run: |
+          mkdir -p gradle/wrapper
+          curl -Lo gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v9.3.1/gradle/wrapper/gradle-wrapper.jar
+
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
