@@ -3,6 +3,7 @@ package com.example.data
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.flow.Flow
+import androidx.room.withTransaction
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -12,32 +13,110 @@ class AppRepository(
     private val locationDao: LocationDao,
     private val shopDao: ShopDao,
     private val productDao: ProductDao,
-    private val salesDao: SalesDao
+    private val productPriceDao: ProductPriceDao,
+    private val salesDao: SalesDao,
+    private val timetableDao: TimetableDao,
+    private val dailyTargetDao: DailyTargetDao,
+    private val badgeDao: BadgeDao
 ) {
+    // --- Badge Queries ---
+    val allBadges: Flow<List<Badge>> = badgeDao.getAllBadges()
+    val unlockedBadges: Flow<List<UserBadge>> = badgeDao.getUnlockedBadges()
+    suspend fun insertBadge(badge: Badge) = badgeDao.insertBadge(badge)
+    suspend fun unlockBadge(badgeId: String) = badgeDao.unlockBadge(UserBadge(badgeId, System.currentTimeMillis()))
+
+    // --- Weekly Timetable Queries ---
+    val allTimetableEntries: Flow<List<TimetableEntry>> = timetableDao.getAllTimetableEntries()
+    // ... (rest of the file)
+    // --- Daily Target Queries ---
+    val dailyTarget: Flow<DailyTarget?> = dailyTargetDao.getDailyTarget()
+    suspend fun insertDailyTarget(target: DailyTarget) = dailyTargetDao.insertDailyTarget(target)
+
+    suspend fun updateTimetableEntry(entry: TimetableEntry) = timetableDao.updateTimetableEntry(entry)
+
+    suspend fun initializeTimetableIfNeeded() {
+        val existing = timetableDao.getDirectTimetableEntries()
+        val days = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        val missingDays = days.filter { day -> existing.none { it.dayOfWeek.equals(day, ignoreCase = true) } }
+        
+        if (missingDays.isNotEmpty()) {
+            val newEntries = missingDays.map { day ->
+                TimetableEntry(dayOfWeek = day)
+            }
+            timetableDao.insertTimetableEntries(newEntries)
+        }
+    }
+
     // --- Location Master Queries ---
     val allLocations: Flow<List<LocationMaster>> = locationDao.getAllLocations()
     suspend fun insertLocation(location: LocationMaster) = locationDao.insertLocation(location)
     suspend fun insertLocations(locations: List<LocationMaster>) = locationDao.insertLocations(locations)
     suspend fun updateLocation(location: LocationMaster) = locationDao.updateLocation(location)
     suspend fun deleteLocation(location: LocationMaster) = locationDao.deleteLocation(location)
+    suspend fun deleteAllLocations() = locationDao.deleteAllLocations()
     suspend fun getLocationByNumber(number: String) = locationDao.getLocationByNumber(number)
 
     // --- Shop Master Queries ---
     val allShops: Flow<List<ShopMaster>> = shopDao.getAllShops()
-    suspend fun insertShop(shop: ShopMaster) = shopDao.insertShop(shop)
-    suspend fun insertShops(shops: List<ShopMaster>) = shopDao.insertShops(shops)
-    suspend fun updateShop(shop: ShopMaster) = shopDao.updateShop(shop)
+    suspend fun insertShop(shop: ShopMaster) {
+        database.withTransaction {
+            shopDao.insertShop(shop)
+            salesDao.updateSalesShopDetails(shop.shopNumber, shop.storeName, shop.locationNumber)
+        }
+    }
+    suspend fun insertShops(shops: List<ShopMaster>) {
+        android.util.Log.d("SnackRouteDiagnostic", "Starting Room transaction: insertShops for ${shops.size} shops")
+        database.withTransaction {
+            shopDao.insertShops(shops)
+            shops.forEach { shop ->
+                salesDao.updateSalesShopDetails(shop.shopNumber, shop.storeName, shop.locationNumber)
+            }
+        }
+        android.util.Log.d("SnackRouteDiagnostic", "Finished Room transaction: insertShops")
+    }
+    suspend fun updateShop(oldShopNumber: String, shop: ShopMaster) {
+        database.withTransaction {
+            if (oldShopNumber != shop.shopNumber) {
+                val oldRecord = shopDao.getShopByNumber(oldShopNumber)
+                if (oldRecord != null) {
+                    shopDao.deleteShop(oldRecord)
+                }
+                shopDao.insertShop(shop)
+                salesDao.updateSalesShopNumber(oldShopNumber, shop.shopNumber)
+            } else {
+                shopDao.updateShop(shop)
+            }
+            salesDao.updateSalesShopDetails(shop.shopNumber, shop.storeName, shop.locationNumber)
+        }
+    }
     suspend fun deleteShop(shop: ShopMaster) = shopDao.deleteShop(shop)
+    suspend fun deleteAllShops() = shopDao.deleteAllShops()
     suspend fun getShopByNumber(number: String) = shopDao.getShopByNumber(number)
 
     suspend fun generateNextShopNumber(): String {
-        val maxShop = shopDao.getMaxShopNumber() ?: return "SHOP0001"
         return try {
-            val numStr = maxShop.removePrefix("SHOP")
-            val nextNum = numStr.toInt() + 1
-            "SHOP" + String.format("%04d", nextNum)
+            val numbers = shopDao.getAllShopNumbers()
+            if (numbers.isEmpty()) {
+                "1"
+            } else {
+                val hasShopPrefix = numbers.any { it.startsWith("SHOP", ignoreCase = true) }
+                val existingInts = numbers.mapNotNull { num ->
+                    num.filter { it.isDigit() }.toIntOrNull()
+                }.toSet()
+                
+                var candidate = 1
+                while (existingInts.contains(candidate)) {
+                    candidate++
+                }
+                
+                if (hasShopPrefix) {
+                    "SHOP" + String.format("%04d", candidate)
+                } else {
+                    candidate.toString()
+                }
+            }
         } catch (e: Exception) {
-            "SHOP0001"
+            "1"
         }
     }
 
@@ -45,8 +124,36 @@ class AppRepository(
     val allProducts: Flow<List<ProductMaster>> = productDao.getAllProducts()
     suspend fun insertProduct(product: ProductMaster) = productDao.insertProduct(product)
     suspend fun updateProduct(product: ProductMaster) = productDao.updateProduct(product)
-    suspend fun deleteProduct(product: ProductMaster) = productDao.deleteProduct(product)
+    suspend fun deleteProductWithPrices(product: ProductMaster) {
+        database.withTransaction {
+            productPriceDao.deletePricesForProduct(product.id)
+            productDao.deleteProduct(product)
+        }
+    }
+    suspend fun deleteAllProducts() {
+        database.withTransaction {
+            productPriceDao.deleteAllPrices()
+            productDao.deleteAllProducts()
+        }
+    }
     suspend fun getProductByName(name: String) = productDao.getProductByName(name)
+
+    suspend fun insertProductWithPrices(product: ProductMaster, prices: List<ProductPrice>) {
+        database.withTransaction {
+            val productId = productDao.insertProduct(product)
+            prices.forEach {
+                productPriceDao.insertPrice(it.copy(productId = productId.toInt()))
+            }
+        }
+    }
+
+    // --- Product Price Queries ---
+    fun getPricesForProduct(productId: Int) = productPriceDao.getPricesForProduct(productId)
+    suspend fun getAllPrices() = productPriceDao.getAllPrices()
+    suspend fun insertPrice(price: ProductPrice) = productPriceDao.insertPrice(price)
+    suspend fun updatePrice(price: ProductPrice) = productPriceDao.updatePrice(price)
+    suspend fun deletePrice(price: ProductPrice) = productPriceDao.deletePrice(price)
+    suspend fun deletePricesForProduct(productId: Int) = productPriceDao.deletePricesForProduct(productId)
 
     // --- Sales Entry Queries ---
     val allSales: Flow<List<SalesEntry>> = salesDao.getAllSales()
@@ -54,6 +161,7 @@ class AppRepository(
     suspend fun insertSalesList(salesList: List<SalesEntry>) = salesDao.insertSalesList(salesList)
     suspend fun updateSales(sales: SalesEntry) = salesDao.updateSales(sales)
     suspend fun deleteSales(sales: SalesEntry) = salesDao.deleteSales(sales)
+    suspend fun deleteAllSales() = salesDao.deleteAllSales()
 
     // --- Backup and Restore Logic ---
     fun backupDatabase(context: Context): Boolean {

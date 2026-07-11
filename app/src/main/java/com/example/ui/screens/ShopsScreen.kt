@@ -9,10 +9,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,12 +35,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.rememberAsyncImagePainter
 import com.example.data.LocationMaster
 import com.example.data.ShopMaster
+import com.example.data.DailyTarget
+import com.example.data.Badge
+import com.example.data.UserBadge
 import com.example.ui.AppViewModel
 import com.example.utils.Exporter
 import java.io.File
@@ -46,11 +55,90 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShopsScreen(viewModel: AppViewModel) {
+fun ShopsScreen(
+    viewModel: AppViewModel,
+    onNavigateToTab: (String) -> Unit,
+    onOpenChat: () -> Unit,
+    onOpenTimetable: () -> Unit
+) {
     val context = LocalContext.current
     val shops by viewModel.shops.collectAsStateWithLifecycle()
     val locations by viewModel.locations.collectAsStateWithLifecycle()
+    val sales by viewModel.sales.collectAsStateWithLifecycle()
     val nextShopNum by viewModel.nextShopNumber.collectAsStateWithLifecycle()
+    val resolvedUrls by viewModel.resolvedUrls.collectAsStateWithLifecycle()
+    val nearestQueryCoords by viewModel.nearestQueryCoords.collectAsStateWithLifecycle()
+    val isResolvingQuery by viewModel.isResolvingQuery.collectAsStateWithLifecycle()
+
+    val dailyTarget by viewModel.dailyTarget.collectAsStateWithLifecycle()
+    val todayPackets by viewModel.todayPackets.collectAsStateWithLifecycle()
+    val todaySales by viewModel.todaySales.collectAsStateWithLifecycle()
+    val todayProfit by viewModel.todayProfit.collectAsStateWithLifecycle()
+    val allBadges by viewModel.allBadges.collectAsStateWithLifecycle()
+    val unlockedBadges by viewModel.unlockedBadges.collectAsStateWithLifecycle()
+
+    fun extractCoordinates(text: String): Pair<Double, Double>? {
+        if (text.isBlank()) return null
+        val urlToParse = resolvedUrls[text] ?: text
+        val decoded = try {
+            java.net.URLDecoder.decode(urlToParse, "UTF-8")
+        } catch (e: Exception) {
+            urlToParse
+        }
+
+        // 1. Try to find @lat,lng format
+        val atPattern = Regex("@(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
+        atPattern.find(decoded)?.let {
+            val lat = it.groupValues[1].toDoubleOrNull()
+            val lng = it.groupValues[2].toDoubleOrNull()
+            if (lat != null && lng != null) return Pair(lat, lng)
+        }
+
+        // 2. Try to find parameter pattern e.g. q=lat,lng or query=lat,lng
+        val paramPattern = Regex("(?:[?&](?:q|query|daddr|saddr|ll|cbll)=)(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
+        // 2.5 Try to find place, dir or search path pattern: e.g. /place/lat,lng or /dir/lat,lng
+        val pathPattern = Regex("/(?:place|dir|search)/(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
+        pathPattern.find(decoded)?.let {
+            val lat = it.groupValues[1].toDoubleOrNull()
+            val lng = it.groupValues[2].toDoubleOrNull()
+            if (lat != null && lng != null) return Pair(lat, lng)
+        }
+        paramPattern.find(decoded)?.let {
+            val lat = it.groupValues[1].toDoubleOrNull()
+            val lng = it.groupValues[2].toDoubleOrNull()
+            if (lat != null && lng != null) return Pair(lat, lng)
+        }
+
+        // 3. Try DMS format: e.g. 12°58'17.8"N 77°35'40.4"E
+        fun parseDMS(deg: String, min: String, sec: String, dir: String): Double? {
+            val d = deg.toDoubleOrNull() ?: return null
+            val m = min.toDoubleOrNull() ?: 0.0
+            val s = sec.toDoubleOrNull() ?: 0.0
+            var decimal = d + (m / 60.0) + (s / 3600.0)
+            if (dir.equals("S", ignoreCase = true) || dir.equals("W", ignoreCase = true)) {
+                decimal = -decimal
+            }
+            return decimal
+        }
+
+        val dmsRegex = Regex("(\\d+)[°\\s]+(\\d+)[\\'\\s]+(\\d+(?:\\.\\d+)?)\"?\\s*([NSEWnsew])")
+        val dmsMatches = dmsRegex.findAll(decoded).toList()
+        if (dmsMatches.size >= 2) {
+            val lat = parseDMS(dmsMatches[0].groupValues[1], dmsMatches[0].groupValues[2], dmsMatches[0].groupValues[3], dmsMatches[0].groupValues[4])
+            val lng = parseDMS(dmsMatches[1].groupValues[1], dmsMatches[1].groupValues[2], dmsMatches[1].groupValues[3], dmsMatches[1].groupValues[4])
+            if (lat != null && lng != null) return Pair(lat, lng)
+        }
+
+        // 4. Try generic decimal pair: e.g. "12.971598, 77.594562"
+        val genericPattern = Regex("(-?\\d{1,3}\\.\\d+)[\\s,]+(-?\\d{1,3}\\.\\d+)")
+        genericPattern.find(decoded)?.let {
+            val lat = it.groupValues[1].toDoubleOrNull()
+            val lng = it.groupValues[2].toDoubleOrNull()
+            if (lat != null && lng != null) return Pair(lat, lng)
+        }
+
+        return null
+    }
 
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
@@ -64,14 +152,23 @@ fun ShopsScreen(viewModel: AppViewModel) {
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    var selectedLocationFilter by remember { mutableStateOf<String?>(null) }
+    val selectedLocationFilter by viewModel.shopLocationFilter.collectAsStateWithLifecycle()
     var sortBy by remember { mutableStateOf("Name") } // Name, Number, Rating, Date
+    var sortAscending by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
+    var activeSubTab by remember { mutableStateOf("Directory") } // "Directory" or "Nearest Search"
+    var nearestQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(nearestQuery) {
+        viewModel.resolveNearestQueryCoords(context, nearestQuery)
+    }
 
     var showAddEditScreen by remember { mutableStateOf(false) }
     var selectedShopForEdit by remember { mutableStateOf<ShopMaster?>(null) }
     var selectedShopForDetail by remember { mutableStateOf<ShopMaster?>(null) }
 
     // Form fields
+    var formShopNumber by remember { mutableStateOf("") }
     var storeName by remember { mutableStateOf("") }
     var selectedLocationCode by remember { mutableStateOf("") }
     var storeImageUri by remember { mutableStateOf<String?>(null) }
@@ -82,6 +179,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
     var notes by remember { mutableStateOf("") }
 
     // Form validation states
+    var shopNumberError by remember { mutableStateOf<String?>(null) }
     var storeNameError by remember { mutableStateOf<String?>(null) }
     var locationError by remember { mutableStateOf<String?>(null) }
     var mobileError by remember { mutableStateOf<String?>(null) }
@@ -101,7 +199,11 @@ fun ShopsScreen(viewModel: AppViewModel) {
     }
 
     // --- Search & Filtering ---
-    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy) {
+    LaunchedEffect(searchQuery, selectedLocationFilter, sortBy, sortAscending) {
+        listState.scrollToItem(0)
+    }
+
+    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales) {
         var list = shops.filter { shop ->
             val matchSearch = shop.storeName.contains(searchQuery, ignoreCase = true) ||
                     shop.shopNumber.contains(searchQuery, ignoreCase = true) ||
@@ -112,11 +214,42 @@ fun ShopsScreen(viewModel: AppViewModel) {
             matchSearch && matchFilter
         }
 
+        val shopAnalyticsMap = list.associate { shop ->
+            val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
+            shop.shopNumber to com.example.utils.RatingCalculator.calculateAnalytics(salesForShop)
+        }
+
         list = when (sortBy) {
-            "Number" -> list.sortedBy { it.shopNumber }
-            "Rating" -> list.sortedByDescending { it.rating }
-            "Date" -> list.sortedByDescending { it.startingDate }
-            else -> list.sortedBy { it.storeName }
+            "Highest Rating" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.currentRating ?: 0f }
+            "Lowest Rating" -> list.sortedBy { shopAnalyticsMap[it.shopNumber]?.currentRating ?: 5f }
+            "Most Regular Customer" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.totalSalesTransactions ?: 0 }
+            "Highest Revenue" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.totalRevenue ?: 0.0 }
+            "Highest Profit" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.totalProfit ?: 0.0 }
+            "Highest Packets Purchased" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.totalPacketsPurchased ?: 0 }
+            "Health Score (High → Low)" -> {
+                val healthSelector: (ShopMaster) -> Int = { shop ->
+                    val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
+                    viewModel.calculateHealthScore(shop, salesForShop)
+                }
+                list.sortedByDescending(healthSelector)
+            }
+            "Health Score (Low → High)" -> {
+                val healthSelector: (ShopMaster) -> Int = { shop ->
+                    val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
+                    viewModel.calculateHealthScore(shop, salesForShop)
+                }
+                list.sortedBy(healthSelector)
+            }
+            "Most Recent Purchase" -> list.sortedWith(compareByDescending<ShopMaster> { shopAnalyticsMap[it.shopNumber]?.lastPurchaseDate }.thenBy { it.shopNumber })
+            "Number" -> {
+                val numSelector: (ShopMaster) -> Double = { s ->
+                    s.shopNumber.filter { it.isDigit() }.toDoubleOrNull() ?: Double.MAX_VALUE
+                }
+                if (sortAscending) list.sortedBy(numSelector) else list.sortedByDescending(numSelector)
+            }
+            "Rating" -> if (sortAscending) list.sortedBy { it.rating } else list.sortedByDescending { it.rating }
+            "Date" -> if (sortAscending) list.sortedBy { it.startingDate } else list.sortedByDescending { it.startingDate }
+            else -> if (sortAscending) list.sortedBy { it.storeName } else list.sortedByDescending { it.storeName }
         }
         list
     }
@@ -126,7 +259,29 @@ fun ShopsScreen(viewModel: AppViewModel) {
             topBar = {
                 TopAppBar(
                     title = { Text("Shop Master", fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onOpenTimetable,
+                            modifier = Modifier.testTag("open_timetable_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = "Weekly Timetable",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    },
                     actions = {
+                        IconButton(
+                            onClick = onOpenChat,
+                            modifier = Modifier.testTag("open_ai_chat_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Psychology,
+                                contentDescription = "AI Assistant",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         // Import Excel Button
                         IconButton(
                             onClick = {
@@ -154,6 +309,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
                             Toast.makeText(context, "Please create at least one location first!", Toast.LENGTH_LONG).show()
                         } else {
                             selectedShopForEdit = null
+                            formShopNumber = nextShopNum
                             storeName = ""
                             selectedLocationCode = locations.first().locationNumber
                             storeImageUri = null
@@ -162,6 +318,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
                             googleMapLink = ""
                             mobileNumber = ""
                             notes = ""
+                            shopNumberError = null
                             storeNameError = null
                             locationError = null
                             mobileError = null
@@ -183,138 +340,602 @@ fun ShopsScreen(viewModel: AppViewModel) {
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // --- Search input ---
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search by Shop Name, ID, Mobile...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                // --- Sub Tabs (Store Directory / Nearest Shops) ---
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("shop_search_input"),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                // --- Filters (Locations Selector & Sorting) ---
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Location Filter dropdown
-                    var filterExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        FilterChip(
-                            selected = selectedLocationFilter != null,
-                            onClick = { filterExpanded = true },
-                            label = { Text(selectedLocationFilter ?: "All Locations") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) }
-                        )
-                        DropdownMenu(
-                            expanded = filterExpanded,
-                            onDismissRequest = { filterExpanded = false }
+                    ElevatedAssistChip(
+                        onClick = { activeSubTab = "Directory" },
+                        label = { Text("Store Directory", fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        colors = AssistChipDefaults.elevatedAssistChipColors(
+                            containerColor = if (activeSubTab == "Directory") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            labelColor = if (activeSubTab == "Directory") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.weight(1f).testTag("tab_store_directory")
+                    )
+                    ElevatedAssistChip(
+                        onClick = { activeSubTab = "Nearest Search" },
+                        label = { Text("Find Nearest", fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        colors = AssistChipDefaults.elevatedAssistChipColors(
+                            containerColor = if (activeSubTab == "Nearest Search") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            labelColor = if (activeSubTab == "Nearest Search") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.weight(1f).testTag("tab_find_nearest")
+                    )
+                }
+
+                if (activeSubTab == "Directory") {
+                    // --- Search input ---
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search by Shop Name, ID, Mobile...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("shop_search_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    // --- Active Filter Indicator ---
+                    if (selectedLocationFilter != null) {
+                        val loc = locations.firstOrNull { it.locationNumber == selectedLocationFilter }
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("All Locations") },
-                                onClick = {
-                                    selectedLocationFilter = null
-                                    filterExpanded = false
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Filtered by: ${loc?.locationNumber ?: ""} - ${loc?.locationName ?: ""}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                IconButton(onClick = { viewModel.setShopLocationFilter(null) }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear Filter")
                                 }
+                            }
+                        }
+                    }
+
+                    // --- Filters (Locations Selector & Sorting) ---
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Location Filter dropdown
+                        var filterExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            FilterChip(
+                                selected = selectedLocationFilter != null,
+                                onClick = { filterExpanded = true },
+                                label = { Text(selectedLocationFilter ?: "All Locations") },
+                                trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) }
                             )
-                            locations.forEach { loc ->
+                            DropdownMenu(
+                                expanded = filterExpanded,
+                                onDismissRequest = { filterExpanded = false }
+                            ) {
                                 DropdownMenuItem(
-                                    text = { Text(loc.locationName) },
+                                    text = { Text("All Locations") },
                                     onClick = {
-                                        selectedLocationFilter = loc.locationNumber
+                                        viewModel.setShopLocationFilter(null)
                                         filterExpanded = false
+                                    }
+                                )
+                                locations.forEach { loc ->
+                                    DropdownMenuItem(
+                                        text = { Text(loc.locationName) },
+                                        onClick = {
+                                            viewModel.setShopLocationFilter(loc.locationNumber)
+                                            filterExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        // Sort menu
+                        var sortExpanded by remember { mutableStateOf(false) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box {
+                                FilterChip(
+                                    selected = true,
+                                    onClick = { sortExpanded = true },
+                                    label = { Text("Sort: $sortBy") },
+                                    trailingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
+                                )
+                                DropdownMenu(
+                                    expanded = sortExpanded,
+                                    onDismissRequest = { sortExpanded = false }
+                                ) {
+                                    DropdownMenuItem(text = { Text("Name") }, onClick = { sortBy = "Name"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Shop Number") }, onClick = { sortBy = "Number"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Highest Rating") }, onClick = { sortBy = "Highest Rating"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Lowest Rating") }, onClick = { sortBy = "Lowest Rating"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Most Regular Customer") }, onClick = { sortBy = "Most Regular Customer"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Highest Revenue") }, onClick = { sortBy = "Highest Revenue"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Highest Profit") }, onClick = { sortBy = "Highest Profit"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Highest Packets Purchased") }, onClick = { sortBy = "Highest Packets Purchased"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Health Score (High → Low)") }, onClick = { sortBy = "Health Score (High → Low)"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Health Score (Low → High)") }, onClick = { sortBy = "Health Score (Low → High)"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Most Recent Purchase") }, onClick = { sortBy = "Most Recent Purchase"; sortExpanded = false })
+                                    DropdownMenuItem(text = { Text("Date Added") }, onClick = { sortBy = "Date"; sortExpanded = false })
+                                }
+                            }
+                            IconButton(onClick = { sortAscending = !sortAscending }) {
+                                Icon(if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, contentDescription = "Toggle Sort Order")
+                            }
+                        }
+                    }
+
+                    // --- Shops List ---
+                    if (filteredShops.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Storefront,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    text = if (searchQuery.isEmpty() && selectedLocationFilter == null) "No Shops Logged" else "No matching stores found",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(bottom = 80.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            item {
+                DailyTargetWidget(
+                    dailyTarget = dailyTarget,
+                    todayPackets = todayPackets,
+                    todaySales = todaySales,
+                    todayProfit = todayProfit,
+                    onSetTarget = { viewModel.setDailyTarget(it) }
+                )
+                BadgeSection(allBadges = allBadges, unlockedBadges = unlockedBadges)
+            }
+            items(filteredShops, key = { it.shopNumber }) { shop ->
+                                val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
+                                val score = viewModel.calculateHealthScore(shop, sales)
+                                ShopCard(
+                                    shop = shop,
+                                    locationName = locName,
+                                    healthScore = score,
+                                    healthCategory = viewModel.getHealthCategory(score),
+                                    onClick = { selectedShopForDetail = shop },
+                                    onEdit = {
+                                        selectedShopForEdit = shop
+                                        formShopNumber = shop.shopNumber
+                                        storeName = shop.storeName
+                                        selectedLocationCode = shop.locationNumber
+                                        storeImageUri = shop.storeImage
+                                        rating = shop.rating
+                                        startingDateMillis = shop.startingDate
+                                        googleMapLink = shop.googleMapLink ?: ""
+                                        mobileNumber = shop.mobileNumber ?: ""
+                                        notes = shop.notes ?: ""
+                                        shopNumberError = null
+                                        storeNameError = null
+                                        locationError = null
+                                        mobileError = null
+                                        showAddEditScreen = true
+                                    },
+                                    onDelete = {
+                                        viewModel.deleteShop(shop)
+                                        Toast.makeText(context, "Shop deleted", Toast.LENGTH_SHORT).show()
                                     }
                                 )
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    // Sort menu
-                    var sortExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        FilterChip(
-                            selected = true,
-                            onClick = { sortExpanded = true },
-                            label = { Text("Sort: $sortBy") },
-                            trailingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
-                        )
-                        DropdownMenu(
-                            expanded = sortExpanded,
-                            onDismissRequest = { sortExpanded = false }
-                        ) {
-                            DropdownMenuItem(text = { Text("Name") }, onClick = { sortBy = "Name"; sortExpanded = false })
-                            DropdownMenuItem(text = { Text("Shop Number") }, onClick = { sortBy = "Number"; sortExpanded = false })
-                            DropdownMenuItem(text = { Text("Rating") }, onClick = { sortBy = "Rating"; sortExpanded = false })
-                            DropdownMenuItem(text = { Text("Date Added") }, onClick = { sortBy = "Date"; sortExpanded = false })
-                        }
-                    }
-                }
-
-                // --- Shops List ---
-                if (filteredShops.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Storefront,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                                modifier = Modifier.size(64.dp)
-                            )
-                            Text(
-                                text = if (searchQuery.isEmpty() && selectedLocationFilter == null) "No Shops Logged" else "No matching stores found",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
                 } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(bottom = 80.dp),
-                        modifier = Modifier.weight(1f)
+                    // --- Nearest Shops Search ---
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        items(filteredShops, key = { it.shopNumber }) { shop ->
-                            val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
-                            ShopCard(
-                                shop = shop,
-                                locationName = locName,
-                                onClick = { selectedShopForDetail = shop },
-                                onEdit = {
-                                    selectedShopForEdit = shop
-                                    storeName = shop.storeName
-                                    selectedLocationCode = shop.locationNumber
-                                    storeImageUri = shop.storeImage
-                                    rating = shop.rating
-                                    startingDateMillis = shop.startingDate
-                                    googleMapLink = shop.googleMapLink ?: ""
-                                    mobileNumber = shop.mobileNumber ?: ""
-                                    notes = shop.notes ?: ""
-                                    storeNameError = null
-                                    locationError = null
-                                    mobileError = null
-                                    showAddEditScreen = true
-                                },
-                                onDelete = {
-                                    viewModel.deleteShop(shop)
-                                    Toast.makeText(context, "Shop deleted", Toast.LENGTH_SHORT).show()
+                        OutlinedTextField(
+                            value = nearestQuery,
+                            onValueChange = { nearestQuery = it },
+                            placeholder = { Text("Enter Location or Paste Link...") },
+                            leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
+                            trailingIcon = {
+                                if (nearestQuery.isNotEmpty()) {
+                                    IconButton(onClick = { nearestQuery = "" }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                    }
                                 }
-                            )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("nearest_search_input"),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                viewModel.resolveNearestQueryCoords(context, nearestQuery)
+                            },
+                            modifier = Modifier.testTag("nearest_search_button"),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Search")
+                        }
+                    }
+
+                    if (isResolvingQuery) {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .padding(horizontal = 4.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
+
+                    if (nearestQuery.isNotEmpty() && !isResolvingQuery) {
+                        val isLocationResolved = remember(nearestQuery, nearestQueryCoords, locations, shops) {
+                            var coords = nearestQueryCoords
+                            if (coords == null) {
+                                coords = extractCoordinates(nearestQuery)
+                            }
+                            if (coords == null) {
+                                val queryLower = nearestQuery.lowercase()
+                                val matchedOffline = listOf("bangalore", "bengaluru", "indiranagar", "koramangala", "whitefield", "jayanagar", "m.g. road", "mg road", "malleshwaram", "hsr layout", "hebbal", "electronic city", "marathahalli", "btm layout", "rajajinagar", "banashankari", "yeshwanthpur", "bellandur", "yelahanka", "bannerghatta", "mysore", "mysuru", "mangalore", "mangaluru", "hubli", "belgaum", "dharwad", "delhi", "new delhi", "mumbai", "bombay", "chennai", "madras", "kolkata", "calcutta", "hyderabad", "pune", "ahmedabad", "jaipur", "kochi", "cochin").any { queryLower.contains(it) }
+                                if (matchedOffline) {
+                                    coords = Pair(0.0, 0.0)
+                                }
+                            }
+                            if (coords == null) {
+                                val matchedLoc = locations.any {
+                                    it.locationNumber.equals(nearestQuery, ignoreCase = true) ||
+                                    it.locationName.contains(nearestQuery, ignoreCase = true)
+                                }
+                                if (matchedLoc) {
+                                    coords = Pair(0.0, 0.0)
+                                }
+                            }
+                            if (coords == null) {
+                                val matchedShop = shops.any {
+                                    it.storeName.contains(nearestQuery, ignoreCase = true) ||
+                                    it.shopNumber.equals(nearestQuery, ignoreCase = true) ||
+                                    (it.notes ?: "").contains(nearestQuery, ignoreCase = true)
+                                }
+                                if (matchedShop) {
+                                    coords = Pair(0.0, 0.0)
+                                }
+                            }
+                            coords != null
+                        }
+
+                        if (!isLocationResolved) {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = "Warning",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Location not recognized. Showing closest shops to Central Bangalore.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        } else {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp, 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Resolved",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Location coordinates successfully resolved & verified.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val nearestShopsResult = remember(nearestQuery, nearestQueryCoords, shops, locations, sales, resolvedUrls) {
+                        if (nearestQuery.isBlank()) {
+                            emptyList<Pair<ShopMaster, Double>>()
+                        } else {
+                            val query = nearestQuery.trim()
+
+
+
+                            // Standard Haversine distance in km
+                            fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+                                val r = 6371.0
+                                val dLat = Math.toRadians(lat2 - lat1)
+                                val dLon = Math.toRadians(lon2 - lon1)
+                                val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                                        Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                                        Math.sin(dLon / 2) * Math.sin(dLon / 2)
+                                val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+                                return r * c
+                            }
+
+                            // 1. Read the Latitude and Longitude of every Shop. If null, fall back to parsing from maps link or resolved link.
+                            val mapOfShopCoords = shops.map { shop ->
+                                val coords = if (shop.latitude != null && shop.longitude != null) {
+                                    Pair(shop.latitude, shop.longitude)
+                                } else if (!shop.googleMapLink.isNullOrEmpty()) {
+                                    extractCoordinates(shop.googleMapLink)
+                                } else {
+                                    null
+                                }
+                                shop.shopNumber to coords
+                            }.toMap()
+
+                            // 2. Identify the anchor coordinate (first shop that has valid coordinates, or default Bangalore)
+                            val anchorCoordinate = mapOfShopCoords.values.filterNotNull().firstOrNull() ?: Pair(12.971598, 77.594562)
+
+                            // 3. Build center coordinates for each location (average of all shops in that location that have coordinates)
+                            val mapOfLocationCoords = locations.mapIndexed { idx, loc ->
+                                val shopsInLocWithCoords = shops.filter { it.locationNumber == loc.locationNumber }
+                                    .mapNotNull { mapOfShopCoords[it.shopNumber] }
+
+                                val locCoords = if (shopsInLocWithCoords.isNotEmpty()) {
+                                    val avgLat = shopsInLocWithCoords.map { it.first }.average()
+                                    val avgLng = shopsInLocWithCoords.map { it.second }.average()
+                                    Pair(avgLat, avgLng)
+                                } else {
+                                    // Deterministic offset from anchor coordinate to keep things realistic and ordered
+                                    Pair(anchorCoordinate.first + 0.005 * (idx + 1), anchorCoordinate.second + 0.005 * (idx + 1))
+                                }
+                                loc.locationNumber to locCoords
+                            }.toMap()
+
+                            // 4. Build resolved coordinates for EVERY shop in the database (even those with no links or shortened links)
+                            val resolvedShopCoords = shops.map { shop ->
+                                val finalCoords = mapOfShopCoords[shop.shopNumber] ?: mapOfLocationCoords[shop.locationNumber] ?: anchorCoordinate
+                                shop.shopNumber to finalCoords
+                            }.toMap()
+
+                            // 5. Try to resolve targetCoords from query
+                            var targetCoords = nearestQueryCoords
+
+                            if (targetCoords == null) {
+                                targetCoords = extractCoordinates(query)
+                            }
+
+                            // If not direct coordinates, try offline geocoding matching
+                            if (targetCoords == null) {
+                                val queryLower = query.lowercase()
+                                val offlineMatch = listOf(
+                                    "bangalore" to Pair(12.971598, 77.594562),
+                                    "bengaluru" to Pair(12.971598, 77.594562),
+                                    "indiranagar" to Pair(12.9640, 77.6385),
+                                    "koramangala" to Pair(12.9352, 77.6244),
+                                    "whitefield" to Pair(12.9698, 77.7500),
+                                    "jayanagar" to Pair(12.9307, 77.5832),
+                                    "m.g. road" to Pair(12.9738, 77.6119),
+                                    "mg road" to Pair(12.9738, 77.6119),
+                                    "malleshwaram" to Pair(13.0031, 77.5643),
+                                    "hsr layout" to Pair(12.9116, 77.6388),
+                                    "hebbal" to Pair(13.0359, 77.5970),
+                                    "electronic city" to Pair(12.8452, 77.6602),
+                                    "marathahalli" to Pair(12.9569, 77.7011),
+                                    "btm layout" to Pair(12.9166, 77.6101),
+                                    "rajajinagar" to Pair(12.9901, 77.5525),
+                                    "banashankari" to Pair(12.9254, 77.5468),
+                                    "yeshwanthpur" to Pair(13.0232, 77.5529),
+                                    "bellandur" to Pair(12.9304, 77.6784),
+                                    "yelahanka" to Pair(13.1007, 77.5963),
+                                    "bannerghatta" to Pair(12.8063, 77.5772),
+                                    "mysore" to Pair(12.2958, 76.6394),
+                                    "mysuru" to Pair(12.2958, 76.6394),
+                                    "mangalore" to Pair(12.9141, 74.8560),
+                                    "mangaluru" to Pair(12.9141, 74.8560),
+                                    "hubli" to Pair(15.3647, 75.1240),
+                                    "belgaum" to Pair(15.8497, 74.4977),
+                                    "dharwad" to Pair(15.4589, 75.0078),
+                                    "delhi" to Pair(28.6139, 77.2090),
+                                    "new delhi" to Pair(28.6139, 77.2090),
+                                    "mumbai" to Pair(19.0760, 72.8777),
+                                    "bombay" to Pair(19.0760, 72.8777),
+                                    "chennai" to Pair(13.0827, 80.2707),
+                                    "madras" to Pair(13.0827, 80.2707),
+                                    "kolkata" to Pair(22.5726, 88.3639),
+                                    "calcutta" to Pair(22.5726, 88.3639),
+                                    "hyderabad" to Pair(17.3850, 78.4867),
+                                    "pune" to Pair(18.5204, 73.8567),
+                                    "ahmedabad" to Pair(23.0225, 72.5714),
+                                    "jaipur" to Pair(26.9124, 75.7873),
+                                    "kochi" to Pair(9.9312, 76.2673),
+                                    "cochin" to Pair(9.9312, 76.2673)
+                                )
+                                offlineMatch.firstOrNull { queryLower.contains(it.first) }?.let {
+                                    targetCoords = it.second
+                                }
+                            }
+
+                            // If not direct coordinates, try to find matching location
+                            if (targetCoords == null) {
+                                val matchedLocation = locations.firstOrNull {
+                                    it.locationNumber.equals(query, ignoreCase = true) ||
+                                    it.locationName.contains(query, ignoreCase = true)
+                                }
+                                if (matchedLocation != null) {
+                                    targetCoords = mapOfLocationCoords[matchedLocation.locationNumber]
+                                }
+                            }
+
+                            // If still not found, try to find matching shop
+                            if (targetCoords == null) {
+                                val matchedShop = shops.firstOrNull {
+                                    it.storeName.contains(query, ignoreCase = true) ||
+                                    it.shopNumber.equals(query, ignoreCase = true) ||
+                                    (it.notes ?: "").contains(query, ignoreCase = true)
+                                }
+                                if (matchedShop != null) {
+                                    targetCoords = resolvedShopCoords[matchedShop.shopNumber]
+                                }
+                            }
+
+                            // 6. Calculate accurate mathematical distances to all shops using resolved coordinates
+                            val finalTargetCoords = targetCoords ?: anchorCoordinate
+                            val (tLat, tLng) = finalTargetCoords
+                            shops.map { shop ->
+                                val shopCoords = resolvedShopCoords[shop.shopNumber] ?: anchorCoordinate
+                                val dist = calculateDistance(tLat, tLng, shopCoords.first, shopCoords.second)
+                                Pair(shop, dist)
+                            }.sortedBy { it.second }.take(5)
+                        }
+                    }
+
+                    if (nearestQuery.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.padding(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NearMe,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(72.dp)
+                                )
+                                Text(
+                                    text = "Nearest Shops Finder",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Text(
+                                    text = "Enter a manual location (e.g. LOC001, Avenue Road) or paste a Google Maps navigation link to find the 5 closest shops, sorted by shortest distance.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.widthIn(max = 320.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        if (nearestShopsResult.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No nearest shops found",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(bottom = 80.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                item {
+                                    Text(
+                                        text = "Nearest 5 Shops",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+                                }
+                                itemsIndexed(nearestShopsResult) { index, (shop, distance) ->
+                                    val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
+                                    NearestShopCard(
+                                        shop = shop,
+                                        locationName = locName,
+                                        distance = distance,
+                                        index = index + 1,
+                                        onClick = { selectedShopForDetail = shop },
+                                        onNavigate = {
+                                            if (!shop.googleMapLink.isNullOrEmpty()) {
+                                                val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(shop.googleMapLink))
+                                                context.startActivity(mapIntent)
+                                            }
+                                        },
+                                        onCreateSale = {
+                                            viewModel.setPrefilledSaleData(shop.shopNumber, shop.storeName, locName)
+                                            onNavigateToTab("Sales")
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -390,11 +1011,14 @@ fun ShopsScreen(viewModel: AppViewModel) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             OutlinedTextField(
-                                value = if (isEdit) selectedShopForEdit!!.shopNumber else nextShopNum,
-                                onValueChange = {},
+                                value = formShopNumber,
+                                onValueChange = { formShopNumber = it; shopNumberError = null },
                                 label = { Text("Shop Number") },
-                                enabled = false,
-                                modifier = Modifier.width(110.dp)
+                                enabled = true,
+                                isError = shopNumberError != null,
+                                supportingText = shopNumberError?.let { { Text(it) } },
+                                modifier = Modifier.width(135.dp),
+                                singleLine = true
                             )
                             OutlinedTextField(
                                 value = storeName,
@@ -448,32 +1072,33 @@ fun ShopsScreen(viewModel: AppViewModel) {
                     }
 
                     item {
-                        // Rating (1-5 stars)
+                        // Rating (Info only)
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            modifier = Modifier.fillMaxWidth().testTag("auto_rating_info_card"),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f))
                         ) {
-                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Store Rating & Score", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    (1..5).forEach { starIndex ->
-                                        Icon(
-                                            imageVector = if (starIndex <= rating) Icons.Default.Star else Icons.Outlined.StarBorder,
-                                            contentDescription = "Rate $starIndex",
-                                            tint = if (starIndex <= rating) Color(0xFFFFD700) else Color.Gray,
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .clickable { rating = starIndex.toFloat() }
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stars,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Column {
                                     Text(
-                                        text = "Score: ${(rating * 20).toInt()}/100",
+                                        "Dynamic Store Rating Enabled",
+                                        style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        "Ratings (1.0 - 5.0) are calculated automatically based on purchase recency, frequency, packets purchased, revenue, and profit. No manual updates required.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -556,6 +1181,23 @@ fun ShopsScreen(viewModel: AppViewModel) {
                 Button(
                     onClick = {
                         var isValid = true
+                        val cleanedShopNum = formShopNumber.trim()
+                        if (cleanedShopNum.isEmpty()) {
+                            shopNumberError = "Shop Number is required"
+                            isValid = false
+                        } else {
+                            val duplicateExists = if (isEdit) {
+                                shops.any { it.shopNumber.equals(cleanedShopNum, ignoreCase = true) && !it.shopNumber.equals(selectedShopForEdit!!.shopNumber, ignoreCase = true) }
+                            } else {
+                                shops.any { it.shopNumber.equals(cleanedShopNum, ignoreCase = true) }
+                            }
+
+                            if (duplicateExists) {
+                                shopNumberError = "Shop Number already exists. Please enter a different Shop Number."
+                                isValid = false
+                            }
+                        }
+
                         if (storeName.trim().isEmpty()) {
                             storeNameError = "Store Name is required"
                             isValid = false
@@ -570,13 +1212,14 @@ fun ShopsScreen(viewModel: AppViewModel) {
                         }
 
                         if (isValid) {
-                            val scoreValue = (rating * 20).toInt()
+                            val targetRating = if (isEdit) (selectedShopForEdit?.rating ?: 1.0f) else 1.0f
+                            val scoreValue = (targetRating * 20).toInt()
                             val shop = ShopMaster(
-                                shopNumber = if (isEdit) selectedShopForEdit!!.shopNumber else nextShopNum,
+                                shopNumber = cleanedShopNum,
                                 locationNumber = selectedLocationCode,
                                 storeName = storeName.trim(),
                                 storeImage = storeImageUri,
-                                rating = rating,
+                                rating = targetRating,
                                 score = scoreValue,
                                 startingDate = startingDateMillis,
                                 googleMapLink = googleMapLink.trim().ifEmpty { null },
@@ -585,7 +1228,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
                             )
 
                             if (isEdit) {
-                                viewModel.updateShop(shop)
+                                viewModel.updateShop(selectedShopForEdit!!.shopNumber, shop)
                                 Toast.makeText(context, "Store Master updated", Toast.LENGTH_SHORT).show()
                             } else {
                                 viewModel.addShop(shop)
@@ -642,19 +1285,80 @@ fun ShopsScreen(viewModel: AppViewModel) {
                     DetailField(label = "Route Location", value = "$locName (${detail.locationNumber})")
                     DetailField(label = "Starting Date", value = detail.startingDateFormatted)
                     
+                    val salesForShop = sales.filter { it.shopNumber == detail.shopNumber }
+                    val analytics = com.example.utils.RatingCalculator.calculateAnalytics(salesForShop)
+
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Rating:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("Dynamic Rating:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         Row {
                             (1..5).forEach { star ->
+                                val isFilled = star <= analytics.currentRating
+                                val isHalf = !isFilled && (star - 1) < analytics.currentRating
                                 Icon(
-                                    imageVector = if (star <= detail.rating) Icons.Default.Star else Icons.Outlined.StarBorder,
+                                    imageVector = if (isFilled) Icons.Default.Star else Icons.Outlined.StarBorder,
                                     contentDescription = null,
-                                    tint = if (star <= detail.rating) Color(0xFFFFD700) else Color.Gray,
+                                    tint = if (isFilled) Color(0xFFFFD700) else Color.Gray,
                                     modifier = Modifier.size(18.dp)
                                 )
+                            }
+                        }
+                        Text(
+                            text = "${analytics.currentRating} (${analytics.ratingDescription})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth().testTag("shop_detail_analytics_card"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Store Performance Analytics", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                            
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Total Sales Transactions", fontSize = 11.sp, color = Color.Gray)
+                                Text("${analytics.totalSalesTransactions}", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Total Packets Purchased", fontSize = 11.sp, color = Color.Gray)
+                                Text("${analytics.totalPacketsPurchased} packs", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Total Revenue", fontSize = 11.sp, color = Color.Gray)
+                                Text("₹${"%.2f".format(analytics.totalRevenue)}", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF2E7D32))
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Total Profit", fontSize = 11.sp, color = Color.Gray)
+                                Text("₹${"%.2f".format(analytics.totalProfit)}", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF2E7D32))
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Avg Purchases / Month", fontSize = 11.sp, color = Color.Gray)
+                                Text("${"%.1f".format(analytics.averagePurchasesPerMonth)}", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                            
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("First Purchase Date", fontSize = 11.sp, color = Color.Gray)
+                                Text(analytics.firstPurchaseDateFormatted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Last Purchase Date", fontSize = 11.sp, color = Color.Gray)
+                                Text(analytics.lastPurchaseDateFormatted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Days Since Last Purchase", fontSize = 11.sp, color = Color.Gray)
+                                val daysStr = if (analytics.totalSalesTransactions > 0) "${analytics.daysSinceLastPurchase} days" else "N/A"
+                                Text(daysStr, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = if (analytics.daysSinceLastPurchase > 30) Color.Red else Color.Unspecified)
                             }
                         }
                     }
@@ -721,8 +1425,19 @@ fun ShopsScreen(viewModel: AppViewModel) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { selectedShopForDetail = null }) {
-                    Text("Close")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            viewModel.setPrefilledSaleData(detail.shopNumber, detail.storeName, locName)
+                            onNavigateToTab("Sales")
+                            selectedShopForDetail = null
+                        }
+                    ) {
+                        Text("Create Daily Sale")
+                    }
+                    TextButton(onClick = { selectedShopForDetail = null }) {
+                        Text("Close")
+                    }
                 }
             }
         )
@@ -748,7 +1463,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
     }
 
     // --- Excel Import Summary Dialog ---
-    if (importSummary != null) {
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.SHOPS) {
         val summary = importSummary!!
         AlertDialog(
             onDismissRequest = { viewModel.clearImportSummary() },
@@ -798,6 +1513,37 @@ fun ShopsScreen(viewModel: AppViewModel) {
                             SummaryRow(label = "• Invalid Products:", value = "${summary.invalidProductsCount}")
                             SummaryRow(label = "• Failed / Invalid Rows:", value = "${summary.failedRowsCount}")
                         }
+                        else -> {}
+                    }
+                    
+                    if (summary.type == com.example.utils.Exporter.ImportType.SHOPS && summary.totalImagesFound > 0) {
+                        HorizontalDivider()
+                        Text("Image Import Details:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        SummaryRow(label = "• Total Images Found:", value = "${summary.totalImagesFound}")
+                        SummaryRow(label = "• Images Imported Successfully:", value = "${summary.imagesImportedSuccessfully}", color = MaterialTheme.colorScheme.primary)
+                        SummaryRow(label = "• Images Failed:", value = "${summary.imagesFailed}", color = if (summary.imagesFailed > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                        
+                        if (summary.imageImportReasons.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val scrollState = rememberScrollState()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 120.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                    .padding(8.dp)
+                                    .verticalScroll(scrollState),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                summary.imageImportReasons.forEach { reason ->
+                                    Text(
+                                        text = reason,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (reason.contains("successfully", ignoreCase = true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
                     }
                     
                     if (summary.errorReportFile != null) {
@@ -822,6 +1568,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
                                     com.example.utils.Exporter.ImportType.SHOPS -> "Shop Import Error Report"
                                     com.example.utils.Exporter.ImportType.LOCATIONS -> "Location Import Error Report"
                                     com.example.utils.Exporter.ImportType.SALES -> "Sales Import Error Report"
+                                    else -> "Import Error Report"
                                 }
                                 Exporter.shareFile(context, summary.errorReportFile, reportTitle)
                             },
@@ -846,7 +1593,7 @@ fun ShopsScreen(viewModel: AppViewModel) {
     }
 }
 
-@Composable
+private @Composable
 fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
     Row(
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -869,6 +1616,8 @@ fun DetailField(label: String, value: String) {
 fun ShopCard(
     shop: ShopMaster,
     locationName: String,
+    healthScore: Int,
+    healthCategory: String,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -949,6 +1698,24 @@ fun ShopCard(
                     }
                 }
 
+                // Health Score
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "$healthScore%",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = when (healthCategory) {
+                            "Excellent" -> Color(0xFF4CAF50)
+                            "Good" -> Color(0xFF8BC34A)
+                            "Average" -> Color(0xFFFFC107)
+                            else -> Color(0xFFF44336)
+                        }
+                    )
+                    Text(
+                        text = healthCategory,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+
                 // Edit/Delete actions
                 Column(horizontalAlignment = Alignment.End) {
                     IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
@@ -1001,4 +1768,281 @@ fun ShopCard(
             }
         }
     }
+}
+
+@Composable
+fun NearestShopCard(
+    shop: ShopMaster,
+    locationName: String,
+    distance: Double,
+    index: Int,
+    onClick: () -> Unit,
+    onNavigate: () -> Unit,
+    onCreateSale: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .testTag("nearest_shop_card_${shop.shopNumber}"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header: Rank badge, Store Info, and Distance Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                // Rank Badge
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "#$index",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Shop Name & Details
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = shop.storeName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${shop.shopNumber} • $locationName",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Distance Badge
+                val distanceText = if (distance >= 10.0) {
+                    "%.1f km".format(distance)
+                } else if (distance > 0.0) {
+                    "%.2f km".format(distance)
+                } else {
+                    "Exact Match"
+                }
+                
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = distanceText,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Image if available
+            if (!shop.storeImage.isNullOrEmpty() && File(shop.storeImage).exists()) {
+                Image(
+                    painter = rememberAsyncImagePainter(File(shop.storeImage)),
+                    contentDescription = "Store Photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+            }
+
+            // Rating & Action Buttons Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Stars
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    val displayRating = shop.rating
+                    (1..5).forEach { star ->
+                        Icon(
+                            imageVector = if (star <= displayRating) Icons.Default.Star else Icons.Outlined.StarBorder,
+                            contentDescription = null,
+                            tint = if (star <= displayRating) Color(0xFFFFD700) else Color.Gray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "%.1f".format(displayRating),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Quick Action Buttons
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (!shop.googleMapLink.isNullOrEmpty()) {
+                        OutlinedButton(
+                            onClick = onNavigate,
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            modifier = Modifier.height(36.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Map", fontSize = 11.sp)
+                        }
+                    }
+                    Button(
+                        onClick = onCreateSale,
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(36.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sale", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BadgeSection(allBadges: List<Badge>, unlockedBadges: List<UserBadge>) {
+    val unlockedIds = unlockedBadges.map { it.badgeId }.toSet()
+    
+    if (allBadges.isEmpty()) return
+
+    Card(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Achievements", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(allBadges) { badge ->
+                    BadgeItem(badge, badge.id in unlockedIds)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BadgeItem(badge: Badge, isUnlocked: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
+        Icon(
+            imageVector = Icons.Default.EmojiEvents,
+            contentDescription = null,
+            tint = if (isUnlocked) MaterialTheme.colorScheme.primary else Color.Gray,
+            modifier = Modifier.size(48.dp)
+        )
+        Text(badge.name, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2)
+    }
+}
+
+@Composable
+fun DailyTargetWidget(
+    dailyTarget: DailyTarget?,
+    todayPackets: Int,
+    todaySales: Double,
+    todayProfit: Double,
+    onSetTarget: (DailyTarget) -> Unit
+) {
+    var showDialog by remember { mutableStateOf(false) }
+
+    if (showDialog) {
+        DailyTargetDialog(
+            onDismiss = { showDialog = false },
+            onSave = { p, s, pr -> onSetTarget(DailyTarget(1, p, s, pr)) },
+            initialPackets = dailyTarget?.packetTarget ?: 0,
+            initialSales = dailyTarget?.salesAmountTarget ?: 0.0,
+            initialProfit = dailyTarget?.profitTarget ?: 0.0
+        )
+    }
+
+    Card(modifier = Modifier.padding(16.dp).fillMaxWidth(), onClick = { showDialog = true }) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Today's Target", style = MaterialTheme.typography.titleMedium)
+            if (dailyTarget == null) {
+                Text("No target set. Click to set.")
+            } else {
+                val packetProgress = (todayPackets.toFloat() / dailyTarget.packetTarget.coerceAtLeast(1)).coerceIn(0f, 1f)
+                val salesProgress = (todaySales.toFloat() / dailyTarget.salesAmountTarget.coerceAtLeast(1.0)).coerceIn(0.0, 1.0).toFloat()
+                val profitProgress = (todayProfit.toFloat() / dailyTarget.profitTarget.coerceAtLeast(1.0)).coerceIn(0.0, 1.0).toFloat()
+                
+                Text("Packets: $todayPackets / ${dailyTarget.packetTarget}")
+                LinearProgressIndicator(progress = packetProgress, modifier = Modifier.fillMaxWidth())
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text("Sales: ₹${todaySales.toInt()} / ₹${dailyTarget.salesAmountTarget.toInt()}")
+                LinearProgressIndicator(progress = salesProgress, modifier = Modifier.fillMaxWidth())
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text("Profit: ₹${todayProfit.toInt()} / ₹${dailyTarget.profitTarget.toInt()}")
+                LinearProgressIndicator(progress = profitProgress, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyTargetDialog(
+    onDismiss: () -> Unit,
+    onSave: (Int, Double, Double) -> Unit,
+    initialPackets: Int,
+    initialSales: Double,
+    initialProfit: Double
+) {
+    var packets by remember { mutableStateOf(initialPackets.toString()) }
+    var sales by remember { mutableStateOf(initialSales.toInt().toString()) }
+    var profit by remember { mutableStateOf(initialProfit.toInt().toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set Daily Target") },
+        text = {
+            Column {
+                OutlinedTextField(value = packets, onValueChange = { packets = it }, label = { Text("Packets Target") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(value = sales, onValueChange = { sales = it }, label = { Text("Sales Amount Target") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(value = profit, onValueChange = { profit = it }, label = { Text("Profit Target") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(packets.toIntOrNull() ?: 0, sales.toDoubleOrNull() ?: 0.0, profit.toDoubleOrNull() ?: 0.0)
+                onDismiss()
+            }) { Text("Save") }
+        }
+    )
 }

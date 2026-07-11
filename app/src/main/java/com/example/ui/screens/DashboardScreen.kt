@@ -43,7 +43,9 @@ import java.util.Locale
 fun DashboardScreen(
     viewModel: AppViewModel,
     onNavigateToTab: (String) -> Unit,
-    onQuickAddSales: () -> Unit
+    onQuickAddSales: () -> Unit,
+    onOpenChat: () -> Unit,
+    onOpenTimetable: () -> Unit
 ) {
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val shops by viewModel.shops.collectAsStateWithLifecycle()
@@ -111,6 +113,32 @@ fun DashboardScreen(
                             text = "Smart Store & Sales Management",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onOpenTimetable,
+                        modifier = Modifier.testTag("open_timetable_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Weekly Timetable",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = onOpenChat,
+                        modifier = Modifier.testTag("open_ai_chat_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "AI Assistant",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 },
@@ -265,6 +293,145 @@ fun DashboardScreen(
                         LeaderRow(label = "Top Selling Product", value = topSellingProduct, icon = Icons.Default.Star, color = Color(0xFFFFD700))
                         LeaderRow(label = "Best Performing Shop", value = bestPerformingShop, icon = Icons.Default.ThumbUp, color = Color(0xFF4CAF50))
                         LeaderRow(label = "Lowest Performing Shop", value = worstPerformingShop, icon = Icons.Default.TrendingDown, color = Color(0xFFF44336))
+                    }
+                }
+            }
+
+            // --- Top Rated Shops Card ---
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("top_rated_shops_dashboard_card"),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = CardDefaults.outlinedCardBorder()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stars,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFD700),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Text(
+                                    text = "Top Rated Shops",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            
+                            AssistChip(
+                                onClick = { onNavigateToTab("Shops") },
+                                label = { Text("View All") },
+                                leadingIcon = { Icon(Icons.Default.ArrowForward, null, modifier = Modifier.size(16.dp)) }
+                            )
+                        }
+                        
+                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                        
+                        val topShops = shops.sortedByDescending { it.rating }.take(10)
+                        if (topShops.isEmpty()) {
+                            Text(
+                                text = "Add stores and log sales to see automatic performance ratings.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                topShops.forEachIndexed { index, shop ->
+                                    val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
+                                    val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
+                                    val analytics = com.example.utils.RatingCalculator.calculateAnalytics(salesForShop)
+                                    
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onNavigateToTab("Shops") }
+                                            .padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            // Rank Badge
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .background(
+                                                        color = when (index) {
+                                                            0 -> Color(0xFFFFD700)
+                                                            1 -> Color(0xFFC0C0C0)
+                                                            2 -> Color(0xFFCD7F32)
+                                                            else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                        },
+                                                        shape = CircleShape
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "${index + 1}",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (index < 3) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                            
+                                            Column {
+                                                Text(
+                                                    text = shop.storeName,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "$locName • ${analytics.ratingDescription}",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = null,
+                                                tint = Color(0xFFFFD700),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = "${"%.1f".format(shop.rating)}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

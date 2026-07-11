@@ -4,22 +4,33 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 
 @Database(
     entities = [
         LocationMaster::class,
         ShopMaster::class,
         ProductMaster::class,
-        SalesEntry::class
+        ProductPrice::class,
+        SalesEntry::class,
+        TimetableEntry::class,
+        DailyTarget::class,
+        Badge::class,
+        UserBadge::class
     ],
-    version = 1,
+    version = 7,
     exportSchema = false
 )
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun locationDao(): LocationDao
     abstract fun shopDao(): ShopDao
     abstract fun productDao(): ProductDao
+    abstract fun productPriceDao(): ProductPriceDao
     abstract fun salesDao(): SalesDao
+    abstract fun timetableDao(): TimetableDao
+    abstract fun dailyTargetDao(): DailyTargetDao
+    abstract fun badgeDao(): BadgeDao
 
     companion object {
         @Volatile
@@ -36,6 +47,13 @@ abstract class AppDatabase : RoomDatabase() {
                 .build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        fun closeDatabase() {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
             }
         }
     }

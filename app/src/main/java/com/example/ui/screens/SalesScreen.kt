@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -37,7 +38,11 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SalesScreen(viewModel: AppViewModel) {
+fun SalesScreen(
+    viewModel: AppViewModel,
+    onOpenChat: () -> Unit,
+    onOpenTimetable: () -> Unit
+) {
     val context = LocalContext.current
     val sales by viewModel.sales.collectAsStateWithLifecycle()
     val shops by viewModel.shops.collectAsStateWithLifecycle()
@@ -55,6 +60,7 @@ fun SalesScreen(viewModel: AppViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var showAddEditScreen by remember { mutableStateOf(false) }
     var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
+    var isShopLocked by remember { mutableStateOf(false) }
 
     // --- Search & Multiple Filters State ---
     var filterExpanded by remember { mutableStateOf(false) }
@@ -64,7 +70,9 @@ fun SalesScreen(viewModel: AppViewModel) {
     var filterStatus by remember { mutableStateOf<String?>(null) }
     var filterStartDate by remember { mutableStateOf<Long?>(null) }
     var filterEndDate by remember { mutableStateOf<Long?>(null) }
-    var sortBy by remember { mutableStateOf("DateNewest") } // DateNewest, DateOldest, AmountHigh, ProfitHigh
+    var sortBy by remember { mutableStateOf("Date") } // Date, Amount, Profit
+    var sortAscending by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
     // Form fields
     var entryDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -73,6 +81,9 @@ fun SalesScreen(viewModel: AppViewModel) {
     var packetsGivenStr by remember { mutableStateOf("") }
     var packetsReturnedStr by remember { mutableStateOf("") }
     var ratePerPacketStr by remember { mutableStateOf("") }
+    var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
+    var isCustomRate by remember { mutableStateOf(false) }
+    var customProfitStr by remember { mutableStateOf("") }
     var payStatus by remember { mutableStateOf("Paid") } // Paid, Pending, Partially Paid
     var remarks by remember { mutableStateOf("") }
 
@@ -83,9 +94,16 @@ fun SalesScreen(viewModel: AppViewModel) {
     var rateError by remember { mutableStateOf<String?>(null) }
 
     // --- Filter logic ---
+    LaunchedEffect(
+        searchQuery, filterShopNumber, filterLocationNumber,
+        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy, sortAscending
+    ) {
+        listState.scrollToItem(0)
+    }
+
     val filteredSales = remember(
         sales, searchQuery, filterShopNumber, filterLocationNumber,
-        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy
+        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy, sortAscending
     ) {
         var list = sales.filter { sale ->
             // Search filter
@@ -112,12 +130,129 @@ fun SalesScreen(viewModel: AppViewModel) {
 
         // Sorting
         list = when (sortBy) {
-            "DateOldest" -> list.sortedBy { it.entryDate }
-            "AmountHigh" -> list.sortedByDescending { it.totalAmount }
-            "ProfitHigh" -> list.sortedByDescending { it.totalProfit }
-            else -> list.sortedByDescending { it.entryDate } // DateNewest
+            "Amount" -> if (sortAscending) list.sortedBy { it.totalAmount } else list.sortedByDescending { it.totalAmount }
+            "Profit" -> if (sortAscending) list.sortedBy { it.totalProfit } else list.sortedByDescending { it.totalProfit }
+            else -> if (sortAscending) list.sortedBy { it.entryDate } else list.sortedByDescending { it.entryDate }
         }
         list
+    }
+
+    // --- Excel Import Summary Dialog ---
+    val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
+    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
+    val prefilledSaleData by viewModel.prefilledSaleData.collectAsStateWithLifecycle()
+
+    LaunchedEffect(prefilledSaleData) {
+        if (prefilledSaleData != null) {
+            val (shopNumber, _, _) = prefilledSaleData!!
+            
+            // Set form fields
+            entryDateMillis = System.currentTimeMillis()
+            selectedShopNumber = shopNumber
+            
+            // Set first active product as default
+            val activeProds = products.filter { it.status == "Active" }
+            if (activeProds.isNotEmpty()) {
+                selectedProductName = activeProds.first().productName
+                ratePerPacketStr = "0.0" // Need to fetch price for selected product
+            } else if (products.isNotEmpty()) {
+                selectedProductName = products.first().productName
+                ratePerPacketStr = "0.0" // Need to fetch price for selected product
+            }
+            packetsGivenStr = ""
+            packetsReturnedStr = ""
+            payStatus = "Paid"
+            remarks = ""
+            shopError = null
+            productError = null
+            packetsError = null
+            rateError = null
+            
+            isShopLocked = true
+            showAddEditScreen = true
+            
+            // Clear prefilled data to avoid re-triggering
+            viewModel.setPrefilledSaleData(null, null, null)
+        }
+    }
+
+    if (importSummary != null) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.skippedRows > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The spreadsheet import has completed. Here are the details:")
+                    
+                    HorizontalDivider()
+                    
+                    SummaryRow(label = "Total Candidate Rows:", value = "${summary.totalRows}")
+                    SummaryRow(label = "Successfully Imported:", value = "${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary)
+                    SummaryRow(label = "Skipped Rows (Total):", value = "${summary.skippedRows}", color = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Skipped Details:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    
+                    SummaryRow(label = "• Invalid Shop Numbers:", value = "${summary.invalidShopNumbersCount}")
+                    SummaryRow(label = "• Invalid Products:", value = "${summary.invalidProductsCount}")
+                    SummaryRow(label = "• Invalid Dates:", value = "${summary.invalidDatesCount}")
+                    SummaryRow(label = "• Failed / Invalid Rows:", value = "${summary.failedRowsCount}")
+                    
+                    if (summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Some rows could not be imported. Download/Share the Error Report to review and correct them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                Exporter.shareFile(context, summary.errorReportFile, "Sales Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
     }
 
     if (!showAddEditScreen) {
@@ -125,7 +260,29 @@ fun SalesScreen(viewModel: AppViewModel) {
             topBar = {
                 TopAppBar(
                     title = { Text("Sales Records", fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onOpenTimetable,
+                            modifier = Modifier.testTag("open_timetable_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = "Weekly Timetable",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    },
                     actions = {
+                        IconButton(
+                            onClick = onOpenChat,
+                            modifier = Modifier.testTag("open_ai_chat_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Psychology,
+                                contentDescription = "AI Assistant",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         IconButton(
                             onClick = { filterExpanded = !filterExpanded },
                             modifier = Modifier.testTag("sales_filter_toggle")
@@ -156,6 +313,7 @@ fun SalesScreen(viewModel: AppViewModel) {
                             Toast.makeText(context, "Please configure products first!", Toast.LENGTH_LONG).show()
                         } else {
                             selectedSalesForEdit = null
+                            isShopLocked = false
                             entryDateMillis = System.currentTimeMillis()
                             selectedShopNumber = shops.first().shopNumber
                             val activeProds = products.filter { it.status == "Active" }
@@ -163,7 +321,7 @@ fun SalesScreen(viewModel: AppViewModel) {
                             packetsGivenStr = ""
                             packetsReturnedStr = ""
                             val prodObj = products.firstOrNull { it.productName == selectedProductName }
-                            ratePerPacketStr = prodObj?.sellingPrice?.toString() ?: ""
+                            ratePerPacketStr = "0.0" // TODO: Implement price selection from ProductPrice table
                             payStatus = "Paid"
                             remarks = ""
                             shopError = null
@@ -388,19 +546,23 @@ fun SalesScreen(viewModel: AppViewModel) {
                     )
 
                     var sortMenuExp by remember { mutableStateOf(false) }
-                    Box {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { sortMenuExp = true }
-                        ) {
-                            Text("Sort", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { sortMenuExp = true }
+                            ) {
+                                Text("Sort: $sortBy", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            DropdownMenu(expanded = sortMenuExp, onDismissRequest = { sortMenuExp = false }) {
+                                DropdownMenuItem(text = { Text("Date") }, onClick = { sortBy = "Date"; sortMenuExp = false })
+                                DropdownMenuItem(text = { Text("Amount") }, onClick = { sortBy = "Amount"; sortMenuExp = false })
+                                DropdownMenuItem(text = { Text("Profit") }, onClick = { sortBy = "Profit"; sortMenuExp = false })
+                            }
                         }
-                        DropdownMenu(expanded = sortMenuExp, onDismissRequest = { sortMenuExp = false }) {
-                            DropdownMenuItem(text = { Text("Newest Logs First") }, onClick = { sortBy = "DateNewest"; sortMenuExp = false })
-                            DropdownMenuItem(text = { Text("Oldest Logs First") }, onClick = { sortBy = "DateOldest"; sortMenuExp = false })
-                            DropdownMenuItem(text = { Text("Highest Sale Amount") }, onClick = { sortBy = "AmountHigh"; sortMenuExp = false })
-                            DropdownMenuItem(text = { Text("Highest Profit Earned") }, onClick = { sortBy = "ProfitHigh"; sortMenuExp = false })
+                        IconButton(onClick = { sortAscending = !sortAscending }) {
+                            Icon(if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, contentDescription = "Toggle Sort Order", modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -423,6 +585,7 @@ fun SalesScreen(viewModel: AppViewModel) {
                     }
                 } else {
                     LazyColumn(
+                        state = listState,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 80.dp),
                         modifier = Modifier.weight(1f)
@@ -438,6 +601,7 @@ fun SalesScreen(viewModel: AppViewModel) {
                                     packetsGivenStr = sale.packetsGiven.toString()
                                     packetsReturnedStr = sale.packetsReturned.toString()
                                     ratePerPacketStr = sale.ratePerPacket.toString()
+                                    customProfitStr = sale.profitPerPacket.toString()
                                     payStatus = sale.status
                                     remarks = sale.remarks ?: ""
                                     shopError = null
@@ -464,15 +628,29 @@ fun SalesScreen(viewModel: AppViewModel) {
         val currentShopObj = shops.firstOrNull { it.shopNumber == selectedShopNumber }
         val currentProductObj = products.firstOrNull { it.productName == selectedProductName }
 
+        LaunchedEffect(currentProductObj) {
+            if (currentProductObj != null) {
+                viewModel.getPricesForProduct(currentProductObj.id).collect { prices ->
+                    availablePrices = prices
+                }
+            }
+        }
+
+        LaunchedEffect(availablePrices, selectedSalesForEdit) {
+            if (selectedSalesForEdit != null && availablePrices.isNotEmpty()) {
+                isCustomRate = availablePrices.none { it.sellingPrice == selectedSalesForEdit?.ratePerPacket }
+            }
+        }
+
         // Live Auto-Calculations
         val givenCount = packetsGivenStr.toIntOrNull() ?: 0
         val returnedCount = packetsReturnedStr.toIntOrNull() ?: 0
         val soldCalculated = maxOf(0, givenCount - returnedCount)
         
-        val liveRate = ratePerPacketStr.toDoubleOrNull() ?: currentProductObj?.sellingPrice ?: 0.0
+        val liveRate = ratePerPacketStr.toDoubleOrNull() ?: 0.0
         val totalAmountCalculated = soldCalculated * liveRate
         
-        val liveProfitPerPacket = currentProductObj?.profitPerPacket ?: 0.0
+        val liveProfitPerPacket = customProfitStr.toDoubleOrNull() ?: 0.0
         val totalProfitCalculated = soldCalculated * liveProfitPerPacket
 
         Scaffold(
@@ -538,15 +716,21 @@ fun SalesScreen(viewModel: AppViewModel) {
                                 label = { Text("Shop Master Store*") },
                                 readOnly = true,
                                 trailingIcon = {
-                                    IconButton(onClick = { shopExpanded = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                    if (isShopLocked) {
+                                        IconButton(onClick = { isShopLocked = false }) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Change Shop")
+                                        }
+                                    } else {
+                                        IconButton(onClick = { shopExpanded = true }) {
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                        }
                                     }
                                 },
                                 isError = shopError != null,
                                 supportingText = shopError?.let { { Text(it) } },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { shopExpanded = true }
+                                    .clickable(enabled = !isShopLocked) { shopExpanded = true }
                             )
                             DropdownMenu(expanded = shopExpanded, onDismissRequest = { shopExpanded = false }, modifier = Modifier.fillMaxWidth(0.9f)) {
                                 shops.forEach { s ->
@@ -586,10 +770,10 @@ fun SalesScreen(viewModel: AppViewModel) {
                             DropdownMenu(expanded = prodExpanded, onDismissRequest = { prodExpanded = false }, modifier = Modifier.fillMaxWidth(0.9f)) {
                                 products.forEach { p ->
                                     DropdownMenuItem(
-                                        text = { Text("${p.productName} (₹${p.sellingPrice})") },
+                                        text = { Text("${p.productName} (Price list)") }, // TODO: Implement price selection
                                         onClick = {
                                             selectedProductName = p.productName
-                                            ratePerPacketStr = p.sellingPrice.toString() // Autofill rate
+                                            ratePerPacketStr = "0.0" // TODO: Implement price selection
                                             prodExpanded = false
                                             productError = null
                                         }
@@ -632,21 +816,65 @@ fun SalesScreen(viewModel: AppViewModel) {
                     }
 
                     item {
-                        // Rate per packet (autofilled but editable)
-                        OutlinedTextField(
-                            value = ratePerPacketStr,
-                            onValueChange = {
-                                ratePerPacketStr = it
-                                rateError = null
-                            },
-                            label = { Text("Rate Per Packet (₹)*") },
-                            placeholder = { Text("e.g. 10.00") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            isError = rateError != null,
-                            supportingText = rateError?.let { { Text(it) } },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        // Rate per packet (dropdown + custom input)
+                        var rateMenuExpanded by remember { mutableStateOf(false) }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ExposedDropdownMenuBox(
+                                expanded = rateMenuExpanded,
+                                onExpandedChange = { rateMenuExpanded = !rateMenuExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = if (isCustomRate) "Custom Price" else (availablePrices.find { it.sellingPrice.toString() == ratePerPacketStr }?.let { "₹${it.sellingPrice}" } ?: "Select Rate"),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Rate Per Packet*") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = rateMenuExpanded) },
+                                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                                )
+                                ExposedDropdownMenu(expanded = rateMenuExpanded, onDismissRequest = { rateMenuExpanded = false }) {
+                                    availablePrices.forEach { price ->
+                                        DropdownMenuItem(
+                                            text = { Text("₹${price.sellingPrice}") },
+                                            onClick = {
+                                                isCustomRate = false
+                                                ratePerPacketStr = price.sellingPrice.toString()
+                                                customProfitStr = price.profitPerPacket.toString()
+                                                rateMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        text = { Text("Custom Price") },
+                                        onClick = {
+                                            isCustomRate = true
+                                            ratePerPacketStr = ""
+                                            customProfitStr = ""
+                                            rateMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+
+                            if (isCustomRate) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedTextField(
+                                        value = ratePerPacketStr,
+                                        onValueChange = { ratePerPacketStr = it },
+                                        label = { Text("Selling Price*") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = customProfitStr,
+                                        onValueChange = { customProfitStr = it },
+                                        label = { Text("Profit*") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     item {
@@ -750,7 +978,7 @@ fun SalesScreen(viewModel: AppViewModel) {
                         if (isValid) {
                             val finalSold = givenVal!! - returnedVal
                             val finalTotal = finalSold * rateVal!!
-                            val finalProfitPerUnit = currentProductObj?.profitPerPacket ?: 0.0
+                            val finalProfitPerUnit = customProfitStr.toDoubleOrNull() ?: 0.0
                             val finalProfitTotal = finalSold * finalProfitPerUnit
 
                             val entry = SalesEntry(
@@ -790,6 +1018,117 @@ fun SalesScreen(viewModel: AppViewModel) {
                 }
             }
         }
+    }
+
+    // --- Excel Import Progress Dialog ---
+    if (isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing Sales Logs") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Reading spreadsheet and validating sales entries...")
+                }
+            }
+        )
+    }
+
+    // --- Excel Import Summary Dialog ---
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.SALES) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.skippedRows > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The spreadsheet import has completed. Here are the details:")
+                    
+                    HorizontalDivider()
+                    
+                    SummaryRow(label = "Total Candidate Rows:", value = "${summary.totalRows}")
+                    SummaryRow(label = "Successfully Imported:", value = "${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary)
+                    SummaryRow(label = "Updated Records:", value = "${summary.updatedRecordsCount}")
+                    SummaryRow(label = "Skipped Rows (Total):", value = "${summary.skippedRows}", color = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Skipped Details:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    
+                    SummaryRow(label = "• Duplicate Records:", value = "${summary.duplicateRecordsCount}")
+                    SummaryRow(label = "• Invalid Shop Numbers:", value = "${summary.invalidShopNumbersCount}")
+                    SummaryRow(label = "• Invalid Products:", value = "${summary.invalidProductsCount}")
+                    SummaryRow(label = "• Failed / Invalid Rows:", value = "${summary.failedRowsCount}")
+                    
+                    if (summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Some rows could not be imported. Download/Share the Error Report to review and correct them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                Exporter.shareFile(context, summary.errorReportFile, "Sales Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
+    }
+}
+
+private @Composable
+fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = color)
     }
 }
 

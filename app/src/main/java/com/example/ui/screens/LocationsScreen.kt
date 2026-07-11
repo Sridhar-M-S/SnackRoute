@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -30,9 +31,16 @@ import com.example.utils.Exporter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocationsScreen(viewModel: AppViewModel) {
+fun LocationsScreen(
+    viewModel: AppViewModel,
+    onNavigateToTab: (String) -> Unit,
+    onOpenChat: () -> Unit,
+    onOpenTimetable: () -> Unit
+) {
     val context = LocalContext.current
     val locations by viewModel.locations.collectAsStateWithLifecycle()
+    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
+    val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -44,6 +52,8 @@ fun LocationsScreen(viewModel: AppViewModel) {
 
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("Number") } // Number, Name
+    var sortAscending by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
     var showAddEditDialog by remember { mutableStateOf(false) }
     var selectedLocationForEdit by remember { mutableStateOf<LocationMaster?>(null) }
 
@@ -54,7 +64,11 @@ fun LocationsScreen(viewModel: AppViewModel) {
     var locNameError by remember { mutableStateOf<String?>(null) }
 
     // --- Search & Filtering Logic ---
-    val filteredLocations = remember(locations, searchQuery, sortBy) {
+    LaunchedEffect(searchQuery, sortBy, sortAscending) {
+        listState.scrollToItem(0)
+    }
+
+    val filteredLocations = remember(locations, searchQuery, sortBy, sortAscending) {
         var list = locations.filter {
             it.locationNumber.contains(searchQuery, ignoreCase = true) ||
                     it.locationName.contains(searchQuery, ignoreCase = true)
@@ -71,7 +85,29 @@ fun LocationsScreen(viewModel: AppViewModel) {
         topBar = {
             TopAppBar(
                 title = { Text("Location Master", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onOpenTimetable,
+                        modifier = Modifier.testTag("open_timetable_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Weekly Timetable",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
                 actions = {
+                    IconButton(
+                        onClick = onOpenChat,
+                        modifier = Modifier.testTag("open_ai_chat_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "AI Assistant",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     IconButton(
                         onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
                         modifier = Modifier.testTag("import_locations_button")
@@ -182,6 +218,7 @@ fun LocationsScreen(viewModel: AppViewModel) {
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 80.dp),
                     modifier = Modifier.weight(1f)
@@ -200,6 +237,10 @@ fun LocationsScreen(viewModel: AppViewModel) {
                             onDelete = {
                                 viewModel.deleteLocation(loc)
                                 Toast.makeText(context, "Location deleted", Toast.LENGTH_SHORT).show()
+                            },
+                            onViewShops = {
+                                viewModel.setShopLocationFilter(loc.locationNumber)
+                                onNavigateToTab("Shops")
                             }
                         )
                     }
@@ -297,13 +338,123 @@ fun LocationsScreen(viewModel: AppViewModel) {
             }
         )
     }
+
+    // --- Excel Import Progress Dialog ---
+    if (isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing Locations") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Reading spreadsheet and validating records...")
+                }
+            }
+        )
+    }
+
+    // --- Excel Import Summary Dialog ---
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.LOCATIONS) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.skippedRows > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The spreadsheet import has completed. Here are the details:")
+                    
+                    HorizontalDivider()
+                    
+                    SummaryRow(label = "Total Candidate Rows:", value = "${summary.totalRows}")
+                    SummaryRow(label = "Successfully Imported:", value = "${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary)
+                    SummaryRow(label = "Updated Records:", value = "${summary.updatedRecordsCount}")
+                    SummaryRow(label = "Skipped Rows (Total):", value = "${summary.skippedRows}", color = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Skipped Details:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    
+                    SummaryRow(label = "• Duplicate Records:", value = "${summary.duplicateRecordsCount}")
+                    SummaryRow(label = "• Failed / Invalid Rows:", value = "${summary.failedRowsCount}")
+                    
+                    if (summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Some rows could not be imported. Download/Share the Error Report to review and correct them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                Exporter.shareFile(context, summary.errorReportFile, "Location Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
+    }
+}
+
+private @Composable
+fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = color)
+    }
 }
 
 @Composable
 fun LocationCard(
     location: LocationMaster,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onViewShops: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -355,6 +506,9 @@ fun LocationCard(
                 }
 
                 Row {
+                    IconButton(onClick = onViewShops) {
+                        Icon(Icons.Default.Storefront, contentDescription = "View Shops", tint = MaterialTheme.colorScheme.tertiary)
+                    }
                     IconButton(onClick = onEdit) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
                     }

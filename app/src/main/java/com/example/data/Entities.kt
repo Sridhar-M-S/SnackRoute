@@ -23,7 +23,9 @@ data class ShopMaster(
     val startingDate: Long = System.currentTimeMillis(),
     val googleMapLink: String? = null,
     val mobileNumber: String? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 ) {
     val startingDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(startingDate))
@@ -34,6 +36,13 @@ data class ProductMaster(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val productName: String,
     val productCategory: String,
+    val status: String = "Active" // Active, Inactive
+)
+
+@Entity(tableName = "product_prices")
+data class ProductPrice(
+    @PrimaryKey(autoGenerate = true) val priceId: Int = 0,
+    val productId: Int,
     val sellingPrice: Double,
     val profitPerPacket: Double,
     val status: String = "Active" // Active, Inactive
@@ -60,3 +69,33 @@ data class SalesEntry(
     val entryDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(entryDate))
 }
+
+@Entity(tableName = "weekly_timetable")
+data class TimetableEntry(
+    @PrimaryKey val dayOfWeek: String, // "Monday", "Tuesday", etc.
+    val locationNumbers: List<String> = emptyList(), // Store as list of location numbers
+    val notes: String = ""
+)
+
+@Entity(tableName = "daily_targets")
+data class DailyTarget(
+    @PrimaryKey val id: Int = 1,
+    val packetTarget: Int,
+    val salesAmountTarget: Double,
+    val profitTarget: Double
+)
+
+@Entity(tableName = "badges")
+data class Badge(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String,
+    val iconName: String
+)
+
+@Entity(tableName = "user_badges")
+data class UserBadge(
+    @PrimaryKey val badgeId: String,
+    val unlockedAt: Long
+)
+

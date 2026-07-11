@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -25,80 +28,121 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ProductMaster
+import com.example.data.ProductPrice
 import com.example.ui.AppViewModel
 import com.example.utils.Exporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProductsScreen(viewModel: AppViewModel) {
+fun ProductsScreen(
+    viewModel: AppViewModel,
+    onOpenChat: () -> Unit,
+    onOpenTimetable: () -> Unit
+) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val products by viewModel.products.collectAsStateWithLifecycle()
+    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
+    val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
+    
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importProductsFromExcel(context, uri)
+        }
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var sortBy by remember { mutableStateOf("Name") } // Name, Price, Profit
-
+    var sortAscending by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
+    
     var showAddEditDialog by remember { mutableStateOf(false) }
     var selectedProductForEdit by remember { mutableStateOf<ProductMaster?>(null) }
-
+    
     // Dialog state fields
     var productName by remember { mutableStateOf("") }
     var productCategory by remember { mutableStateOf("Popcorn") }
-    var sellingPrice by remember { mutableStateOf("") }
-    var profitPerPacket by remember { mutableStateOf("") }
     var productStatus by remember { mutableStateOf("Active") }
-
+    var priceConfigurations by remember { mutableStateOf(listOf<com.example.data.ProductPrice>()) }
+    
+    // Dialog price input fields
+    var newSellingPrice by remember { mutableStateOf("") }
+    var newProfitPerPacket by remember { mutableStateOf("") }
+    var editingPriceId by remember { mutableStateOf<Int?>(null) }
+    
     // Validation errors
     var nameError by remember { mutableStateOf<String?>(null) }
     var priceError by remember { mutableStateOf<String?>(null) }
     var profitError by remember { mutableStateOf<String?>(null) }
-
+    
     // Category suggestions
     val categories = listOf("Popcorn", "Chips", "Savouries", "Puffs", "Drinks", "Healthy Snack")
-
-    // --- Add Default Snack Seed Data if Database is Empty ---
-    LaunchedEffect(products) {
-        if (products.isEmpty()) {
-            val defaults = listOf(
-                ProductMaster(productName = "Cheese Popcorn", productCategory = "Popcorn", sellingPrice = 10.0, profitPerPacket = 4.0),
-                ProductMaster(productName = "Caramel Popcorn", productCategory = "Popcorn", sellingPrice = 15.0, profitPerPacket = 6.0),
-                ProductMaster(productName = "Masala Popcorn", productCategory = "Popcorn", sellingPrice = 10.0, profitPerPacket = 4.0),
-                ProductMaster(productName = "Butter Popcorn", productCategory = "Popcorn", sellingPrice = 10.0, profitPerPacket = 4.0),
-                ProductMaster(productName = "Banana Chips", productCategory = "Chips", sellingPrice = 20.0, profitPerPacket = 8.0),
-                ProductMaster(productName = "Murukku", productCategory = "Savouries", sellingPrice = 15.0, profitPerPacket = 6.0),
-                ProductMaster(productName = "Mixture", productCategory = "Savouries", sellingPrice = 20.0, profitPerPacket = 8.0),
-                ProductMaster(productName = "Corn Rings", productCategory = "Savouries", sellingPrice = 10.0, profitPerPacket = 4.0),
-                ProductMaster(productName = "Potato Chips", productCategory = "Chips", sellingPrice = 10.0, profitPerPacket = 4.0),
-                ProductMaster(productName = "Nachos", productCategory = "Chips", sellingPrice = 25.0, profitPerPacket = 10.0)
-            )
-            defaults.forEach { viewModel.addProduct(it) }
-        }
-    }
-
+    
     // --- Search & Filters ---
-    val filteredProducts = remember(products, searchQuery, selectedCategoryFilter, sortBy) {
+    LaunchedEffect(searchQuery, selectedCategoryFilter, sortBy, sortAscending) {
+        listState.scrollToItem(0)
+    }
+    
+    val filteredProducts = remember(products, searchQuery, selectedCategoryFilter, sortBy, sortAscending) {
         var list = products.filter { prod ->
             val matchSearch = prod.productName.contains(searchQuery, ignoreCase = true) ||
                     prod.productCategory.contains(searchQuery, ignoreCase = true)
             val matchFilter = selectedCategoryFilter == null || prod.productCategory == selectedCategoryFilter
             matchSearch && matchFilter
         }
-
+        
         list = when (sortBy) {
-            "Price" -> list.sortedByDescending { it.sellingPrice }
-            "Profit" -> list.sortedByDescending { it.profitPerPacket }
-            else -> list.sortedBy { it.productName }
+            else -> if (sortAscending) list.sortedBy { it.productName } else list.sortedByDescending { it.productName }
         }
         list
     }
-
+    
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Product Master", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onOpenTimetable,
+                        modifier = Modifier.testTag("open_timetable_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Weekly Timetable",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
                 actions = {
                     IconButton(
-                        onClick = { Exporter.exportProducts(context, products) },
+                        onClick = onOpenChat,
+                        modifier = Modifier.testTag("open_ai_chat_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "AI Assistant",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
+                        onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        modifier = Modifier.testTag("import_products_button")
+                    ) {
+                        Icon(Icons.Default.Upload, contentDescription = "Import Excel")
+                    }
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                val allPrices = viewModel.getAllPrices()
+                                Exporter.exportProducts(context, products, allPrices)
+                            }
+                        },
                         modifier = Modifier.testTag("export_products_button")
                     ) {
                         Icon(Icons.Default.Download, contentDescription = "Export CSV")
@@ -112,12 +156,11 @@ fun ProductsScreen(viewModel: AppViewModel) {
                     selectedProductForEdit = null
                     productName = ""
                     productCategory = "Popcorn"
-                    sellingPrice = ""
-                    profitPerPacket = ""
                     productStatus = "Active"
                     nameError = null
                     priceError = null
                     profitError = null
+                    priceConfigurations = emptyList()
                     showAddEditDialog = true
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -147,7 +190,7 @@ fun ProductsScreen(viewModel: AppViewModel) {
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp)
             )
-
+            
             // --- Category Filters Row ---
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -170,7 +213,7 @@ fun ProductsScreen(viewModel: AppViewModel) {
                     }
                 }
             }
-
+            
             // --- Sort Pills ---
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -183,21 +226,45 @@ fun ProductsScreen(viewModel: AppViewModel) {
                 )
                 FilterChip(
                     selected = sortBy == "Name",
-                    onClick = { sortBy = "Name" },
-                    label = { Text("A - Z Name") }
+                    onClick = {
+                        if (sortBy == "Name") sortAscending = !sortAscending
+                        else { sortBy = "Name"; sortAscending = true }
+                    },
+                    label = { 
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Name")
+                            Icon(if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 )
                 FilterChip(
                     selected = sortBy == "Price",
-                    onClick = { sortBy = "Price" },
-                    label = { Text("Highest Price") }
+                    onClick = {
+                        if (sortBy == "Price") sortAscending = !sortAscending
+                        else { sortBy = "Price"; sortAscending = false }
+                    },
+                    label = { 
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Price")
+                            Icon(if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 )
                 FilterChip(
                     selected = sortBy == "Profit",
-                    onClick = { sortBy = "Profit" },
-                    label = { Text("Highest Profit") }
+                    onClick = {
+                        if (sortBy == "Profit") sortAscending = !sortAscending
+                        else { sortBy = "Profit"; sortAscending = false }
+                    },
+                    label = { 
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Profit")
+                            Icon(if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 )
             }
-
+            
             // --- List of Products ---
             if (filteredProducts.isEmpty()) {
                 Box(
@@ -226,6 +293,7 @@ fun ProductsScreen(viewModel: AppViewModel) {
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 80.dp),
                     modifier = Modifier.weight(1f)
@@ -237,12 +305,17 @@ fun ProductsScreen(viewModel: AppViewModel) {
                                 selectedProductForEdit = prod
                                 productName = prod.productName
                                 productCategory = prod.productCategory
-                                sellingPrice = prod.sellingPrice.toString()
-                                profitPerPacket = prod.profitPerPacket.toString()
+                                // sellingPrice = prod.sellingPrice.toString()
+                                // profitPerPacket = prod.profitPerPacket.toString()
                                 productStatus = prod.status
                                 nameError = null
                                 priceError = null
                                 profitError = null
+                                scope.launch {
+                                    viewModel.getPricesForProduct(prod.id).collect { prices ->
+                                        priceConfigurations = prices
+                                    }
+                                }
                                 showAddEditDialog = true
                             },
                             onDelete = {
@@ -255,7 +328,7 @@ fun ProductsScreen(viewModel: AppViewModel) {
             }
         }
     }
-
+    
     // --- Add / Edit Dialog ---
     if (showAddEditDialog) {
         val isEdit = selectedProductForEdit != null
@@ -277,7 +350,7 @@ fun ProductsScreen(viewModel: AppViewModel) {
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
-
+                    
                     // Category Selector
                     var catExpanded by remember { mutableStateOf(false) }
                     Box(modifier = Modifier.fillMaxWidth()) {
@@ -311,43 +384,72 @@ fun ProductsScreen(viewModel: AppViewModel) {
                             }
                         }
                     }
-
-                    // Prices & Profits (Numeric inputs)
+                    
+                    // Prices & Profits
+                    Text("Price Configurations", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    
+                    priceConfigurations.forEach { price ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("₹${price.sellingPrice} / Profit: ₹${price.profitPerPacket}")
+                            Row {
+                                IconButton(onClick = { 
+                                    newSellingPrice = price.sellingPrice.toString()
+                                    newProfitPerPacket = price.profitPerPacket.toString()
+                                    editingPriceId = price.priceId
+                                }) { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                IconButton(onClick = { priceConfigurations = priceConfigurations.filter { it.priceId != price.priceId } }) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                    
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
-                            value = sellingPrice,
-                            onValueChange = {
-                                sellingPrice = it
-                                priceError = null
-                            },
-                            label = { Text("Selling Price (₹)*") },
-                            placeholder = { Text("e.g. 15.00") },
-                            isError = priceError != null,
-                            supportingText = priceError?.let { { Text(it) } },
+                            value = newSellingPrice,
+                            onValueChange = { newSellingPrice = it },
+                            label = { Text("Selling Price (₹)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
-
+                        
                         OutlinedTextField(
-                            value = profitPerPacket,
-                            onValueChange = {
-                                profitPerPacket = it
-                                profitError = null
-                            },
-                            label = { Text("Profit / Packet (₹)*") },
-                            placeholder = { Text("e.g. 5.50") },
-                            isError = profitError != null,
-                            supportingText = profitError?.let { { Text(it) } },
+                            value = newProfitPerPacket,
+                            onValueChange = { newProfitPerPacket = it },
+                            label = { Text("Profit / Packet (₹)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
                     }
-
+                    Button(
+                        onClick = {
+                            val sp = newSellingPrice.toDoubleOrNull() ?: 0.0
+                            val pr = newProfitPerPacket.toDoubleOrNull() ?: 0.0
+                            if (sp > 0) {
+                                if (editingPriceId != null) {
+                                    priceConfigurations = priceConfigurations.map { if (it.priceId == editingPriceId) it.copy(sellingPrice = sp, profitPerPacket = pr) else it }
+                                    editingPriceId = null
+                                } else {
+                                    priceConfigurations = priceConfigurations + com.example.data.ProductPrice(productId = selectedProductForEdit?.id ?: 0, sellingPrice = sp, profitPerPacket = pr)
+                                }
+                                newSellingPrice = ""
+                                newProfitPerPacket = ""
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (editingPriceId != null) "Update Price" else "Add Price")
+                    }
+                    
                     // Status selection
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -383,40 +485,36 @@ fun ProductsScreen(viewModel: AppViewModel) {
                                 isValid = false
                             }
                         }
-
-                        val sellPriceVal = sellingPrice.toDoubleOrNull()
-                        if (sellPriceVal == null || sellPriceVal <= 0.0) {
-                            priceError = "Enter valid price"
+                        
+                        if (priceConfigurations.isEmpty()) {
+                            priceError = "Add at least one price configuration"
+                            isValid = false
+                        } else if (priceConfigurations.any { it.sellingPrice <= 0 || it.profitPerPacket < 0 }) {
+                            priceError = "All price configurations must have valid selling price and profit"
                             isValid = false
                         }
-
-                        val profitVal = profitPerPacket.toDoubleOrNull()
-                        if (profitVal == null || profitVal < 0.0) {
-                            profitError = "Enter valid profit"
-                            isValid = false
-                        } else if (sellPriceVal != null && profitVal > sellPriceVal) {
-                            profitError = "Profit cannot exceed selling price"
-                            isValid = false
-                        }
-
+                        
                         if (isValid) {
                             val product = ProductMaster(
                                 id = selectedProductForEdit?.id ?: 0,
                                 productName = productName.trim(),
                                 productCategory = productCategory,
-                                sellingPrice = sellPriceVal!!,
-                                profitPerPacket = profitVal!!,
                                 status = productStatus
                             )
-
-                            if (isEdit) {
-                                viewModel.updateProduct(product)
-                                Toast.makeText(context, "Product configuration updated", Toast.LENGTH_SHORT).show()
-                            } else {
-                                viewModel.addProduct(product)
-                                Toast.makeText(context, "Product configured successfully", Toast.LENGTH_SHORT).show()
+                            
+                            scope.launch {
+                                if (selectedProductForEdit != null) {
+                                    viewModel.updateProduct(product)
+                                    // Handle price updates/additions/deletions - simplified for now: delete all and re-add
+                                    viewModel.deletePricesForProduct(product.id)
+                                    priceConfigurations.forEach { viewModel.addPrice(it.copy(productId = product.id)) }
+                                    Toast.makeText(context, "Product configuration updated", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.addProductWithPrices(product, priceConfigurations)
+                                    Toast.makeText(context, "Product configured successfully", Toast.LENGTH_SHORT).show()
+                                }
+                                showAddEditDialog = false
                             }
-                            showAddEditDialog = false
                         }
                     },
                     modifier = Modifier.testTag("save_product_button")
@@ -431,6 +529,115 @@ fun ProductsScreen(viewModel: AppViewModel) {
             }
         )
     }
+
+    // --- Excel Import Progress Dialog ---
+    if (isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing Products") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Reading spreadsheet and validating products...")
+                }
+            }
+        )
+    }
+
+    // --- Excel Import Summary Dialog ---
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.PRODUCTS) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.skippedRows > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The spreadsheet import has completed. Here are the details:")
+                    
+                    HorizontalDivider()
+                    
+                    SummaryRow(label = "Total Candidate Rows:", value = "${summary.totalRows}")
+                    SummaryRow(label = "Successfully Imported:", value = "${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary)
+                    SummaryRow(label = "Updated Records:", value = "${summary.updatedRecordsCount}", color = MaterialTheme.colorScheme.secondary)
+                    SummaryRow(label = "Skipped Rows (Total):", value = "${summary.skippedRows}", color = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Skipped Details:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    
+                    SummaryRow(label = "• Duplicate Records:", value = "${summary.duplicateRecordsCount}")
+                    SummaryRow(label = "• Failed / Invalid Rows:", value = "${summary.failedRowsCount}")
+                    
+                    if (summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Some rows could not be imported. Download/Share the Error Report to review and correct them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                Exporter.shareFile(context, summary.errorReportFile, "Product Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
+    }
+}
+
+private @Composable
+fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = color)
+    }
 }
 
 @Composable
@@ -440,7 +647,7 @@ fun ProductCard(
     onDelete: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
-
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -472,7 +679,7 @@ fun ProductCard(
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
-
+                    
                     Column {
                         Text(
                             text = product.productName,
@@ -488,7 +695,7 @@ fun ProductCard(
                         )
                     }
                 }
-
+                
                 Row(horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = onEdit) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
@@ -498,18 +705,16 @@ fun ProductCard(
                     }
                 }
             }
-
+            
             Divider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
+            
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
-                ProductMetricItem(label = "Selling Price", value = "₹${"%.2f".format(product.sellingPrice)}")
-                ProductMetricItem(label = "Profit / Packet", value = "₹${"%.2f".format(product.profitPerPacket)}")
-                ProductMetricItem(label = "Profit Ratio", value = "${"%.1f".format((product.profitPerPacket / product.sellingPrice) * 100)}%")
+                Text("See Price Configurations to view pricing.")
             }
-
+            
             AnimatedVisibility(visible = showDeleteConfirm) {
                 Column(
                     modifier = Modifier
