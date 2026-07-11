@@ -1,0 +1,19 @@
+# Handle line endings automatically for text files
+* text=auto
+
+# Explicitly declare binary files to prevent corruption during git checkout/commit
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+
+# Ensure shell scripts always use LF (line feed) line endings
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Ensure Windows batch files always use CRLF (carriage return + line feed) line endings
+gradlew.bat text eol=crlf
+*.bat text eol=crlf
