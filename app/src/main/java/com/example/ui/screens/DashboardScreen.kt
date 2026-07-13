@@ -1,7 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
@@ -33,6 +33,10 @@ import com.example.data.SalesEntry
 import com.example.ui.AppViewModel
 import com.example.ui.BusinessSuggestion
 import com.example.ui.SuggestionType
+import com.example.ui.GamificationState
+import com.example.ui.Mission
+import com.example.ui.BossChallenge
+import com.example.ui.GamificationEvent
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -52,6 +56,15 @@ fun DashboardScreen(
     val products by viewModel.products.collectAsStateWithLifecycle()
     val sales by viewModel.sales.collectAsStateWithLifecycle()
     val suggestions by viewModel.businessInsights.collectAsStateWithLifecycle(emptyList())
+
+    val gameProgress by viewModel.gamificationState.collectAsStateWithLifecycle()
+    var activeCelebration by remember { mutableStateOf<GamificationEvent?>(null) }
+
+    LaunchedEffect(Unit) {
+        viewModel.gamificationEvents.collect { event ->
+            activeCelebration = event
+        }
+    }
 
     // --- Statistics Calculations ---
     val totalLocations = locations.size
@@ -99,7 +112,8 @@ fun DashboardScreen(
         "N/A"
     }
 
-    Scaffold(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
         topBar = {
             LargeTopAppBar(
                 title = {
@@ -166,6 +180,67 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 80.dp)
         ) {
+            // --- Gamification HUD Header ---
+            item {
+                GameHudCard(state = gameProgress)
+            }
+
+            // --- Combo Alert ---
+            if (gameProgress.sessionCombo > 1) {
+                item {
+                    val comboBonus = when {
+                        gameProgress.sessionCombo >= 10 -> 100
+                        gameProgress.sessionCombo >= 5 -> 50
+                        gameProgress.sessionCombo >= 3 -> 20
+                        else -> 10
+                    }
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToTab("Sales") },
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFF5722)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "🔥", fontSize = 28.sp)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "${gameProgress.sessionCombo}X Sales Combo Active!",
+                                        fontWeight = FontWeight.Black,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "Log another sale within 10 minutes for massive XP multipliers!",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White.copy(alpha = 0.9f)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "+$comboBonus XP!",
+                                fontWeight = FontWeight.Black,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+
+            // --- Missions Arena (Daily run & Boss fights) ---
+            item {
+                MissionsArenaWidget(state = gameProgress)
+            }
+
             // --- AI Suggestions Section ---
             if (suggestions.isNotEmpty()) {
                 item {
@@ -475,6 +550,14 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+        } // Close Scaffold lambda block
+
+        if (activeCelebration != null) {
+            CelebrationOverlay(
+                event = activeCelebration!!,
+                onDismiss = { activeCelebration = null }
+            )
         }
     }
 }
@@ -1014,3 +1097,669 @@ fun BentoMiniStatCard(
         }
     }
 }
+
+@Composable
+fun GameHudCard(state: GamificationState) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("game_hud_card"),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(50.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "LVL",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp
+                            )
+                            Text(
+                                text = state.level.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = state.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = state.rank,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFFFD700).copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFD700))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "🪙", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = state.coins.toString(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFFFC107)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFFF5722).copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF5722))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "🔥", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "${state.streak}D",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFFF5722)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "XP Progress",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = "${state.xp} / ${state.xpNeededForNextLevel} XP",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { state.xpProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f)
+            )
+        }
+    }
+}
+
+@Composable
+fun MissionsArenaWidget(state: GamificationState) {
+    var selectedTab by remember { mutableStateOf(0) }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Missions Arena ⚔️",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                AssistChip(
+                    onClick = {},
+                    label = { Text("Rank: ${state.rank}") },
+                    leadingIcon = { Icon(Icons.Default.TrendingUp, null, modifier = Modifier.size(14.dp)) }
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Daily Run", style = MaterialTheme.typography.labelMedium) }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("Milestones", style = MaterialTheme.typography.labelMedium) }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("Boss Fights", style = MaterialTheme.typography.labelMedium) }
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            when (selectedTab) {
+                0 -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.dailyMissions.isEmpty()) {
+                            Text(
+                                text = "All daily missions cleared! Check tomorrow.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            state.dailyMissions.forEach { mission ->
+                                MissionItemRow(mission = mission)
+                            }
+                        }
+                    }
+                }
+                1 -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val milestoneMissions = state.weeklyMissions + state.monthlyMissions
+                        if (milestoneMissions.isEmpty()) {
+                            Text(
+                                text = "No milestone missions active.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            milestoneMissions.forEach { mission ->
+                                MissionItemRow(mission = mission)
+                            }
+                        }
+                    }
+                }
+                2 -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.bossChallenges.isEmpty()) {
+                            Text(
+                                text = "All boss challenges slain! You are the ultimate leader.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            state.bossChallenges.forEach { boss ->
+                                BossChallengeItemRow(boss = boss)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MissionItemRow(mission: Mission) {
+    val progressPercent = if (mission.target > 0) mission.progress.toFloat() / mission.target else 0f
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (mission.isCompleted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.02f)
+            )
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(
+                    if (mission.isCompleted) Color(0xFF4CAF50).copy(alpha = 0.15f)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (mission.isCompleted) {
+                Icon(Icons.Default.Check, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+            } else {
+                Icon(Icons.Default.Flag, null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+            }
+        }
+        
+        Spacer(modifier = Modifier.width(10.dp))
+        
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = mission.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (mission.isCompleted) Color(0xFF388E3C) else MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = mission.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LinearProgressIndicator(
+                    progress = { progressPercent.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = if (mission.isCompleted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "${mission.progress}/${mission.target}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 10.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BossChallengeItemRow(boss: BossChallenge) {
+    val progressPercent = if (boss.target > 0) boss.progress.toFloat() / boss.target else 0f
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (boss.isCompleted) Color(0xFFFFE4E6).copy(alpha = 0.15f)
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.02f)
+            )
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(
+                    if (boss.isCompleted) Color(0xFF4CAF50).copy(alpha = 0.15f)
+                    else Color(0xFFE91E63).copy(alpha = 0.15f)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (boss.isCompleted) {
+                Icon(Icons.Default.WorkspacePremium, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
+            } else {
+                Text(text = "👹", fontSize = 18.sp)
+            }
+        }
+        
+        Spacer(modifier = Modifier.width(10.dp))
+        
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = boss.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Black,
+                    color = if (boss.isCompleted) Color(0xFF388E3C) else Color(0xFFC2185B)
+                )
+                Text(
+                    text = if (boss.isCompleted) "SLAYED" else "ALIVE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = if (boss.isCompleted) Color(0xFF388E3C) else Color(0xFFC2185B),
+                    fontSize = 9.sp
+                )
+            }
+            Text(
+                text = boss.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LinearProgressIndicator(
+                    progress = { progressPercent.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = if (boss.isCompleted) Color(0xFF4CAF50) else Color(0xFFE91E63),
+                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "${boss.progress}/${boss.target}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 10.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CelebrationOverlay(event: GamificationEvent, onDismiss: () -> Unit) {
+    LaunchedEffect(event) {
+        kotlinx.coroutines.delay(3500)
+        onDismiss()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.75f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (event is GamificationEvent.LevelUp) {
+            ConfettiScreen()
+        }
+
+        Card(
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .padding(20.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                when (event) {
+                    is GamificationEvent.LevelUp -> {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFFD700)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.MilitaryTech, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
+                        Text(
+                            text = "LEVEL UP! 👑",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFFFC107)
+                        )
+                        Text(
+                            text = "You've reached Level ${event.level}!",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Title Unlocked:\n${event.title}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    is GamificationEvent.MissionComplete -> {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF4CAF50)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CheckCircle, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
+                        Text(
+                            text = "MISSION COMPLETE! 🎉",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF4CAF50),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Text(
+                            text = event.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Text(
+                            text = "Daily Reward Credited!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                    is GamificationEvent.AchievementUnlocked -> {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF9800)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.EmojiEvents, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
+                        Text(
+                            text = "BADGE UNLOCKED! 🏆",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFF9800),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Text(
+                            text = event.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                    is GamificationEvent.BossDefeated -> {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFE91E63)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.WorkspacePremium, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
+                        Text(
+                            text = "BOSS DEFEATED! ⚔️",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE91E63),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Text(
+                            text = "You defeated ${event.bossName}!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                    is GamificationEvent.XpGain -> {
+                        Text(
+                            text = "+${event.amount} XP",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = event.reason,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    is GamificationEvent.CoinGain -> {
+                        Text(
+                            text = "+${event.amount} COINS 🪙",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFFFC107)
+                        )
+                        Text(
+                            text = event.reason,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    is GamificationEvent.ComboUpdate -> {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF5722)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "🔥", fontSize = 32.sp)
+                        }
+                        Text(
+                            text = "${event.count}X SALES COMBO!",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFFF5722)
+                        )
+                        Text(
+                            text = "+${event.bonusXp} Combo Bonus XP!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Awesome!")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ConfettiScreen() {
+    val particles = remember {
+        List(80) {
+            ConfettiParticle(
+                x = (0..1000).random().toFloat(),
+                y = (-200..0).random().toFloat(),
+                speed = (6..18).random().toFloat(),
+                color = Color(
+                    red = (150..255).random() / 255f,
+                    green = (150..255).random() / 255f,
+                    blue = (150..255).random() / 255f
+                ),
+                size = (6..16).random().toFloat()
+            )
+        }
+    }
+    
+    val infiniteTransition = rememberInfiniteTransition(label = "confetti")
+    val animFactor by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "confetti_anim"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        particles.forEach { p ->
+            val currentY = p.y + animFactor * (p.speed / 10f)
+            val currentX = p.x + kotlin.math.sin(currentY / 50f) * 30f
+            if (currentY in 0f..size.height) {
+                drawCircle(
+                    color = p.color,
+                    radius = p.size / 2,
+                    center = Offset(currentX % size.width, currentY)
+                )
+            }
+        }
+    }
+}
+
+data class ConfettiParticle(
+    val x: Float,
+    val y: Float,
+    val speed: Float,
+    val color: Color,
+    val size: Float
+)

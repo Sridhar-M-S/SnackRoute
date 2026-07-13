@@ -11,6 +11,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.*
@@ -109,41 +114,90 @@ fun AiAssistantScreen(viewModel: AppViewModel, onClose: (() -> Unit)? = null) {
             ) {
                 items(messages) { message ->
                     val isUser = message.sender == "user"
+                    val clipboardManager = LocalClipboardManager.current
                     
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .widthIn(max = 290.dp)
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 16.dp,
-                                        topEnd = 16.dp,
-                                        bottomStart = if (isUser) 16.dp else 4.dp,
-                                        bottomEnd = if (isUser) 4.dp else 16.dp
-                                    )
-                                )
-                                .background(
-                                    if (isUser) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceVariant
-                                    }
-                                )
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
                         ) {
-                            Text(
-                                text = message.text,
-                                color = if (isUser) {
-                                    MaterialTheme.colorScheme.onPrimary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 290.dp)
+                                    .clip(
+                                        RoundedCornerShape(
+                                            topStart = 16.dp,
+                                            topEnd = 16.dp,
+                                            bottomStart = if (isUser) 16.dp else 4.dp,
+                                            bottomEnd = if (isUser) 4.dp else 16.dp
+                                        )
+                                    )
+                                    .background(
+                                        if (isUser) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        }
+                                    )
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                SelectionContainer {
+                                    Text(
+                                        text = message.text,
+                                        color = if (isUser) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Action row underneath the bubble
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(message.text))
                                 },
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp
-                            )
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .testTag(if (isUser) "copy_user_msg" else "copy_ai_msg")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy message",
+                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            
+                            // If user message, let them edit/use it as input
+                            if (isUser) {
+                                IconButton(
+                                    onClick = {
+                                        inputText = message.text
+                                    },
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .testTag("use_as_input_msg")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit or reuse message",
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

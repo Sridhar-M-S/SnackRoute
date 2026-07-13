@@ -40,9 +40,19 @@ object GeminiHelper {
                 if (!response.isSuccessful) {
                     Log.e("GeminiHelper", "API Error: ${response.code} - $responseBody")
                     val errorObj = try { JSONObject(responseBody) } catch (e: Exception) { null }
-                    val message = errorObj?.getJSONArray("error")?.getJSONObject(0)?.getString("message")
-                        ?: errorObj?.getJSONObject("error")?.getString("message")
-                        ?: "HTTP ${response.code}"
+                    val message = errorObj?.let { obj ->
+                        val errObj = obj.optJSONObject("error")
+                        if (errObj != null) {
+                            errObj.optString("message", "HTTP ${response.code}")
+                        } else {
+                            val errArray = obj.optJSONArray("error")
+                            if (errArray != null && errArray.length() > 0) {
+                                errArray.optJSONObject(0)?.optString("message", "HTTP ${response.code}")
+                            } else {
+                                obj.optString("message", "HTTP ${response.code}")
+                            }
+                        }
+                    } ?: "HTTP ${response.code}"
                     return "Error from Gemini API: $message"
                 }
 
