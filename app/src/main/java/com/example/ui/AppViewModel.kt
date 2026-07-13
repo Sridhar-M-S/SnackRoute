@@ -33,6 +33,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.badgeDao()
     )
 
+    // --- Preferences & custom Gemini API Key ---
+    private val prefs = application.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+    private val _userGeminiApiKey = MutableStateFlow(prefs.getString("gemini_api_key", "") ?: "")
+    val userGeminiApiKey: StateFlow<String> = _userGeminiApiKey.asStateFlow()
+
+    fun saveGeminiApiKey(key: String) {
+        prefs.edit().putString("gemini_api_key", key).apply()
+        _userGeminiApiKey.value = key
+    }
+
     // --- Core Database Flows ---
     val dailyTarget: StateFlow<DailyTarget?> = repository.dailyTarget
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -1131,7 +1141,7 @@ Summary Analytics:
 
 User Question: $userQuestion
 """
-            val reply = com.example.utils.GeminiHelper.queryGemini(contextPrompt)
+            val reply = com.example.utils.GeminiHelper.queryGemini(contextPrompt, userGeminiApiKey.value)
             
             _chatMessages.value = _chatMessages.value + ChatMessage("assistant", reply)
             _isChatLoading.value = false

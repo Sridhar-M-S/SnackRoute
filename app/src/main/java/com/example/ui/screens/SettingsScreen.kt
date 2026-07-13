@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.AppViewModel
@@ -36,6 +38,9 @@ fun SettingsScreen(
     onOpenTimetable: () -> Unit
 ) {
     val context = LocalContext.current
+    val userApiKey by viewModel.userGeminiApiKey.collectAsState()
+    var apiKeyInput by remember(userApiKey) { mutableStateOf(userApiKey) }
+    var isKeyVisible by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -108,6 +113,85 @@ fun SettingsScreen(
                         onCheckedChange = onToggleDarkMode,
                         modifier = Modifier.testTag("dark_mode_switch")
                     )
+                }
+            }
+
+            // --- Gemini API Key Card ---
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("gemini_api_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column {
+                            Text("Gemini AI API Key", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Required for AI Assistant when downloaded from GitHub", fontSize = 11.sp, color = Color.Gray)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = apiKeyInput,
+                        onValueChange = { apiKeyInput = it },
+                        label = { Text("Gemini API Key", fontSize = 12.sp) },
+                        placeholder = { Text("AIzaSy...", fontSize = 12.sp) },
+                        singleLine = true,
+                        visualTransformation = if (isKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { isKeyVisible = !isKeyVisible }) {
+                                Icon(
+                                    imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isKeyVisible) "Hide API Key" else "Show API Key"
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("gemini_api_key_input"),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+                                context.startActivity(intent)
+                            },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.testTag("get_api_key_link")
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Get free API Key", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.saveGeminiApiKey(apiKeyInput.trim())
+                                Toast.makeText(context, "API Key saved successfully!", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.testTag("save_api_key_button"),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text("Save Key", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
 

@@ -20,10 +20,10 @@ object GeminiHelper {
     private const val MODEL_NAME = "gemini-3.5-flash"
     private const val API_URL = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL_NAME:generateContent"
 
-    suspend fun queryGemini(prompt: String): String {
-        val apiKey = BuildConfig.GEMINI_API_KEY
+    suspend fun queryGemini(prompt: String, customApiKey: String? = null): String {
+        val apiKey = if (!customApiKey.isNullOrBlank()) customApiKey else BuildConfig.GEMINI_API_KEY
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return "API Key is not configured. Please enter your Gemini API key in the Secrets panel in AI Studio UI to enable the AI Assistant."
+            return "API Key is not configured. Please enter your Gemini API key in the app Settings (General Settings section) or the Secrets panel in AI Studio UI to enable the AI Assistant."
         }
 
         try {
