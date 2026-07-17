@@ -1556,7 +1556,31 @@ fun ShopsScreen(
                     ) {
                         Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Navigate to Sales")
+                        Text("Sales")
+                    }
+                    if (!detail.googleMapLink.isNullOrEmpty()) {
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(detail.googleMapLink))
+                                    context.startActivity(mapIntent)
+                                } catch (e: Exception) {
+                                    // fallback
+                                }
+                            },
+                            modifier = Modifier.testTag("go_to_map_detail_button"),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = "Navigate to Google Maps",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Map", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                        }
                     }
                     Button(
                         onClick = {
@@ -1900,19 +1924,52 @@ fun ShopCard(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
+                val hasMapLink = !shop.googleMapLink.isNullOrEmpty()
+                val hasCoords = shop.latitude != null && shop.longitude != null && shop.latitude != 0.0 && shop.longitude != 0.0
+                if (hasMapLink || hasCoords) {
+                    val context = LocalContext.current
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val intent = if (hasMapLink) {
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(shop.googleMapLink))
+                                } else {
+                                    Intent(Intent.ACTION_VIEW, Uri.parse("geo:${shop.latitude},${shop.longitude}?q=${Uri.encode(shop.storeName)}"))
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                // fallback
+                            }
+                        },
+                        modifier = Modifier.testTag("go_to_map_button_${shop.shopNumber}"),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = "Navigate to Google Maps",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Map", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                OutlinedButton(
                     onClick = onGoToSales,
                     modifier = Modifier.testTag("go_to_sales_button_${shop.shopNumber}"),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ReceiptLong,
-                        contentDescription = "Go to Sales",
+                        contentDescription = "Navigate to Sales",
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Go to Sales", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    Text("Sales", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
