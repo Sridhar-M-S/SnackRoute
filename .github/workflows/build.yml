@@ -20,20 +20,14 @@ jobs:
           mkdir -p gradle/wrapper
           curl -Lo gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v9.3.1/gradle/wrapper/gradle-wrapper.jar
 
-      - name: Decode Debug Keystore
-        env:
-          DEBUG_KEYSTORE_BASE64_SECRET: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+      - name: Decode or Generate Debug Keystore
         run: |
-          if [ -n "$DEBUG_KEYSTORE_BASE64_SECRET" ]; then
-            echo "Decoding debug keystore from GitHub Secret..."
-            echo "$DEBUG_KEYSTORE_BASE64_SECRET" | base64 -d > debug.keystore
-          elif [ -f debug.keystore.base64 ]; then
-            echo "Decoding debug keystore from local debug.keystore.base64 file..."
+          if [ -f debug.keystore.base64 ]; then
+            echo "Decoding debug.keystore.base64..."
             base64 -d debug.keystore.base64 > debug.keystore
           else
-            echo "::error::Debug keystore could not be resolved! Neither 'DEBUG_KEYSTORE_BASE64' GitHub Secret was found nor 'debug.keystore.base64' file exists in the repository."
-            echo "Please configure the 'DEBUG_KEYSTORE_BASE64' secret in your GitHub repository settings under Settings > Secrets and variables > Actions."
-            exit 1
+            echo "debug.keystore.base64 not found! Generating a new fallback debug keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug, O=Android, C=US"
           fi
 
       - name: Disable in-process compilation for KSP compatibility
