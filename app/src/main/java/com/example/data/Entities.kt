@@ -27,7 +27,8 @@ data class ShopMaster(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val coordinateStatus: String? = null, // "Valid", "Invalid", "Pending"
-    val lastCoordinateUpdate: Long? = null
+    val lastCoordinateUpdate: Long? = null,
+    val coordinateError: String? = null
 ) {
     val startingDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(startingDate))

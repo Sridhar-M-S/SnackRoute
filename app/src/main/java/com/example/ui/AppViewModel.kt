@@ -609,34 +609,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun resolveShortenedUrlRecursively(urlStr: String, maxHops: Int = 3): String {
-        var currentUrl = urlStr
         val client = okhttp3.OkHttpClient.Builder()
-            .followRedirects(false)
-            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true)
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .build()
-        for (i in 0 until maxHops) {
-            if (!currentUrl.contains("goo.gl") && !currentUrl.contains("maps.app.goo.gl")) {
-                break
-            }
-            try {
-                val request = okhttp3.Request.Builder().url(currentUrl).head().build()
-                client.newCall(request).execute().use { response ->
-                    if (response.isRedirect) {
-                        val loc = response.header("Location")
-                        if (!loc.isNullOrEmpty()) {
-                            currentUrl = loc
-                        } else {
-                            return@use
-                        }
-                    } else {
-                        return@use
-                    }
+        try {
+            val request = okhttp3.Request.Builder()
+                .url(urlStr)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val finalUrl = response.request.url.toString()
+                val bodyText = response.body?.string() ?: ""
+                
+                // If coordinates are in the final URL, we return that
+                val coordsInUrl = extractCoordinatesFromText(finalUrl)
+                if (coordsInUrl != null) {
+                    return finalUrl
                 }
-            } catch (e: Exception) {
-                break
+                
+                // If not, maybe we can find coordinates in the HTML body
+                val coordsInBody = extractCoordinatesFromText(bodyText)
+                if (coordsInBody != null) {
+                    return bodyText
+                }
+                
+                return finalUrl
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return currentUrl
+        return urlStr
     }
 
     private val _nearestQueryCoords = MutableStateFlow<Pair<Double, Double>?>(null)
@@ -893,86 +898,145 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _coordinateResolutionError = MutableStateFlow<Map<String, String?>>(emptyMap())
     val coordinateResolutionError: StateFlow<Map<String, String?>> = _coordinateResolutionError.asStateFlow()
 
+    sealed class CoordinateResolutionResult {
+        data class Success(val latitude: Double, val longitude: Double) : CoordinateResolutionResult()
+        data class Failure(val reason: String) : CoordinateResolutionResult()
+    }
+
+    suspend fun resolveCoordinatesForLinkOrQuery(
+        context: Context,
+        link: String?,
+        storeName: String,
+        locationNumber: String
+    ): CoordinateResolutionResult {
+        if (!link.isNullOrBlank()) {
+            val trimmedLink = link.trim()
+            
+            // 1. Check if it's a valid URL structure
+            if (!trimmedLink.startsWith("http://") && !trimmedLink.startsWith("https://")) {
+                return CoordinateResolutionResult.Failure("Invalid Google Maps Link")
+            }
+            if (!trimmedLink.contains("google.com") && !trimmedLink.contains("goo.gl") && !trimmedLink.contains("google.co")) {
+                return CoordinateResolutionResult.Failure("Invalid Google Maps Link")
+            }
+
+            // 2. Extract directly if possible (e.g. long link)
+            val directCoords = extractCoordinatesFromText(trimmedLink)
+            if (directCoords != null) {
+                val (lat, lng) = directCoords
+                if (lat in -90.0..90.0 && lng in -180.0..180.0 && (lat != 0.0 || lng != 0.0)) {
+                    return CoordinateResolutionResult.Success(lat, lng)
+                }
+            }
+
+            // 3. Resolve shortened URL if needed
+            var finalUrl = trimmedLink
+            var bodyText: String? = null
+            var networkErrorOccurred = false
+            var resolutionFailed = false
+
+            if (trimmedLink.contains("goo.gl") || trimmedLink.contains("maps.app.goo.gl")) {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .followRedirects(true)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                try {
+                    val request = okhttp3.Request.Builder()
+                        .url(trimmedLink)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+                        .get()
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful && response.code >= 400) {
+                            resolutionFailed = true
+                        } else {
+                            finalUrl = response.request.url.toString()
+                            bodyText = response.body?.string()
+                        }
+                    }
+                } catch (e: java.net.UnknownHostException) {
+                    networkErrorOccurred = true
+                } catch (e: java.io.IOException) {
+                    networkErrorOccurred = true
+                } catch (e: Exception) {
+                    resolutionFailed = true
+                }
+            }
+
+            if (networkErrorOccurred) {
+                return CoordinateResolutionResult.Failure("Network Error")
+            }
+            if (resolutionFailed) {
+                return CoordinateResolutionResult.Failure("Unable to Resolve Short URL")
+            }
+
+            // 4. Try extracting from resolved URL or body
+            val resolvedCoords = extractCoordinatesFromText(finalUrl)
+            if (resolvedCoords != null) {
+                val (lat, lng) = resolvedCoords
+                if (lat in -90.0..90.0 && lng in -180.0..180.0 && (lat != 0.0 || lng != 0.0)) {
+                    return CoordinateResolutionResult.Success(lat, lng)
+                }
+            }
+
+            if (!bodyText.isNullOrBlank()) {
+                val bodyCoords = extractCoordinatesFromText(bodyText)
+                if (bodyCoords != null) {
+                    val (lat, lng) = bodyCoords
+                    if (lat in -90.0..90.0 && lng in -180.0..180.0 && (lat != 0.0 || lng != 0.0)) {
+                        return CoordinateResolutionResult.Success(lat, lng)
+                    }
+                }
+            }
+
+            // If we had a Google Maps link but couldn't get coordinates, return Coordinates Not Found
+            return CoordinateResolutionResult.Failure("Coordinates Not Found")
+        }
+
+        // 5. Fallback to geocoding (offline then online)
+        val location = repository.getLocationByNumber(locationNumber)
+        val locationName = location?.locationName ?: ""
+        val queryText = if (locationName.isNotEmpty()) {
+            "$storeName, $locationName"
+        } else {
+            storeName
+        }
+
+        val offlineResult = offlineGeocode(queryText)
+        if (offlineResult != null) {
+            return CoordinateResolutionResult.Success(offlineResult.first, offlineResult.second)
+        }
+
+        val geocoded = geocodeAddress(context, queryText)
+        if (geocoded != null) {
+            return CoordinateResolutionResult.Success(geocoded.first, geocoded.second)
+        }
+
+        if (locationName.isNotEmpty()) {
+            val offlineLoc = offlineGeocode(locationName)
+            if (offlineLoc != null) {
+                return CoordinateResolutionResult.Success(offlineLoc.first, offlineLoc.second)
+            }
+            val geocodedLoc = geocodeAddress(context, locationName)
+            if (geocodedLoc != null) {
+                return CoordinateResolutionResult.Success(geocodedLoc.first, geocodedLoc.second)
+            }
+        }
+
+        return CoordinateResolutionResult.Failure("Geocoding Failed")
+    }
+
     fun resolveAndSaveCoordinatesForShop(context: Context, shop: ShopMaster) {
         viewModelScope.launch(Dispatchers.IO) {
             val shopNo = shop.shopNumber
             _isResolvingCoordinates.value = _isResolvingCoordinates.value + (shopNo to true)
             _coordinateResolutionError.value = _coordinateResolutionError.value + (shopNo to null)
             try {
-                val link = shop.googleMapLink
-                var lat: Double? = null
-                var lng: Double? = null
-
-                if (!link.isNullOrEmpty()) {
-                    val extracted = extractCoordinatesFromText(link)
-                    if (extracted != null) {
-                        lat = extracted.first
-                        lng = extracted.second
-                    } else {
-                        if (link.contains("goo.gl") || link.contains("maps.app.goo.gl")) {
-                            val resolved = resolveShortenedUrlRecursively(link)
-                            val resolvedExtracted = extractCoordinatesFromText(resolved)
-                            if (resolvedExtracted != null) {
-                                lat = resolvedExtracted.first
-                                lng = resolvedExtracted.second
-                            }
-                        }
-                    }
-                }
-
-                if (lat == null || lng == null) {
-                    val location = repository.getLocationByNumber(shop.locationNumber)
-                    val locationName = location?.locationName ?: ""
-                    val queryText = if (locationName.isNotEmpty()) {
-                        "${shop.storeName}, $locationName"
-                    } else {
-                        shop.storeName
-                    }
-                    
-                    val offlineResult = offlineGeocode(queryText)
-                    if (offlineResult != null) {
-                        lat = offlineResult.first
-                        lng = offlineResult.second
-                    } else {
-                        val geocoded = geocodeAddress(context, queryText)
-                        if (geocoded != null) {
-                            lat = geocoded.first
-                            lng = geocoded.second
-                        } else if (locationName.isNotEmpty()) {
-                            val offlineLoc = offlineGeocode(locationName)
-                            if (offlineLoc != null) {
-                                lat = offlineLoc.first
-                                lng = offlineLoc.second
-                            } else {
-                                val geocodedLoc = geocodeAddress(context, locationName)
-                                if (geocodedLoc != null) {
-                                    lat = geocodedLoc.first
-                                    lng = geocodedLoc.second
-                                }
-                            }
-                        }
-                    }
-                }
-
-                val isValid = lat != null && lng != null && lat != 0.0 && lng != 0.0 && lat in -90.0..90.0 && lng in -180.0..180.0
-                
-                if (isValid) {
-                    val updatedShop = shop.copy(
-                        latitude = lat,
-                        longitude = lng,
-                        coordinateStatus = "Valid",
-                        lastCoordinateUpdate = System.currentTimeMillis()
-                    )
-                    repository.updateShop(shop.shopNumber, updatedShop)
-                } else {
-                    val updatedShop = shop.copy(
-                        latitude = null,
-                        longitude = null,
-                        coordinateStatus = "Invalid",
-                        lastCoordinateUpdate = System.currentTimeMillis()
-                    )
-                    repository.updateShop(shop.shopNumber, updatedShop)
-                    _coordinateResolutionError.value = _coordinateResolutionError.value + (shopNo to "Unable to retrieve location coordinates from the provided Google Maps link.")
+                val resolvedShop = resolveShopCoords(context, shop)
+                repository.updateShop(shopNo, resolvedShop)
+                if (resolvedShop.coordinateStatus == "Invalid") {
+                    _coordinateResolutionError.value = _coordinateResolutionError.value + (shopNo to resolvedShop.coordinateError)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -984,100 +1048,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun resolveShopCoords(context: Context, shop: ShopMaster): ShopMaster {
-        // 1. If the shop already has coordinates and status, preserve them
-        if (shop.latitude != null && shop.longitude != null && shop.coordinateStatus != null) {
-            return shop
-        } else if (shop.latitude != null && shop.longitude != null) {
-            val isValid = shop.latitude != 0.0 && shop.longitude != 0.0 && shop.latitude in -90.0..90.0 && shop.longitude in -180.0..180.0
-            val status = if (isValid) "Valid" else "Invalid"
-            return shop.copy(
-                coordinateStatus = status,
-                lastCoordinateUpdate = shop.lastCoordinateUpdate ?: System.currentTimeMillis()
-            )
-        }
-
-        // 2. If it's an update, preserve coords and status from the old shop if map link hasn't changed
+        // 1. If the shop already has coordinates and status, and map link hasn't changed, preserve them
         try {
             val oldShop = repository.getShopByNumber(shop.shopNumber)
-            if (oldShop != null && oldShop.googleMapLink == shop.googleMapLink && oldShop.latitude != null && oldShop.longitude != null) {
+            if (oldShop != null && oldShop.googleMapLink == shop.googleMapLink && oldShop.latitude != null && oldShop.longitude != null && oldShop.coordinateStatus == "Valid") {
                 return shop.copy(
                     latitude = oldShop.latitude,
                     longitude = oldShop.longitude,
-                    coordinateStatus = oldShop.coordinateStatus ?: "Valid",
-                    lastCoordinateUpdate = oldShop.lastCoordinateUpdate ?: System.currentTimeMillis()
+                    coordinateStatus = oldShop.coordinateStatus,
+                    lastCoordinateUpdate = oldShop.lastCoordinateUpdate ?: System.currentTimeMillis(),
+                    coordinateError = oldShop.coordinateError
                 )
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        val link = shop.googleMapLink
-        var lat: Double? = null
-        var lng: Double? = null
-
-        if (!link.isNullOrEmpty()) {
-            val extracted = extractCoordinatesFromText(link)
-            if (extracted != null) {
-                lat = extracted.first
-                lng = extracted.second
-            } else {
-                if (link.contains("goo.gl") || link.contains("maps.app.goo.gl")) {
-                    val resolved = resolveShortenedUrlRecursively(link)
-                    val resolvedExtracted = extractCoordinatesFromText(resolved)
-                    if (resolvedExtracted != null) {
-                        lat = resolvedExtracted.first
-                        lng = resolvedExtracted.second
-                    }
-                }
+        return when (val result = resolveCoordinatesForLinkOrQuery(context, shop.googleMapLink, shop.storeName, shop.locationNumber)) {
+            is CoordinateResolutionResult.Success -> {
+                shop.copy(
+                    latitude = result.latitude,
+                    longitude = result.longitude,
+                    coordinateStatus = "Valid",
+                    lastCoordinateUpdate = System.currentTimeMillis(),
+                    coordinateError = null
+                )
+            }
+            is CoordinateResolutionResult.Failure -> {
+                shop.copy(
+                    latitude = null,
+                    longitude = null,
+                    coordinateStatus = "Invalid",
+                    lastCoordinateUpdate = System.currentTimeMillis(),
+                    coordinateError = result.reason
+                )
             }
         }
-
-        if (lat == null || lng == null) {
-            val location = repository.getLocationByNumber(shop.locationNumber)
-            val locationName = location?.locationName ?: ""
-            val queryText = if (locationName.isNotEmpty()) {
-                "${shop.storeName}, $locationName"
-            } else {
-                shop.storeName
-            }
-            
-            // Try offline geocoder first
-            val offlineResult = offlineGeocode(queryText)
-            if (offlineResult != null) {
-                lat = offlineResult.first
-                lng = offlineResult.second
-            } else {
-                val geocoded = geocodeAddress(context, queryText)
-                if (geocoded != null) {
-                    lat = geocoded.first
-                    lng = geocoded.second
-                } else if (locationName.isNotEmpty()) {
-                    val offlineLoc = offlineGeocode(locationName)
-                    if (offlineLoc != null) {
-                        lat = offlineLoc.first
-                        lng = offlineLoc.second
-                    } else {
-                        val geocodedLoc = geocodeAddress(context, locationName)
-                        if (geocodedLoc != null) {
-                            lat = geocodedLoc.first
-                            lng = geocodedLoc.second
-                        }
-                    }
-                }
-            }
-        }
-
-        val isValid = lat != null && lng != null && lat != 0.0 && lng != 0.0 && lat in -90.0..90.0 && lng in -180.0..180.0
-        val status = if (isValid) "Valid" else "Invalid"
-        val finalLat = if (isValid) lat else null
-        val finalLng = if (isValid) lng else null
-
-        return shop.copy(
-            latitude = finalLat,
-            longitude = finalLng,
-            coordinateStatus = status,
-            lastCoordinateUpdate = System.currentTimeMillis()
-        )
     }
 
     val shops: StateFlow<List<ShopMaster>> = combine(

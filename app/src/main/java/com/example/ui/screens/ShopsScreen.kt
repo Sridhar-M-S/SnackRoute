@@ -1556,7 +1556,7 @@ fun ShopsScreen(
                     ) {
                         Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Go to Sales")
+                        Text("Navigate to Sales")
                     }
                     Button(
                         onClick = {
