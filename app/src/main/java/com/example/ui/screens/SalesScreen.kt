@@ -70,13 +70,12 @@ fun SalesScreen(
 
     val searchQuery by viewModel.salesSearchQuery.collectAsStateWithLifecycle()
     var showAddEditScreen by remember { mutableStateOf(false) }
+    var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
     
     BackHandler(enabled = showAddEditScreen) {
         showAddEditScreen = false
-        onBackToParent()
+        selectedSalesForEdit = null
     }
-    
-    var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
     var isShopLocked by remember { mutableStateOf(false) }
 
     // --- Search & Multiple Filters State ---
@@ -690,7 +689,7 @@ fun SalesScreen(
                     navigationIcon = {
                         IconButton(onClick = {
                             showAddEditScreen = false
-                            onBackToParent()
+                            selectedSalesForEdit = null
                         }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                         }
