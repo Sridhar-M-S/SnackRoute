@@ -166,6 +166,117 @@ fun ShopsScreen(
     var activeSubTab by remember { mutableStateOf("Directory") } // "Directory" or "Nearest Search"
     var nearestQuery by remember { mutableStateOf("") }
 
+    val fusedLocationClient = remember { com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context) }
+    var isFetchingLocation by remember { mutableStateOf(false) }
+
+    fun fetchCurrentLocation() {
+        val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val isGpsEnabled = try {
+            locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+            locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception) {
+            false
+        }
+
+        if (!isGpsEnabled) {
+            Toast.makeText(context, "GPS/Location Services are turned off. Please enable them.", Toast.LENGTH_LONG).show()
+            try {
+                context.startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            } catch (e: Exception) {
+                // fallback
+            }
+            return
+        }
+
+        isFetchingLocation = true
+        try {
+            fusedLocationClient.getCurrentLocation(
+                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+                com.google.android.gms.tasks.CancellationTokenSource().token
+            ).addOnSuccessListener { location ->
+                if (location != null) {
+                    isFetchingLocation = false
+                    val lat = location.latitude
+                    val lng = location.longitude
+                    nearestQuery = "$lat,$lng"
+                    viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
+                } else {
+                    fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                        isFetchingLocation = false
+                        if (lastLoc != null) {
+                            val lat = lastLoc.latitude
+                            val lng = lastLoc.longitude
+                            nearestQuery = "$lat,$lng"
+                            viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
+                        } else {
+                            Toast.makeText(context, "Unable to retrieve current location. Please verify GPS or try again.", Toast.LENGTH_SHORT).show()
+                        }
+                    }.addOnFailureListener { e ->
+                        isFetchingLocation = false
+                        Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }.addOnFailureListener { e ->
+                fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                    isFetchingLocation = false
+                    if (lastLoc != null) {
+                        val lat = lastLoc.latitude
+                        val lng = lastLoc.longitude
+                        nearestQuery = "$lat,$lng"
+                        viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
+                    } else {
+                        Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }.addOnFailureListener {
+                    isFetchingLocation = false
+                    Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: SecurityException) {
+            isFetchingLocation = false
+            Toast.makeText(context, "Location permission is required to fetch current location.", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            isFetchingLocation = false
+            Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+            val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+            if (fineGranted || coarseGranted) {
+                fetchCurrentLocation()
+            } else {
+                Toast.makeText(context, "Location permission denied. Please allow location permissions in system settings.", Toast.LENGTH_LONG).show()
+            }
+        }
+    )
+
+    fun checkAndRequestLocation() {
+        val hasFinePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        val hasCoarsePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (hasFinePermission || hasCoarsePermission) {
+            fetchCurrentLocation()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
     LaunchedEffect(nearestQuery) {
         viewModel.resolveNearestQueryCoords(context, nearestQuery)
     }
@@ -598,6 +709,31 @@ fun ShopsScreen(
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedIconButton(
+                            onClick = {
+                                checkAndRequestLocation()
+                            },
+                            modifier = Modifier
+                                .size(50.dp)
+                                .testTag("current_location_button"),
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            if (isFetchingLocation) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.MyLocation,
+                                    contentDescription = "Get current location",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = {
