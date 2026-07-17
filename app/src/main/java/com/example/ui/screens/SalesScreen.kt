@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.SalesEntry
 import com.example.ui.AppViewModel
@@ -41,7 +42,8 @@ import java.util.Locale
 fun SalesScreen(
     viewModel: AppViewModel,
     onOpenChat: () -> Unit,
-    onOpenTimetable: () -> Unit
+    onOpenTimetable: () -> Unit,
+    onBackToParent: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val sales by viewModel.sales.collectAsStateWithLifecycle()
@@ -59,6 +61,12 @@ fun SalesScreen(
 
     val searchQuery by viewModel.salesSearchQuery.collectAsStateWithLifecycle()
     var showAddEditScreen by remember { mutableStateOf(false) }
+    
+    BackHandler(enabled = showAddEditScreen) {
+        showAddEditScreen = false
+        onBackToParent()
+    }
+    
     var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
     var isShopLocked by remember { mutableStateOf(false) }
 
@@ -661,7 +669,10 @@ fun SalesScreen(
                 TopAppBar(
                     title = { Text(if (isEdit) "Edit Sales Record" else "Log Daily Sales", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        IconButton(onClick = { showAddEditScreen = false }) {
+                        IconButton(onClick = {
+                            showAddEditScreen = false
+                            onBackToParent()
+                        }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                         }
                     }

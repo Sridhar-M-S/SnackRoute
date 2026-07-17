@@ -150,7 +150,8 @@ class MainActivity : ComponentActivity() {
                                     SalesScreen(
                                         viewModel = viewModel,
                                         onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true }
+                                        onOpenTimetable = { isTimetableOpen = true },
+                                        onBackToParent = { navigateBack() }
                                     )
                                 }
                                 Box(modifier = if (currentTab == "Reports") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
