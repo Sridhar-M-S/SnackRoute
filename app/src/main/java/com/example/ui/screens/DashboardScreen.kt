@@ -30,6 +30,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.SalesEntry
+import com.example.data.DailyTarget
+import com.example.data.Badge
+import com.example.data.UserBadge
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import com.example.ui.AppViewModel
 import com.example.ui.BusinessSuggestion
 import com.example.ui.SuggestionType
@@ -58,6 +64,12 @@ fun DashboardScreen(
     val suggestions by viewModel.businessInsights.collectAsStateWithLifecycle(emptyList())
 
     val gameProgress by viewModel.gamificationState.collectAsStateWithLifecycle()
+    val dailyTarget by viewModel.dailyTarget.collectAsStateWithLifecycle()
+    val todayPacketsVal by viewModel.todayPackets.collectAsStateWithLifecycle()
+    val todaySalesVal by viewModel.todaySales.collectAsStateWithLifecycle()
+    val todayProfitVal by viewModel.todayProfit.collectAsStateWithLifecycle()
+    val allBadges by viewModel.allBadges.collectAsStateWithLifecycle()
+    val unlockedBadges by viewModel.unlockedBadges.collectAsStateWithLifecycle()
     var activeCelebration by remember { mutableStateOf<GamificationEvent?>(null) }
 
     LaunchedEffect(Unit) {
@@ -242,6 +254,20 @@ fun DashboardScreen(
             // --- Missions Arena (Daily run & Boss fights) ---
             item {
                 MissionsArenaWidget(state = gameProgress)
+            }
+
+            // --- Today's Target and Achievements (moved from Shops page) ---
+            item {
+                DailyTargetWidget(
+                    dailyTarget = dailyTarget,
+                    todayPackets = todayPacketsVal,
+                    todaySales = todaySalesVal,
+                    todayProfit = todayProfitVal,
+                    onSetTarget = { viewModel.setDailyTarget(it) }
+                )
+            }
+            item {
+                BadgeSection(allBadges = allBadges, unlockedBadges = unlockedBadges)
             }
 
             // --- AI Suggestions Section ---
@@ -1783,3 +1809,113 @@ data class ConfettiParticle(
     val color: Color,
     val size: Float
 )
+
+@Composable
+fun BadgeSection(allBadges: List<Badge>, unlockedBadges: List<UserBadge>) {
+    val unlockedIds = unlockedBadges.map { it.badgeId }.toSet()
+    
+    if (allBadges.isEmpty()) return
+
+    Card(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Achievements", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(allBadges) { badge ->
+                    BadgeItem(badge, badge.id in unlockedIds)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BadgeItem(badge: Badge, isUnlocked: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
+        Icon(
+            imageVector = Icons.Default.EmojiEvents,
+            contentDescription = null,
+            tint = if (isUnlocked) MaterialTheme.colorScheme.primary else Color.Gray,
+            modifier = Modifier.size(48.dp)
+        )
+        Text(badge.name, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2)
+    }
+}
+
+@Composable
+fun DailyTargetWidget(
+    dailyTarget: DailyTarget?,
+    todayPackets: Int,
+    todaySales: Double,
+    todayProfit: Double,
+    onSetTarget: (DailyTarget) -> Unit
+) {
+    var showDialog by remember { mutableStateOf(false) }
+
+    if (showDialog) {
+        DailyTargetDialog(
+            onDismiss = { showDialog = false },
+            onSave = { p, s, pr -> onSetTarget(DailyTarget(1, p, s, pr)) },
+            initialPackets = dailyTarget?.packetTarget ?: 0,
+            initialSales = dailyTarget?.salesAmountTarget ?: 0.0,
+            initialProfit = dailyTarget?.profitTarget ?: 0.0
+        )
+    }
+
+    Card(modifier = Modifier.padding(16.dp).fillMaxWidth(), onClick = { showDialog = true }) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Today's Target", style = MaterialTheme.typography.titleMedium)
+            if (dailyTarget == null) {
+                Text("No target set. Click to set.")
+            } else {
+                val packetProgress = (todayPackets.toFloat() / dailyTarget.packetTarget.coerceAtLeast(1)).coerceIn(0f, 1f)
+                val salesProgress = (todaySales.toFloat() / dailyTarget.salesAmountTarget.coerceAtLeast(1.0)).coerceIn(0.0, 1.0).toFloat()
+                val profitProgress = (todayProfit.toFloat() / dailyTarget.profitTarget.coerceAtLeast(1.0)).coerceIn(0.0, 1.0).toFloat()
+                
+                Text("Packets: $todayPackets / ${dailyTarget.packetTarget}")
+                LinearProgressIndicator(progress = packetProgress, modifier = Modifier.fillMaxWidth())
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text("Sales: ₹${todaySales.toInt()} / ₹${dailyTarget.salesAmountTarget.toInt()}")
+                LinearProgressIndicator(progress = salesProgress, modifier = Modifier.fillMaxWidth())
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text("Profit: ₹${todayProfit.toInt()} / ₹${dailyTarget.profitTarget.toInt()}")
+                LinearProgressIndicator(progress = profitProgress, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyTargetDialog(
+    onDismiss: () -> Unit,
+    onSave: (Int, Double, Double) -> Unit,
+    initialPackets: Int,
+    initialSales: Double,
+    initialProfit: Double
+) {
+    var packets by remember { mutableStateOf(initialPackets.toString()) }
+    var sales by remember { mutableStateOf(initialSales.toInt().toString()) }
+    var profit by remember { mutableStateOf(initialProfit.toInt().toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set Daily Target") },
+        text = {
+            Column {
+                OutlinedTextField(value = packets, onValueChange = { packets = it }, label = { Text("Packets Target") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(value = sales, onValueChange = { sales = it }, label = { Text("Sales Amount Target") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(value = profit, onValueChange = { profit = it }, label = { Text("Profit Target") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(packets.toIntOrNull() ?: 0, sales.toDoubleOrNull() ?: 0.0, profit.toDoubleOrNull() ?: 0.0)
+                onDismiss()
+            }) { Text("Save") }
+        }
+    )
+}

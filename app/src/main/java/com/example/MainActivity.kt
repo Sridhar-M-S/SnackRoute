@@ -17,6 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
 import com.example.ui.AppViewModel
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
@@ -37,6 +40,14 @@ class MainActivity : ComponentActivity() {
                 var isDebugOpen by remember { mutableStateOf(false) }
                 var showExitConfirmationDialog by remember { mutableStateOf(false) }
 
+                val navigationHistory = remember { mutableStateListOf<String>("Dashboard") }
+
+                LaunchedEffect(currentTab) {
+                    if (navigationHistory.isEmpty() || navigationHistory.last() != currentTab) {
+                        navigationHistory.add(currentTab)
+                    }
+                }
+
                 BackHandler(enabled = true) {
                     if (isAiChatOpen) {
                         isAiChatOpen = false
@@ -44,12 +55,13 @@ class MainActivity : ComponentActivity() {
                         isTimetableOpen = false
                     } else if (isDebugOpen) {
                         isDebugOpen = false
-                    } else if (currentTab == "Levels") {
-                        currentTab = "Dashboard"
-                    } else if (currentTab != "Dashboard") {
-                        currentTab = "Dashboard"
                     } else {
-                        showExitConfirmationDialog = true
+                        if (navigationHistory.size > 1) {
+                            navigationHistory.removeAt(navigationHistory.lastIndex)
+                            currentTab = navigationHistory.last()
+                        } else {
+                            showExitConfirmationDialog = true
+                        }
                     }
                 }
 
@@ -87,53 +99,69 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .padding(innerPadding)
                         ) {
-                            when (currentTab) {
-                                "Dashboard" -> DashboardScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToTab = { currentTab = it },
-                                    onQuickAddSales = { currentTab = "Sales" },
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
-                                )
-                                "Locations" -> LocationsScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToTab = { currentTab = it },
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
-                                )
-                                "Shops" -> ShopsScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToTab = { currentTab = it },
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
-                                )
-                                "Products" -> ProductsScreen(
-                                    viewModel = viewModel,
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
-                                )
-                                "Sales" -> SalesScreen(
-                                    viewModel = viewModel,
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
-                                )
-                                "Reports" -> ReportsScreen(
-                                    viewModel = viewModel,
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
-                                )
-                                "Settings" -> SettingsScreen(
-                                    viewModel = viewModel,
-                                    isDarkMode = isDarkMode,
-                                    onToggleDarkMode = { isDarkMode = it },
-                                    onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true },
-                                    onOpenDebug = { isDebugOpen = true }
-                                )
-                                "Levels" -> LevelsScreen(
-                                    viewModel = viewModel,
-                                    onBack = { currentTab = "Dashboard" }
-                                )
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                Box(modifier = if (currentTab == "Dashboard") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    DashboardScreen(
+                                        viewModel = viewModel,
+                                        onNavigateToTab = { currentTab = it },
+                                        onQuickAddSales = { currentTab = "Sales" },
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Locations") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    LocationsScreen(
+                                        viewModel = viewModel,
+                                        onNavigateToTab = { currentTab = it },
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Shops") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    ShopsScreen(
+                                        viewModel = viewModel,
+                                        onNavigateToTab = { currentTab = it },
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Products") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    ProductsScreen(
+                                        viewModel = viewModel,
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Sales") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    SalesScreen(
+                                        viewModel = viewModel,
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Reports") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    ReportsScreen(
+                                        viewModel = viewModel,
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Settings") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    SettingsScreen(
+                                        viewModel = viewModel,
+                                        isDarkMode = isDarkMode,
+                                        onToggleDarkMode = { isDarkMode = it },
+                                        onOpenChat = { isAiChatOpen = true },
+                                        onOpenTimetable = { isTimetableOpen = true },
+                                        onOpenDebug = { isDebugOpen = true }
+                                    )
+                                }
+                                Box(modifier = if (currentTab == "Levels") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                    LevelsScreen(
+                                        viewModel = viewModel,
+                                        onBack = { currentTab = "Dashboard" }
+                                    )
+                                }
                             }
                         }
                     }
