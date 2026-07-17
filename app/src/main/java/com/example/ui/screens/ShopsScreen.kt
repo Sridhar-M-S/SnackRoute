@@ -1473,7 +1473,7 @@ fun ShopsScreen(
                             }
 
                             val coordinatesString = if (detail.latitude != null && detail.longitude != null) {
-                                "${detail.latitude}, ${detail.longitude}"
+                                "${detail.latitude},${detail.longitude}"
                             } else {
                                 null
                             }
@@ -1483,7 +1483,7 @@ fun ShopsScreen(
                                 Surface(
                                     onClick = {
                                         clipboardManager.setText(AnnotatedString(coordinatesString))
-                                        Toast.makeText(context, "Coordinates copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Coordinates copied: $coordinatesString", Toast.LENGTH_SHORT).show()
                                     },
                                     shape = RoundedCornerShape(8.dp),
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
