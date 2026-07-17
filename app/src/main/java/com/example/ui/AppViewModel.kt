@@ -1180,6 +1180,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun resolveShopCoords(context: Context, shop: ShopMaster): ShopMaster {
+        // If both are available (e.g., from Excel import or direct input), use them directly and skip coordinate resolution.
+        if (shop.latitude != null && shop.longitude != null && (shop.latitude != 0.0 || shop.longitude != 0.0) && shop.latitude in -90.0..90.0 && shop.longitude in -180.0..180.0) {
+            return shop.copy(
+                coordinateStatus = "Valid",
+                lastCoordinateUpdate = shop.lastCoordinateUpdate ?: System.currentTimeMillis(),
+                coordinateError = null
+            )
+        }
+
         // 1. If the shop already has coordinates and status, and map link hasn't changed, preserve them
         try {
             val oldShop = repository.getShopByNumber(shop.shopNumber)

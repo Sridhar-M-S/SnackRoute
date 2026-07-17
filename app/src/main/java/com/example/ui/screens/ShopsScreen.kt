@@ -1478,64 +1478,48 @@ fun ShopsScreen(
 
                             DetailField(label = "Google Maps Link", value = detail.googleMapLink ?: "N/A")
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    DetailField(label = "Latitude", value = detail.latitude?.toString() ?: "N/A")
-                                }
-                                Box(modifier = Modifier.weight(1f)) {
-                                    DetailField(label = "Longitude", value = detail.longitude?.toString() ?: "N/A")
-                                }
-                            }
-
                             val coordinatesString = if (detail.latitude != null && detail.longitude != null) {
                                 "${detail.latitude},${detail.longitude}"
                             } else {
                                 null
                             }
 
-                            if (coordinatesString != null) {
-                                val clipboardManager = LocalClipboardManager.current
-                                Surface(
-                                    onClick = {
-                                        clipboardManager.setText(AnnotatedString(coordinatesString))
-                                        Toast.makeText(context, "Coordinates copied: $coordinatesString", Toast.LENGTH_SHORT).show()
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("copy_coordinates_button")
+                            Column {
+                                Text(
+                                    text = "Latitude & Longitude",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                                            .fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Coordinates (Lat, Lng) - Tap to Copy",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                            Text(
-                                                text = coordinatesString,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    Text(
+                                        text = coordinatesString ?: "Coordinates not available.",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (coordinatesString != null) {
+                                        val clipboardManager = LocalClipboardManager.current
+                                        IconButton(
+                                            onClick = {
+                                                clipboardManager.setText(AnnotatedString(coordinatesString))
+                                                Toast.makeText(context, "Coordinates copied successfully.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .testTag("copy_coordinates_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Copy coordinates",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
                                             )
                                         }
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copy coordinates",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
                                     }
                                 }
                             }

@@ -218,7 +218,7 @@ object Exporter {
             val headers = listOf(
                 "Shop Number", "Location Number", "Store Name", 
                 "Rating", "Score", "Starting Date", 
-                "Google Maps", "Mobile", "Notes", "Image"
+                "Google Maps", "Latitude & Longitude", "Mobile", "Notes", "Image"
             )
             val headerRow = sheet.createRow(0)
             for (i in headers.indices) {
@@ -244,17 +244,26 @@ object Exporter {
                 
                 row.createCell(5).setCellValue(shop.startingDateFormatted)
                 row.createCell(6).setCellValue(shop.googleMapLink ?: "")
-                row.createCell(7).setCellValue(shop.mobileNumber ?: "")
-                row.createCell(8).setCellValue(shop.notes ?: "")
+                
+                // Latitude & Longitude
+                val latLngString = if (shop.latitude != null && shop.longitude != null) {
+                    "${shop.latitude},${shop.longitude}"
+                } else {
+                    ""
+                }
+                row.createCell(7).setCellValue(latLngString)
+                
+                row.createCell(8).setCellValue(shop.mobileNumber ?: "")
+                row.createCell(9).setCellValue(shop.notes ?: "")
                 
                 // Embed the actual image
                 val bytes = getBytesFromImagePath(context, shop.storeImage)
                 if (bytes != null) {
                     try {
                         val anchor = helper.createClientAnchor().apply {
-                            setCol1(9)
+                            setCol1(10)
                             setRow1(row.rowNum)
-                            setCol2(10)
+                            setCol2(11)
                             setRow2(row.rowNum + 1)
                         }
                         val type = if (shop.storeImage?.endsWith(".png", ignoreCase = true) == true) {
@@ -264,13 +273,13 @@ object Exporter {
                         }
                         val pictureIdx = workbook.addPicture(bytes, type)
                         drawing.createPicture(anchor, pictureIdx)
-                        row.createCell(9).setCellValue("")
+                        row.createCell(10).setCellValue("")
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        row.createCell(9).setCellValue(shop.storeImage ?: "")
+                        row.createCell(10).setCellValue(shop.storeImage ?: "")
                     }
                 } else {
-                    row.createCell(9).setCellValue("")
+                    row.createCell(10).setCellValue("")
                 }
             }
             
@@ -282,9 +291,10 @@ object Exporter {
             sheet.setColumnWidth(4, 3000) // Score
             sheet.setColumnWidth(5, 5000) // Starting Date
             sheet.setColumnWidth(6, 8000) // Google Maps
-            sheet.setColumnWidth(7, 4500) // Mobile
-            sheet.setColumnWidth(8, 8000) // Notes
-            sheet.setColumnWidth(9, 8000) // Image
+            sheet.setColumnWidth(7, 6000) // Latitude & Longitude
+            sheet.setColumnWidth(8, 4500) // Mobile
+            sheet.setColumnWidth(9, 8000) // Notes
+            sheet.setColumnWidth(10, 8000) // Image
             
             FileOutputStream(file).use { out ->
                 workbook.write(out)
@@ -918,6 +928,7 @@ object Exporter {
             val notesIdx = getHeaderIndex(headerMap, "Notes")
             val latitudeIdx = getHeaderIndex(headerMap, "Latitude", "Lat")
             val longitudeIdx = getHeaderIndex(headerMap, "Longitude", "Lng", "Long")
+            val latLngIdx = getHeaderIndex(headerMap, "Latitude & Longitude", "Coordinates", "Lat & Lng", "Lat,Lng", "Lat, Lng", "Latitude/Longitude")
             
             // Map embedded images in the first sheet
             val embeddedImagesMap = mutableMapOf<Int, Pair<ByteArray, String>>()
@@ -971,6 +982,7 @@ object Exporter {
                 val notesVal = if (notesIdx != null) getCellValueAsString(row, notesIdx) ?: "" else ""
                 val latVal = if (latitudeIdx != null) getCellValueAsString(row, latitudeIdx) ?: "" else ""
                 val lngVal = if (longitudeIdx != null) getCellValueAsString(row, longitudeIdx) ?: "" else ""
+                val latLngVal = if (latLngIdx != null) getCellValueAsString(row, latLngIdx)?.trim() ?: "" else ""
                 
                 val originalRowData = listOf(
                     shopNo, locationNo, storeName, imageVal, ratingVal, scoreVal, startDateVal, locationVal, mobileVal
@@ -1055,8 +1067,20 @@ object Exporter {
                 
                 val locationLink = locationVal.ifEmpty { null }
                 val mobileNo = mobileVal.ifEmpty { null }
-                val latDouble = latVal.toDoubleOrNull()
-                val lngDouble = lngVal.toDoubleOrNull()
+                var latDouble = latVal.toDoubleOrNull()
+                var lngDouble = lngVal.toDoubleOrNull()
+                
+                if (latLngVal.isNotEmpty()) {
+                    val parts = latLngVal.split(",")
+                    if (parts.size == 2) {
+                        val latPart = parts[0].trim().toDoubleOrNull()
+                        val lngPart = parts[1].trim().toDoubleOrNull()
+                        if (latPart != null && lngPart != null) {
+                            latDouble = latPart
+                            lngDouble = lngPart
+                        }
+                    }
+                }
                 
                 val shop = ShopMaster(
                     shopNumber = shopNo,
