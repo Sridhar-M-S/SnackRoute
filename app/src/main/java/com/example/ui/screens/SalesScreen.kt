@@ -43,9 +43,18 @@ fun SalesScreen(
     viewModel: AppViewModel,
     onOpenChat: () -> Unit,
     onOpenTimetable: () -> Unit,
-    onBackToParent: () -> Unit = {}
+    onBackToParent: () -> Unit = {},
+    showBackButton: Boolean = false
 ) {
     val context = LocalContext.current
+    
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.setSalesFilterShopNumber(null)
+            viewModel.setSalesSearchQuery("")
+            viewModel.setPrefilledSaleData(null, null, null)
+        }
+    }
     val sales by viewModel.sales.collectAsStateWithLifecycle()
     val shops by viewModel.shops.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
@@ -271,15 +280,25 @@ fun SalesScreen(
                 TopAppBar(
                     title = { Text("Sales Records", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        IconButton(
-                            onClick = onOpenTimetable,
-                            modifier = Modifier.testTag("open_timetable_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DateRange,
-                                contentDescription = "Weekly Timetable",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                        if (showBackButton) {
+                            IconButton(onClick = onBackToParent) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else {
+                            IconButton(
+                                onClick = onOpenTimetable,
+                                modifier = Modifier.testTag("open_timetable_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DateRange,
+                                    contentDescription = "Weekly Timetable",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     },
                     actions = {

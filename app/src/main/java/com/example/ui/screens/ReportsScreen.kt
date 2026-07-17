@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -82,7 +83,9 @@ data class MonthlyData(
 fun ReportsScreen(
     viewModel: AppViewModel,
     onOpenChat: () -> Unit,
-    onOpenTimetable: () -> Unit
+    onOpenTimetable: () -> Unit,
+    onBack: () -> Unit = {},
+    showBackButton: Boolean = false
 ) {
     val context = LocalContext.current
     val sales by viewModel.sales.collectAsStateWithLifecycle()
@@ -302,15 +305,25 @@ fun ReportsScreen(
             TopAppBar(
                 title = { Text("Performance Reports", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(
-                        onClick = onOpenTimetable,
-                        modifier = Modifier.testTag("open_timetable_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DateRange,
-                            contentDescription = "Weekly Timetable",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
+                        IconButton(
+                            onClick = onOpenTimetable,
+                            modifier = Modifier.testTag("open_timetable_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = "Weekly Timetable",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 actions = {

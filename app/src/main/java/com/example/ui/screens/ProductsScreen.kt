@@ -40,7 +40,9 @@ import kotlinx.coroutines.withContext
 fun ProductsScreen(
     viewModel: AppViewModel,
     onOpenChat: () -> Unit,
-    onOpenTimetable: () -> Unit
+    onOpenTimetable: () -> Unit,
+    onBack: () -> Unit = {},
+    showBackButton: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -108,15 +110,25 @@ fun ProductsScreen(
             TopAppBar(
                 title = { Text("Product Master", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(
-                        onClick = onOpenTimetable,
-                        modifier = Modifier.testTag("open_timetable_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DateRange,
-                            contentDescription = "Weekly Timetable",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
+                        IconButton(
+                            onClick = onOpenTimetable,
+                            modifier = Modifier.testTag("open_timetable_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = "Weekly Timetable",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 actions = {

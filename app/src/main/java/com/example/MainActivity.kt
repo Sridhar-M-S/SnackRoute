@@ -114,68 +114,93 @@ class MainActivity : ComponentActivity() {
                                 .padding(innerPadding)
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
-                                Box(modifier = if (currentTab == "Dashboard") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    DashboardScreen(
-                                        viewModel = viewModel,
-                                        onNavigateToTab = { navigateToChildTab(it) },
-                                        onQuickAddSales = { navigateToChildTab("Sales") },
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true }
-                                    )
+                                if (navigationHistory.contains("Dashboard")) {
+                                    Box(modifier = if (currentTab == "Dashboard") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        DashboardScreen(
+                                            viewModel = viewModel,
+                                            onNavigateToTab = { navigateToChildTab(it) },
+                                            onQuickAddSales = { navigateToChildTab("Sales") },
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true }
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Locations") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    LocationsScreen(
-                                        viewModel = viewModel,
-                                        onNavigateToTab = { navigateToChildTab(it) },
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true }
-                                    )
+                                if (navigationHistory.contains("Locations")) {
+                                    Box(modifier = if (currentTab == "Locations") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        LocationsScreen(
+                                            viewModel = viewModel,
+                                            onNavigateToTab = { navigateToChildTab(it) },
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Locations",
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Shops") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    ShopsScreen(
-                                        viewModel = viewModel,
-                                        onNavigateToTab = { navigateToChildTab(it) },
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true }
-                                    )
+                                if (navigationHistory.contains("Shops")) {
+                                    Box(modifier = if (currentTab == "Shops") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        ShopsScreen(
+                                            viewModel = viewModel,
+                                            onNavigateToTab = { navigateToChildTab(it) },
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Shops",
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Products") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    ProductsScreen(
-                                        viewModel = viewModel,
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true }
-                                    )
+                                if (navigationHistory.contains("Products")) {
+                                    Box(modifier = if (currentTab == "Products") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        ProductsScreen(
+                                            viewModel = viewModel,
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Products",
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Sales") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    SalesScreen(
-                                        viewModel = viewModel,
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true },
-                                        onBackToParent = { navigateBack() }
-                                    )
+                                if (navigationHistory.contains("Sales")) {
+                                    Box(modifier = if (currentTab == "Sales") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        SalesScreen(
+                                            viewModel = viewModel,
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            onBackToParent = { navigateBack() },
+                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Sales"
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Reports") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    ReportsScreen(
-                                        viewModel = viewModel,
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true }
-                                    )
+                                if (navigationHistory.contains("Reports")) {
+                                    Box(modifier = if (currentTab == "Reports") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        ReportsScreen(
+                                            viewModel = viewModel,
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Reports",
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Settings") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    SettingsScreen(
-                                        viewModel = viewModel,
-                                        isDarkMode = isDarkMode,
-                                        onToggleDarkMode = { isDarkMode = it },
-                                        onOpenChat = { isAiChatOpen = true },
-                                        onOpenTimetable = { isTimetableOpen = true },
-                                        onOpenDebug = { isDebugOpen = true }
-                                    )
+                                if (navigationHistory.contains("Settings")) {
+                                    Box(modifier = if (currentTab == "Settings") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        SettingsScreen(
+                                            viewModel = viewModel,
+                                            isDarkMode = isDarkMode,
+                                            onToggleDarkMode = { isDarkMode = it },
+                                            onOpenChat = { isAiChatOpen = true },
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            onOpenDebug = { isDebugOpen = true }
+                                        )
+                                    }
                                 }
-                                Box(modifier = if (currentTab == "Levels") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                    LevelsScreen(
-                                        viewModel = viewModel,
-                                        onBack = { navigateBack() }
-                                    )
+                                if (navigationHistory.contains("Levels")) {
+                                    Box(modifier = if (currentTab == "Levels") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        LevelsScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
                                 }
                             }
                         }

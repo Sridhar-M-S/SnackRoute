@@ -58,9 +58,17 @@ fun ShopsScreen(
     viewModel: AppViewModel,
     onNavigateToTab: (String) -> Unit,
     onOpenChat: () -> Unit,
-    onOpenTimetable: () -> Unit
+    onOpenTimetable: () -> Unit,
+    onBack: () -> Unit = {},
+    showBackButton: Boolean = false
 ) {
     val context = LocalContext.current
+    
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.setShopLocationFilter(null)
+        }
+    }
     val shops by viewModel.shops.collectAsStateWithLifecycle()
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val sales by viewModel.sales.collectAsStateWithLifecycle()
@@ -259,15 +267,25 @@ fun ShopsScreen(
                 TopAppBar(
                     title = { Text("Shop Master", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        IconButton(
-                            onClick = onOpenTimetable,
-                            modifier = Modifier.testTag("open_timetable_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DateRange,
-                                contentDescription = "Weekly Timetable",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                        if (showBackButton) {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else {
+                            IconButton(
+                                onClick = onOpenTimetable,
+                                modifier = Modifier.testTag("open_timetable_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DateRange,
+                                    contentDescription = "Weekly Timetable",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     },
                     actions = {
