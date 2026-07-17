@@ -1221,8 +1221,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     ) { allShops, allSales ->
         allShops.map { shop ->
             val salesForShop = allSales.filter { it.shopNumber == shop.shopNumber }
+            val firstPurchaseDate = salesForShop.minOfOrNull { it.entryDate }
+            val finalStartingDate = firstPurchaseDate ?: shop.startingDate
             val analytics = com.example.utils.RatingCalculator.calculateAnalytics(salesForShop)
             shop.copy(
+                startingDate = finalStartingDate,
                 rating = analytics.currentRating,
                 score = (analytics.currentRating * 20).toInt()
             )
