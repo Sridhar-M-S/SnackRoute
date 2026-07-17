@@ -712,30 +712,35 @@ fun SalesScreen(
                     item {
                         // Date picker
                         val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
-                        OutlinedTextField(
-                            value = dateFormat.format(Date(entryDateMillis)),
-                            onValueChange = {},
-                            label = { Text("Log Entry Date*") },
-                            readOnly = true,
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    val calendar = Calendar.getInstance().apply { timeInMillis = entryDateMillis }
-                                    DatePickerDialog(
-                                        context,
-                                        { _, y, m, d ->
-                                            calendar.set(y, m, d)
-                                            entryDateMillis = calendar.timeInMillis
-                                        },
-                                        calendar.get(Calendar.YEAR),
-                                        calendar.get(Calendar.MONTH),
-                                        calendar.get(Calendar.DAY_OF_MONTH)
-                                    ).show()
-                                }) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = dateFormat.format(Date(entryDateMillis)),
+                                onValueChange = {},
+                                label = { Text("Log Entry Date*") },
+                                readOnly = true,
+                                trailingIcon = {
                                     Icon(Icons.Default.CalendarToday, contentDescription = "Select Date")
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable {
+                                        val calendar = Calendar.getInstance().apply { timeInMillis = entryDateMillis }
+                                        DatePickerDialog(
+                                            context,
+                                            { _, y, m, d ->
+                                                calendar.set(y, m, d)
+                                                entryDateMillis = calendar.timeInMillis
+                                            },
+                                            calendar.get(Calendar.YEAR),
+                                            calendar.get(Calendar.MONTH),
+                                            calendar.get(Calendar.DAY_OF_MONTH)
+                                        ).show()
+                                    }
+                            )
+                        }
                     }
 
                     item {
@@ -771,23 +776,23 @@ fun SalesScreen(
                                             Icon(Icons.Default.Edit, contentDescription = "Change Shop")
                                         }
                                     } else {
-                                        IconButton(onClick = { 
-                                            shopSearchQuery = ""
-                                            shopExpanded = true 
-                                        }) {
-                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                        }
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                                     }
                                 },
                                 isError = shopError != null,
                                 supportingText = shopError?.let { { Text(it) } },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = !isShopLocked) { 
-                                        shopSearchQuery = ""
-                                        shopExpanded = true 
-                                    }
+                                modifier = Modifier.fillMaxWidth()
                             )
+                            if (!isShopLocked) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { 
+                                            shopSearchQuery = ""
+                                            shopExpanded = true 
+                                        }
+                                )
+                            }
                             DropdownMenu(
                                 expanded = shopExpanded,
                                 onDismissRequest = { 
@@ -886,14 +891,15 @@ fun SalesScreen(
                                 label = { Text("Snack Product*") },
                                 readOnly = true,
                                 trailingIcon = {
-                                    IconButton(onClick = { prodExpanded = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                    }
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                                 },
                                 isError = productError != null,
                                 supportingText = productError?.let { { Text(it) } },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
+                                    .matchParentSize()
                                     .clickable { prodExpanded = true }
                             )
                             DropdownMenu(expanded = prodExpanded, onDismissRequest = { prodExpanded = false }, modifier = Modifier.fillMaxWidth(0.9f)) {
