@@ -42,9 +42,28 @@ class MainActivity : ComponentActivity() {
 
                 val navigationHistory = remember { mutableStateListOf<String>("Dashboard") }
 
-                LaunchedEffect(currentTab) {
-                    if (navigationHistory.isEmpty() || navigationHistory.last() != currentTab) {
-                        navigationHistory.add(currentTab)
+                fun navigateToParentTab(tab: String) {
+                    navigationHistory.clear()
+                    navigationHistory.add("Dashboard")
+                    if (tab != "Dashboard") {
+                        navigationHistory.add(tab)
+                    }
+                    currentTab = tab
+                }
+
+                fun navigateToChildTab(tab: String) {
+                    if (navigationHistory.isEmpty() || navigationHistory.last() != tab) {
+                        navigationHistory.add(tab)
+                    }
+                    currentTab = tab
+                }
+
+                fun navigateBack() {
+                    if (navigationHistory.size > 1) {
+                        navigationHistory.removeAt(navigationHistory.lastIndex)
+                        currentTab = navigationHistory.last()
+                    } else {
+                        showExitConfirmationDialog = true
                     }
                 }
 
@@ -56,12 +75,7 @@ class MainActivity : ComponentActivity() {
                     } else if (isDebugOpen) {
                         isDebugOpen = false
                     } else {
-                        if (navigationHistory.size > 1) {
-                            navigationHistory.removeAt(navigationHistory.lastIndex)
-                            currentTab = navigationHistory.last()
-                        } else {
-                            showExitConfirmationDialog = true
-                        }
+                        navigateBack()
                     }
                 }
 
@@ -84,7 +98,7 @@ class MainActivity : ComponentActivity() {
                                 items.forEach { item ->
                                     NavigationBarItem(
                                         selected = currentTab == item.label,
-                                        onClick = { currentTab = item.label },
+                                        onClick = { navigateToParentTab(item.label) },
                                         icon = { Icon(item.icon, contentDescription = item.label) },
                                         label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
                                         alwaysShowLabel = false,
@@ -103,8 +117,8 @@ class MainActivity : ComponentActivity() {
                                 Box(modifier = if (currentTab == "Dashboard") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                     DashboardScreen(
                                         viewModel = viewModel,
-                                        onNavigateToTab = { currentTab = it },
-                                        onQuickAddSales = { currentTab = "Sales" },
+                                        onNavigateToTab = { navigateToChildTab(it) },
+                                        onQuickAddSales = { navigateToChildTab("Sales") },
                                         onOpenChat = { isAiChatOpen = true },
                                         onOpenTimetable = { isTimetableOpen = true }
                                     )
@@ -112,7 +126,7 @@ class MainActivity : ComponentActivity() {
                                 Box(modifier = if (currentTab == "Locations") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                     LocationsScreen(
                                         viewModel = viewModel,
-                                        onNavigateToTab = { currentTab = it },
+                                        onNavigateToTab = { navigateToChildTab(it) },
                                         onOpenChat = { isAiChatOpen = true },
                                         onOpenTimetable = { isTimetableOpen = true }
                                     )
@@ -120,7 +134,7 @@ class MainActivity : ComponentActivity() {
                                 Box(modifier = if (currentTab == "Shops") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                     ShopsScreen(
                                         viewModel = viewModel,
-                                        onNavigateToTab = { currentTab = it },
+                                        onNavigateToTab = { navigateToChildTab(it) },
                                         onOpenChat = { isAiChatOpen = true },
                                         onOpenTimetable = { isTimetableOpen = true }
                                     )
@@ -159,7 +173,7 @@ class MainActivity : ComponentActivity() {
                                 Box(modifier = if (currentTab == "Levels") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                     LevelsScreen(
                                         viewModel = viewModel,
-                                        onBack = { currentTab = "Dashboard" }
+                                        onBack = { navigateBack() }
                                     )
                                 }
                             }
