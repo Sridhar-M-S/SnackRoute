@@ -708,6 +708,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSalesSearchQuery(query: String) {
         salesSearchQuery.value = query
+        if (query.isEmpty()) {
+            salesFilterShopNumber.value = null
+        }
     }
 
     fun setSalesFilterShopNumber(shopNumber: String?) {
