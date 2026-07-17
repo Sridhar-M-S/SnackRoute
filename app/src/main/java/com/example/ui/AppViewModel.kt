@@ -574,6 +574,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val products: StateFlow<List<ProductMaster>> = repository.allProducts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val salesSearchQuery = MutableStateFlow("")
+    val salesFilterShopNumber = MutableStateFlow<String?>(null)
+
+    fun setSalesSearchQuery(query: String) {
+        salesSearchQuery.value = query
+    }
+
+    fun setSalesFilterShopNumber(shopNumber: String?) {
+        salesFilterShopNumber.value = shopNumber
+    }
+
     private val _resolvedUrls = MutableStateFlow<Map<String, String>>(emptyMap())
     val resolvedUrls: StateFlow<Map<String, String>> = _resolvedUrls.asStateFlow()
 
@@ -876,17 +887,125 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return null
     }
 
+    private val _isResolvingCoordinates = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val isResolvingCoordinates: StateFlow<Map<String, Boolean>> = _isResolvingCoordinates.asStateFlow()
+
+    private val _coordinateResolutionError = MutableStateFlow<Map<String, String?>>(emptyMap())
+    val coordinateResolutionError: StateFlow<Map<String, String?>> = _coordinateResolutionError.asStateFlow()
+
+    fun resolveAndSaveCoordinatesForShop(context: Context, shop: ShopMaster) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val shopNo = shop.shopNumber
+            _isResolvingCoordinates.value = _isResolvingCoordinates.value + (shopNo to true)
+            _coordinateResolutionError.value = _coordinateResolutionError.value + (shopNo to null)
+            try {
+                val link = shop.googleMapLink
+                var lat: Double? = null
+                var lng: Double? = null
+
+                if (!link.isNullOrEmpty()) {
+                    val extracted = extractCoordinatesFromText(link)
+                    if (extracted != null) {
+                        lat = extracted.first
+                        lng = extracted.second
+                    } else {
+                        if (link.contains("goo.gl") || link.contains("maps.app.goo.gl")) {
+                            val resolved = resolveShortenedUrlRecursively(link)
+                            val resolvedExtracted = extractCoordinatesFromText(resolved)
+                            if (resolvedExtracted != null) {
+                                lat = resolvedExtracted.first
+                                lng = resolvedExtracted.second
+                            }
+                        }
+                    }
+                }
+
+                if (lat == null || lng == null) {
+                    val location = repository.getLocationByNumber(shop.locationNumber)
+                    val locationName = location?.locationName ?: ""
+                    val queryText = if (locationName.isNotEmpty()) {
+                        "${shop.storeName}, $locationName"
+                    } else {
+                        shop.storeName
+                    }
+                    
+                    val offlineResult = offlineGeocode(queryText)
+                    if (offlineResult != null) {
+                        lat = offlineResult.first
+                        lng = offlineResult.second
+                    } else {
+                        val geocoded = geocodeAddress(context, queryText)
+                        if (geocoded != null) {
+                            lat = geocoded.first
+                            lng = geocoded.second
+                        } else if (locationName.isNotEmpty()) {
+                            val offlineLoc = offlineGeocode(locationName)
+                            if (offlineLoc != null) {
+                                lat = offlineLoc.first
+                                lng = offlineLoc.second
+                            } else {
+                                val geocodedLoc = geocodeAddress(context, locationName)
+                                if (geocodedLoc != null) {
+                                    lat = geocodedLoc.first
+                                    lng = geocodedLoc.second
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val isValid = lat != null && lng != null && lat != 0.0 && lng != 0.0 && lat in -90.0..90.0 && lng in -180.0..180.0
+                
+                if (isValid) {
+                    val updatedShop = shop.copy(
+                        latitude = lat,
+                        longitude = lng,
+                        coordinateStatus = "Valid",
+                        lastCoordinateUpdate = System.currentTimeMillis()
+                    )
+                    repository.updateShop(shop.shopNumber, updatedShop)
+                } else {
+                    val updatedShop = shop.copy(
+                        latitude = null,
+                        longitude = null,
+                        coordinateStatus = "Invalid",
+                        lastCoordinateUpdate = System.currentTimeMillis()
+                    )
+                    repository.updateShop(shop.shopNumber, updatedShop)
+                    _coordinateResolutionError.value = _coordinateResolutionError.value + (shopNo to "Unable to retrieve location coordinates from the provided Google Maps link.")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _coordinateResolutionError.value = _coordinateResolutionError.value + (shopNo to "Unable to retrieve location coordinates: ${e.localizedMessage}")
+            } finally {
+                _isResolvingCoordinates.value = _isResolvingCoordinates.value + (shopNo to false)
+            }
+        }
+    }
+
     suspend fun resolveShopCoords(context: Context, shop: ShopMaster): ShopMaster {
-        // 1. If the shop already has coordinates, preserve them
-        if (shop.latitude != null && shop.longitude != null) {
+        // 1. If the shop already has coordinates and status, preserve them
+        if (shop.latitude != null && shop.longitude != null && shop.coordinateStatus != null) {
             return shop
+        } else if (shop.latitude != null && shop.longitude != null) {
+            val isValid = shop.latitude != 0.0 && shop.longitude != 0.0 && shop.latitude in -90.0..90.0 && shop.longitude in -180.0..180.0
+            val status = if (isValid) "Valid" else "Invalid"
+            return shop.copy(
+                coordinateStatus = status,
+                lastCoordinateUpdate = shop.lastCoordinateUpdate ?: System.currentTimeMillis()
+            )
         }
 
-        // 2. If it's an update, preserve coords from the old shop if map link hasn't changed
+        // 2. If it's an update, preserve coords and status from the old shop if map link hasn't changed
         try {
             val oldShop = repository.getShopByNumber(shop.shopNumber)
             if (oldShop != null && oldShop.googleMapLink == shop.googleMapLink && oldShop.latitude != null && oldShop.longitude != null) {
-                return shop.copy(latitude = oldShop.latitude, longitude = oldShop.longitude)
+                return shop.copy(
+                    latitude = oldShop.latitude,
+                    longitude = oldShop.longitude,
+                    coordinateStatus = oldShop.coordinateStatus ?: "Valid",
+                    lastCoordinateUpdate = oldShop.lastCoordinateUpdate ?: System.currentTimeMillis()
+                )
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -948,13 +1067,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        if (lat == null || lng == null) {
-            val idx = shop.shopNumber.filter { it.isDigit() }.toIntOrNull() ?: 0
-            lat = 12.971598 + 0.005 * (idx % 20 + 1)
-            lng = 77.594562 + 0.005 * (idx % 20 + 1)
-        }
+        val isValid = lat != null && lng != null && lat != 0.0 && lng != 0.0 && lat in -90.0..90.0 && lng in -180.0..180.0
+        val status = if (isValid) "Valid" else "Invalid"
+        val finalLat = if (isValid) lat else null
+        val finalLng = if (isValid) lng else null
 
-        return shop.copy(latitude = lat, longitude = lng)
+        return shop.copy(
+            latitude = finalLat,
+            longitude = finalLng,
+            coordinateStatus = status,
+            lastCoordinateUpdate = System.currentTimeMillis()
+        )
     }
 
     val shops: StateFlow<List<ShopMaster>> = combine(
@@ -1234,13 +1357,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             async { resolveShopCoords(context, shop) }
                         }.awaitAll()
                     }
+                    val invalidCoordsCount = resolvedShops.count { shop ->
+                        shop.latitude == null || shop.longitude == null || (shop.latitude == 0.0 && shop.longitude == 0.0) || shop.latitude !in -90.0..90.0 || shop.longitude !in -180.0..180.0
+                    }
                     repository.insertShops(resolvedShops)
                     refreshNextShopNumber()
                     // Clean up any old/orphaned shop images after importing
                     com.example.utils.BackupHelper.cleanupUnusedImages(context)
+                    _importSummary.value = summary.copy(invalidCoordinatesCount = invalidCoordsCount)
+                } else {
+                    _importSummary.value = summary
                 }
-                
-                _importSummary.value = summary
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {

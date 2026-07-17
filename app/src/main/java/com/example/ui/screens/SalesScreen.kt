@@ -57,14 +57,14 @@ fun SalesScreen(
         }
     }
 
-    var searchQuery by remember { mutableStateOf("") }
+    val searchQuery by viewModel.salesSearchQuery.collectAsStateWithLifecycle()
     var showAddEditScreen by remember { mutableStateOf(false) }
     var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
     var isShopLocked by remember { mutableStateOf(false) }
 
     // --- Search & Multiple Filters State ---
     var filterExpanded by remember { mutableStateOf(false) }
-    var filterShopNumber by remember { mutableStateOf<String?>(null) }
+    val filterShopNumber by viewModel.salesFilterShopNumber.collectAsStateWithLifecycle()
     var filterLocationNumber by remember { mutableStateOf<String?>(null) }
     var filterProductName by remember { mutableStateOf<String?>(null) }
     var filterStatus by remember { mutableStateOf<String?>(null) }
@@ -109,6 +109,8 @@ fun SalesScreen(
             // Search filter
             val matchSearch = searchQuery.isEmpty() ||
                     sale.shopName.contains(searchQuery, ignoreCase = true) ||
+                    sale.shopNumber.equals(searchQuery, ignoreCase = true) ||
+                    sale.shopNumber.contains(searchQuery, ignoreCase = true) ||
                     sale.productName.contains(searchQuery, ignoreCase = true) ||
                     sale.locationNumber.contains(searchQuery, ignoreCase = true)
 
@@ -349,7 +351,7 @@ fun SalesScreen(
                 // --- Search Bar ---
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = { viewModel.setSalesSearchQuery(it) },
                     placeholder = { Text("Search shop, product, route...") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier
@@ -391,9 +393,9 @@ fun SalesScreen(
                                         )
                                     }
                                     DropdownMenu(expanded = shopFilterExp, onDismissRequest = { shopFilterExp = false }) {
-                                        DropdownMenuItem(text = { Text("All Stores") }, onClick = { filterShopNumber = null; shopFilterExp = false })
+                                        DropdownMenuItem(text = { Text("All Stores") }, onClick = { viewModel.setSalesFilterShopNumber(null); shopFilterExp = false })
                                         shops.forEach { s ->
-                                            DropdownMenuItem(text = { Text(s.storeName) }, onClick = { filterShopNumber = s.shopNumber; shopFilterExp = false })
+                                            DropdownMenuItem(text = { Text(s.storeName) }, onClick = { viewModel.setSalesFilterShopNumber(s.shopNumber); shopFilterExp = false })
                                         }
                                     }
                                 }
@@ -518,7 +520,8 @@ fun SalesScreen(
                                 }
 
                                 IconButton(onClick = {
-                                    filterShopNumber = null
+                                    viewModel.setSalesFilterShopNumber(null)
+                                    viewModel.setSalesSearchQuery("")
                                     filterLocationNumber = null
                                     filterProductName = null
                                     filterStatus = null
@@ -745,6 +748,19 @@ fun SalesScreen(
                                 }
                             }
                         }
+                    }
+
+                    item {
+                        val shopLocCode = currentShopObj?.locationNumber
+                        val shopLocName = locations.firstOrNull { it.locationNumber == shopLocCode }?.locationName ?: shopLocCode ?: "Not Assigned"
+                        OutlinedTextField(
+                            value = shopLocName,
+                            onValueChange = {},
+                            label = { Text("Associated Route / Location") },
+                            readOnly = true,
+                            enabled = false,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
                     item {

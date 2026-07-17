@@ -53,7 +53,8 @@ object Exporter {
         val totalImagesFound: Int = 0,
         val imagesImportedSuccessfully: Int = 0,
         val imagesFailed: Int = 0,
-        val imageImportReasons: List<String> = emptyList()
+        val imageImportReasons: List<String> = emptyList(),
+        val invalidCoordinatesCount: Int = 0
     )
 
     fun shareFile(context: Context, file: File, title: String) {

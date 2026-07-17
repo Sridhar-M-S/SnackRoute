@@ -18,7 +18,7 @@ import androidx.room.TypeConverters
         Badge::class,
         UserBadge::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

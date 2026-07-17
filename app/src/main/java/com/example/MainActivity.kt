@@ -110,6 +110,10 @@ class MainActivity : ComponentActivity() {
                                     onOpenChat = { isAiChatOpen = true },
                                     onOpenTimetable = { isTimetableOpen = true }
                                 )
+                                "Levels" -> LevelsScreen(
+                                    viewModel = viewModel,
+                                    onBack = { currentTab = "Dashboard" }
+                                )
                             }
                         }
                     }

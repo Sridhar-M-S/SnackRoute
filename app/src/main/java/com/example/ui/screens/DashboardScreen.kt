@@ -182,7 +182,10 @@ fun DashboardScreen(
         ) {
             // --- Gamification HUD Header ---
             item {
-                GameHudCard(state = gameProgress)
+                GameHudCard(
+                    state = gameProgress,
+                    onClick = { onNavigateToTab("Levels") }
+                )
             }
 
             // --- Combo Alert ---
@@ -1099,10 +1102,11 @@ fun BentoMiniStatCard(
 }
 
 @Composable
-fun GameHudCard(state: GamificationState) {
+fun GameHudCard(state: GamificationState, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .testTag("game_hud_card"),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
@@ -1228,6 +1232,22 @@ fun GameHudCard(state: GamificationState) {
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f)
             )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f))
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Tap to enter Levels Arena 🏆",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }

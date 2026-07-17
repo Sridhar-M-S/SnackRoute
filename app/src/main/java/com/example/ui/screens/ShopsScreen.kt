@@ -533,6 +533,15 @@ fun ShopsScreen(
                                     healthScore = score,
                                     healthCategory = viewModel.getHealthCategory(score),
                                     onClick = { selectedShopForDetail = shop },
+                                    onGoToSales = {
+                                        viewModel.setSalesFilterShopNumber(shop.shopNumber)
+                                        viewModel.setSalesSearchQuery(shop.storeName)
+                                        onNavigateToTab("Sales")
+                                    },
+                                    onRecordSale = {
+                                        viewModel.setPrefilledSaleData(shop.shopNumber, shop.storeName, locName)
+                                        onNavigateToTab("Sales")
+                                    },
                                     onEdit = {
                                         selectedShopForEdit = shop
                                         formShopNumber = shop.shopNumber
@@ -710,8 +719,6 @@ fun ShopsScreen(
                         } else {
                             val query = nearestQuery.trim()
 
-
-
                             // Standard Haversine distance in km
                             fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
                                 val r = 6371.0
@@ -724,8 +731,9 @@ fun ShopsScreen(
                                 return r * c
                             }
 
-                            // 1. Read the Latitude and Longitude of every Shop. If null, fall back to parsing from maps link or resolved link.
-                            val mapOfShopCoords = shops.map { shop ->
+                            // 1. Read and validate coordinates for every shop.
+                            // Do not include Shops with invalid coordinates in the nearest shop calculation.
+                            val shopsWithValidCoords = shops.mapNotNull { shop ->
                                 val coords = if (shop.latitude != null && shop.longitude != null) {
                                     Pair(shop.latitude, shop.longitude)
                                 } else if (!shop.googleMapLink.isNullOrEmpty()) {
@@ -733,42 +741,24 @@ fun ShopsScreen(
                                 } else {
                                     null
                                 }
-                                shop.shopNumber to coords
-                            }.toMap()
-
-                            // 2. Identify the anchor coordinate (first shop that has valid coordinates, or default Bangalore)
-                            val anchorCoordinate = mapOfShopCoords.values.filterNotNull().firstOrNull() ?: Pair(12.971598, 77.594562)
-
-                            // 3. Build center coordinates for each location (average of all shops in that location that have coordinates)
-                            val mapOfLocationCoords = locations.mapIndexed { idx, loc ->
-                                val shopsInLocWithCoords = shops.filter { it.locationNumber == loc.locationNumber }
-                                    .mapNotNull { mapOfShopCoords[it.shopNumber] }
-
-                                val locCoords = if (shopsInLocWithCoords.isNotEmpty()) {
-                                    val avgLat = shopsInLocWithCoords.map { it.first }.average()
-                                    val avgLng = shopsInLocWithCoords.map { it.second }.average()
-                                    Pair(avgLat, avgLng)
+                                
+                                if (coords != null && coords.first in -90.0..90.0 && coords.second in -180.0..180.0 && !(coords.first == 0.0 && coords.second == 0.0)) {
+                                    Pair(shop, coords)
                                 } else {
-                                    // Deterministic offset from anchor coordinate to keep things realistic and ordered
-                                    Pair(anchorCoordinate.first + 0.005 * (idx + 1), anchorCoordinate.second + 0.005 * (idx + 1))
+                                    null
                                 }
-                                loc.locationNumber to locCoords
-                            }.toMap()
-
-                            // 4. Build resolved coordinates for EVERY shop in the database (even those with no links or shortened links)
-                            val resolvedShopCoords = shops.map { shop ->
-                                val finalCoords = mapOfShopCoords[shop.shopNumber] ?: mapOfLocationCoords[shop.locationNumber] ?: anchorCoordinate
-                                shop.shopNumber to finalCoords
-                            }.toMap()
-
-                            // 5. Try to resolve targetCoords from query
-                            var targetCoords = nearestQueryCoords
-
-                            if (targetCoords == null) {
-                                targetCoords = extractCoordinates(query)
                             }
 
-                            // If not direct coordinates, try offline geocoding matching
+                            // 2. Resolve target coordinates.
+                            // If the user entered coordinates directly, use them directly without any text matching.
+                            var targetCoords: Pair<Double, Double>? = extractCoordinates(query)
+
+                            if (targetCoords == null) {
+                                // Fallback to state flow resolved coordinates (e.g. from shortened URL resolve or ViewModel geocoder)
+                                targetCoords = nearestQueryCoords
+                            }
+
+                            // If still null, try offline text geocoding or matching (only if NOT explicit coordinates query)
                             if (targetCoords == null) {
                                 val queryLower = query.lowercase()
                                 val offlineMatch = listOf(
@@ -819,34 +809,42 @@ fun ShopsScreen(
                                 }
                             }
 
-                            // If not direct coordinates, try to find matching location
+                            // If still not coordinates, try location master match
                             if (targetCoords == null) {
                                 val matchedLocation = locations.firstOrNull {
                                     it.locationNumber.equals(query, ignoreCase = true) ||
                                     it.locationName.contains(query, ignoreCase = true)
                                 }
                                 if (matchedLocation != null) {
-                                    targetCoords = mapOfLocationCoords[matchedLocation.locationNumber]
+                                    // Use center of location based only on shops with valid coords inside this location
+                                    val shopsInLoc = shopsWithValidCoords.filter { it.first.locationNumber == matchedLocation.locationNumber }
+                                    if (shopsInLoc.isNotEmpty()) {
+                                        targetCoords = Pair(
+                                            shopsInLoc.map { it.second.first }.average(),
+                                            shopsInLoc.map { it.second.second }.average()
+                                        )
+                                    }
                                 }
                             }
 
-                            // If still not found, try to find matching shop
+                            // If still not found, try matching shop name/number
                             if (targetCoords == null) {
-                                val matchedShop = shops.firstOrNull {
-                                    it.storeName.contains(query, ignoreCase = true) ||
-                                    it.shopNumber.equals(query, ignoreCase = true) ||
-                                    (it.notes ?: "").contains(query, ignoreCase = true)
+                                val matchedShop = shopsWithValidCoords.firstOrNull {
+                                    it.first.storeName.contains(query, ignoreCase = true) ||
+                                    it.first.shopNumber.equals(query, ignoreCase = true) ||
+                                    (it.first.notes ?: "").contains(query, ignoreCase = true)
                                 }
                                 if (matchedShop != null) {
-                                    targetCoords = resolvedShopCoords[matchedShop.shopNumber]
+                                    targetCoords = matchedShop.second
                                 }
                             }
 
-                            // 6. Calculate accurate mathematical distances to all shops using resolved coordinates
+                            // 3. Distance calculation and sorting
+                            val anchorCoordinate = shopsWithValidCoords.firstOrNull()?.second ?: Pair(12.971598, 77.594562)
                             val finalTargetCoords = targetCoords ?: anchorCoordinate
                             val (tLat, tLng) = finalTargetCoords
-                            shops.map { shop ->
-                                val shopCoords = resolvedShopCoords[shop.shopNumber] ?: anchorCoordinate
+
+                            shopsWithValidCoords.map { (shop, shopCoords) ->
                                 val dist = calculateDistance(tLat, tLng, shopCoords.first, shopCoords.second)
                                 Pair(shop, dist)
                             }.sortedBy { it.second }.take(5)
@@ -1154,14 +1152,46 @@ fun ShopsScreen(
 
                     item {
                         // Google Map link
-                        OutlinedTextField(
-                            value = googleMapLink,
-                            onValueChange = { googleMapLink = it },
-                            label = { Text("Google Map Link (Optional)") },
-                            placeholder = { Text("e.g. https://maps.app.goo.gl/...") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedTextField(
+                                value = googleMapLink,
+                                onValueChange = { googleMapLink = it },
+                                label = { Text("Google Map Link (Optional)") },
+                                placeholder = { Text("e.g. https://maps.app.goo.gl/...") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            val coordsWarning = remember(googleMapLink) {
+                                if (googleMapLink.isBlank()) {
+                                    "⚠️ Warning: No Google Map link or coordinates provided. This store will not appear in coordinate-based Nearest Shop searches."
+                                } else {
+                                    val coords = extractCoordinates(googleMapLink)
+                                    if (coords == null) {
+                                        if (googleMapLink.contains("goo.gl") || googleMapLink.contains("maps.app.goo.gl")) {
+                                            "ℹ️ Info: Shortened link detected. Coordinates will be resolved dynamically after saving."
+                                        } else {
+                                            "⚠️ Warning: Could not parse coordinates from this link. Use format: Lat,Lng (e.g. 11.795344,77.813469) or a valid Google Map URL."
+                                        }
+                                    } else {
+                                        val (lat, lng) = coords
+                                        if (lat !in -90.0..90.0 || lng !in -180.0..180.0 || (lat == 0.0 && lng == 0.0)) {
+                                            "⚠️ Warning: Parsed coordinates ($lat, $lng) are invalid. Please double-check them."
+                                        } else {
+                                            null
+                                        }
+                                    }
+                                }
+                            }
+                            if (coordsWarning != null) {
+                                val isError = coordsWarning.startsWith("⚠️")
+                                Text(
+                                    text = coordsWarning,
+                                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
 
                     item {
@@ -1250,9 +1280,21 @@ fun ShopsScreen(
 
     // --- Detail Bottom Sheet / Dialog ---
     if (selectedShopForDetail != null) {
-        val detail = selectedShopForDetail!!
+        val detail = shops.firstOrNull { it.shopNumber == selectedShopForDetail?.shopNumber } ?: selectedShopForDetail!!
         val locName = locations.firstOrNull { it.locationNumber == detail.locationNumber }?.locationName ?: detail.locationNumber
         
+        val resolvingMap by viewModel.isResolvingCoordinates.collectAsStateWithLifecycle()
+        val errorMap by viewModel.coordinateResolutionError.collectAsStateWithLifecycle()
+
+        val isResolving = resolvingMap[detail.shopNumber] ?: false
+        val resolutionError = errorMap[detail.shopNumber]
+
+        LaunchedEffect(detail.shopNumber) {
+            if (detail.latitude == null || detail.longitude == null || detail.coordinateStatus == null) {
+                viewModel.resolveAndSaveCoordinatesForShop(context, detail)
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { selectedShopForDetail = null },
             title = {
@@ -1384,29 +1426,100 @@ fun ShopsScreen(
                         }
                     }
 
-                    if (!detail.googleMapLink.isNullOrEmpty()) {
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                    Card(
+                        modifier = Modifier.fillMaxWidth().testTag("shop_detail_location_card"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = "Maps Navigation Link",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Button(
-                                onClick = {
-                                    val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(detail.googleMapLink))
-                                    context.startActivity(mapIntent)
-                                },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Navigate", fontSize = 12.sp)
+                                Text(
+                                    text = "Location Information",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                if (isResolving) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                } else if (!detail.googleMapLink.isNullOrEmpty()) {
+                                    IconButton(
+                                        onClick = {
+                                            val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(detail.googleMapLink))
+                                            context.startActivity(mapIntent)
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Navigation,
+                                            contentDescription = "Navigate to Google Maps",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            DetailField(label = "Google Maps Link", value = detail.googleMapLink ?: "N/A")
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    DetailField(label = "Latitude", value = detail.latitude?.toString() ?: "N/A")
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    DetailField(label = "Longitude", value = detail.longitude?.toString() ?: "N/A")
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Column {
+                                        Text("Coordinate Status", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                                        val status = detail.coordinateStatus ?: "Pending"
+                                        val statusColor = when (status) {
+                                            "Valid" -> Color(0xFF2E7D32)
+                                            "Invalid" -> MaterialTheme.colorScheme.error
+                                            else -> Color(0xFFE65100)
+                                        }
+                                        Text(status, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = statusColor)
+                                    }
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    DetailField(label = "Last Updated", value = detail.lastCoordinateUpdateFormatted ?: "N/A")
+                                }
+                            }
+
+                            val isInvalid = detail.coordinateStatus == "Invalid"
+                            if (isInvalid || resolutionError != null) {
+                                val errorMsg = resolutionError ?: "Unable to retrieve location coordinates from the provided Google Maps link."
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = "⚠️ $errorMsg",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -1425,7 +1538,26 @@ fun ShopsScreen(
                 }
             },
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            viewModel.setSalesFilterShopNumber(detail.shopNumber)
+                            viewModel.setSalesSearchQuery(detail.storeName)
+                            onNavigateToTab("Sales")
+                            selectedShopForDetail = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        ),
+                        modifier = Modifier.testTag("go_to_sales_detail_button")
+                    ) {
+                        Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Go to Sales")
+                    }
                     Button(
                         onClick = {
                             viewModel.setPrefilledSaleData(detail.shopNumber, detail.storeName, locName)
@@ -1503,6 +1635,22 @@ fun ShopsScreen(
                             SummaryRow(label = "• Invalid Location Numbers:", value = "${summary.invalidLocationNumbersCount}")
                             SummaryRow(label = "• Missing Images:", value = "${summary.missingImagesCount}")
                             SummaryRow(label = "• Failed / Invalid Rows:", value = "${summary.failedRowsCount}")
+                            if (summary.invalidCoordinatesCount > 0) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = "⚠️ Warning: ${summary.invalidCoordinatesCount} imported shops have missing or invalid GPS coordinates. They will be excluded from Nearest Shop searches.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                         com.example.utils.Exporter.ImportType.LOCATIONS -> {
                             SummaryRow(label = "• Duplicate Records:", value = "${summary.duplicateRecordsCount}")
@@ -1619,6 +1767,8 @@ fun ShopCard(
     healthScore: Int,
     healthCategory: String,
     onClick: () -> Unit,
+    onGoToSales: () -> Unit,
+    onRecordSale: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1677,6 +1827,21 @@ fun ShopCard(
                             fontSize = 15.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val isCoordsInvalid = shop.latitude == null || shop.longitude == null || (shop.latitude == 0.0 && shop.longitude == 0.0) || shop.latitude !in -90.0..90.0 || shop.longitude !in -180.0..180.0
+                        if (isCoordsInvalid) {
+                            Box(
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "⚠️ No GPS",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                     Text(
                         text = "ID: ${shop.shopNumber} • Route: $locationName",
@@ -1724,6 +1889,45 @@ fun ShopCard(
                     IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = onGoToSales,
+                    modifier = Modifier.testTag("go_to_sales_button_${shop.shopNumber}"),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ReceiptLong,
+                        contentDescription = "Go to Sales",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Go to Sales", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onRecordSale,
+                    modifier = Modifier.testTag("record_sale_button_${shop.shopNumber}"),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Record Sale",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Record Sale", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                 }
             }
 

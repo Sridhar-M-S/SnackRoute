@@ -25,10 +25,15 @@ data class ShopMaster(
     val mobileNumber: String? = null,
     val notes: String? = null,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    val coordinateStatus: String? = null, // "Valid", "Invalid", "Pending"
+    val lastCoordinateUpdate: Long? = null
 ) {
     val startingDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(startingDate))
+
+    val lastCoordinateUpdateFormatted: String?
+        get() = lastCoordinateUpdate?.let { SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date(it)) }
 }
 
 @Entity(tableName = "products")
