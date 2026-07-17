@@ -44,9 +44,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.rememberAsyncImagePainter
 import com.example.data.LocationMaster
 import com.example.data.ShopMaster
-import com.example.data.DailyTarget
-import com.example.data.Badge
-import com.example.data.UserBadge
 import com.example.ui.AppViewModel
 import com.example.utils.Exporter
 import java.io.File
