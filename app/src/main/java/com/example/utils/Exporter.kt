@@ -10,6 +10,7 @@ import com.example.data.ProductMaster
 import com.example.data.ProductPrice
 import com.example.data.SalesEntry
 import com.example.data.ShopMaster
+import com.example.data.ErrorLog
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.apache.poi.ss.usermodel.*
 import java.io.File
@@ -74,6 +75,69 @@ object Exporter {
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(context, "Error exporting: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun exportErrorLogs(context: Context, errorLogs: List<ErrorLog>) {
+        val fileName = "Error_Logs_Export_${System.currentTimeMillis()}.xlsx"
+        val file = File(context.cacheDir, fileName)
+
+        try {
+            val workbook = XSSFWorkbook()
+            val sheet = workbook.createSheet("Error Logs")
+            
+            // Header styling
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.getIndex()
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                fillForegroundColor = IndexedColors.RED.getIndex()
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.CENTER
+            }
+            
+            // Header Row
+            val headers = listOf("Date & Time", "Module", "Operation", "Error Type", "Error Message", "Possible Reason", "Stack Trace")
+            val headerRow = sheet.createRow(0)
+            for (i in headers.indices) {
+                val cell = headerRow.createCell(i)
+                cell.setCellValue(headers[i])
+                cell.cellStyle = headerStyle
+            }
+            
+            // Data Rows
+            var rowIdx = 1
+            for (log in errorLogs) {
+                val row = sheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(log.timestampFormatted)
+                row.createCell(1).setCellValue(log.module)
+                row.createCell(2).setCellValue(log.operation)
+                row.createCell(3).setCellValue(log.errorType)
+                row.createCell(4).setCellValue(log.errorMessage)
+                row.createCell(5).setCellValue(log.possibleReason ?: "")
+                row.createCell(6).setCellValue(log.stackTrace)
+            }
+            
+            // Set fixed column widths
+            sheet.setColumnWidth(0, 6000) // Date & Time
+            sheet.setColumnWidth(1, 4000) // Module
+            sheet.setColumnWidth(2, 6000) // Operation
+            sheet.setColumnWidth(3, 5000) // Error Type
+            sheet.setColumnWidth(4, 10000) // Error Message
+            sheet.setColumnWidth(5, 8000) // Possible Reason
+            sheet.setColumnWidth(6, 15000) // Stack Trace
+            
+            FileOutputStream(file).use { out ->
+                workbook.write(out)
+            }
+            workbook.close()
+            
+            shareFile(context, file, "Error Logs Export")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 

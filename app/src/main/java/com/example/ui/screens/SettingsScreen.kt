@@ -35,7 +35,8 @@ fun SettingsScreen(
     isDarkMode: Boolean,
     onToggleDarkMode: (Boolean) -> Unit,
     onOpenChat: () -> Unit,
-    onOpenTimetable: () -> Unit
+    onOpenTimetable: () -> Unit,
+    onOpenDebug: () -> Unit
 ) {
     val context = LocalContext.current
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
@@ -483,6 +484,38 @@ fun SettingsScreen(
                         }
                     }
                 )
+            }
+
+            // --- System Diagnostics & Debug Panel ---
+            Text("Diagnostics", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("diagnostics_debug_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("System Debug Panel", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("View captured error logs, inspect exception stack traces, clear records, and export reports to Excel.", fontSize = 11.sp, color = Color.Gray)
+                        }
+                        Button(
+                            onClick = onOpenDebug,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                            modifier = Modifier.testTag("open_debug_panel_button")
+                        ) {
+                            Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Debug Panel", fontSize = 12.sp)
+                        }
+                    }
+                }
             }
 
             // --- App Information ---

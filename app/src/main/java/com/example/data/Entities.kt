@@ -105,3 +105,19 @@ data class UserBadge(
     val unlockedAt: Long
 )
 
+@Entity(tableName = "error_logs")
+data class ErrorLog(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val module: String,
+    val operation: String,
+    val errorType: String,
+    val errorMessage: String,
+    val stackTrace: String,
+    val possibleReason: String? = null
+) {
+    val timestampFormatted: String
+        get() = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+}
+
+

@@ -174,3 +174,16 @@ interface BadgeDao {
     suspend fun unlockBadge(userBadge: UserBadge)
 }
 
+@Dao
+interface ErrorLogDao {
+    @Query("SELECT * FROM error_logs ORDER BY timestamp DESC")
+    fun getAllErrorLogs(): Flow<List<ErrorLog>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertErrorLog(errorLog: ErrorLog)
+
+    @Query("DELETE FROM error_logs")
+    suspend fun clearErrorLogs()
+}
+
+

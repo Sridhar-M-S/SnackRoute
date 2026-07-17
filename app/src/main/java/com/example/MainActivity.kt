@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
                 var currentTab by remember { mutableStateOf("Dashboard") }
                 var isAiChatOpen by remember { mutableStateOf(false) }
                 var isTimetableOpen by remember { mutableStateOf(false) }
+                var isDebugOpen by remember { mutableStateOf(false) }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     Scaffold(
@@ -108,7 +109,8 @@ class MainActivity : ComponentActivity() {
                                     isDarkMode = isDarkMode,
                                     onToggleDarkMode = { isDarkMode = it },
                                     onOpenChat = { isAiChatOpen = true },
-                                    onOpenTimetable = { isTimetableOpen = true }
+                                    onOpenTimetable = { isTimetableOpen = true },
+                                    onOpenDebug = { isDebugOpen = true }
                                 )
                                 "Levels" -> LevelsScreen(
                                     viewModel = viewModel,
@@ -135,6 +137,17 @@ class MainActivity : ComponentActivity() {
                             WeeklyTimetableScreen(viewModel = viewModel, onClose = { isTimetableOpen = false })
                         }
                     }
+
+                    if (isDebugOpen) {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            DebugScreen(viewModel = viewModel, onClose = { isDebugOpen = false })
+                        }
+                    }
+
+                    GlobalErrorDisplay(viewModel = viewModel)
                 }
             }
         }

@@ -17,8 +17,14 @@ class AppRepository(
     private val salesDao: SalesDao,
     private val timetableDao: TimetableDao,
     private val dailyTargetDao: DailyTargetDao,
-    private val badgeDao: BadgeDao
+    private val badgeDao: BadgeDao,
+    private val errorLogDao: ErrorLogDao
 ) {
+    // --- Error Log Queries ---
+    val allErrorLogs: Flow<List<ErrorLog>> = errorLogDao.getAllErrorLogs()
+    suspend fun insertErrorLog(errorLog: ErrorLog) = errorLogDao.insertErrorLog(errorLog)
+    suspend fun clearErrorLogs() = errorLogDao.clearErrorLogs()
+
     // --- Badge Queries ---
     val allBadges: Flow<List<Badge>> = badgeDao.getAllBadges()
     val unlockedBadges: Flow<List<UserBadge>> = badgeDao.getUnlockedBadges()

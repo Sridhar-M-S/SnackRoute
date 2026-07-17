@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import com.example.utils.Exporter
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,16 @@ import java.util.Locale
 import okhttp3.*
 import java.util.concurrent.TimeUnit
 
+data class AppError(
+    val module: String,
+    val operation: String,
+    val errorType: String,
+    val errorMessage: String,
+    val possibleReason: String,
+    val stackTrace: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -33,8 +44,126 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.salesDao(),
         db.timetableDao(),
         db.dailyTargetDao(),
-        db.badgeDao()
+        db.badgeDao(),
+        db.errorLogDao()
     )
+
+    // --- Centralized Error States ---
+    private val _activeError = MutableStateFlow<AppError?>(null)
+    val activeError: StateFlow<AppError?> = _activeError.asStateFlow()
+
+    fun dismissError() {
+        _activeError.value = null
+    }
+
+    fun triggerError(
+        module: String,
+        operation: String,
+        errorType: String,
+        errorMessage: String,
+        possibleReason: String,
+        exception: Throwable? = null
+    ) {
+        val stackTraceStr = exception?.stackTraceToString() ?: ""
+        val error = AppError(
+            module = module,
+            operation = operation,
+            errorType = errorType,
+            errorMessage = errorMessage,
+            possibleReason = possibleReason,
+            stackTrace = stackTraceStr
+        )
+        _activeError.value = error
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.insertErrorLog(
+                    ErrorLog(
+                        module = module,
+                        operation = operation,
+                        errorType = errorType,
+                        errorMessage = errorMessage,
+                        stackTrace = stackTraceStr,
+                        possibleReason = possibleReason
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("AppViewModel", "Failed to save error log to DB", e)
+            }
+        }
+    }
+
+    fun triggerError(
+        module: String,
+        operation: String,
+        exception: Throwable,
+        possibleReason: String
+    ) {
+        triggerError(
+            module = module,
+            operation = operation,
+            errorType = exception.javaClass.simpleName,
+            errorMessage = exception.localizedMessage ?: exception.message ?: "Unknown technical exception.",
+            possibleReason = possibleReason,
+            exception = exception
+        )
+    }
+
+    fun triggerError(
+        module: String,
+        operation: String,
+        errorMessage: String,
+        stackTrace: String,
+        possibleReason: String
+    ) {
+        val error = AppError(
+            module = module,
+            operation = operation,
+            errorType = "Validation Error",
+            errorMessage = errorMessage,
+            possibleReason = possibleReason,
+            stackTrace = stackTrace
+        )
+        _activeError.value = error
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.insertErrorLog(
+                    ErrorLog(
+                        module = module,
+                        operation = operation,
+                        errorType = "Validation Error",
+                        errorMessage = errorMessage,
+                        stackTrace = stackTrace,
+                        possibleReason = possibleReason
+                    )
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    val allErrorLogs: StateFlow<List<ErrorLog>> = repository.allErrorLogs
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun clearErrorLogs() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.clearErrorLogs()
+            } catch (e: Exception) {
+                android.util.Log.e("AppViewModel", "Failed to clear error logs", e)
+            }
+        }
+    }
+
+    fun exportErrorLogsToExcel(context: Context) {
+        Exporter.exportErrorLogs(context, allErrorLogs.value)
+    }
 
     // --- Preferences & custom Gemini API Key ---
     private val prefs = application.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
@@ -1263,75 +1392,147 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- CRUD Operations ---
     fun addLocation(location: LocationMaster) = viewModelScope.launch {
-        repository.insertLocation(location)
+        try {
+            repository.insertLocation(location)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Location Master",
+                operation = "Add Location",
+                exception = e,
+                possibleReason = "The Location Number '${location.locationNumber}' might already exist, or some database fields are invalid."
+            )
+        }
     }
 
     fun updateLocation(location: LocationMaster) = viewModelScope.launch {
-        repository.updateLocation(location)
+        try {
+            repository.updateLocation(location)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Location Master",
+                operation = "Update Location",
+                exception = e,
+                possibleReason = "An unexpected error occurred while updating the Location Master."
+            )
+        }
     }
 
     fun deleteLocation(location: LocationMaster) = viewModelScope.launch {
-        repository.deleteLocation(location)
+        try {
+            repository.deleteLocation(location)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Location Master",
+                operation = "Delete Location",
+                exception = e,
+                possibleReason = "This location could not be deleted. It may be referenced by existing Shop Master records."
+            )
+        }
     }
 
     fun deleteAllLocations() = viewModelScope.launch {
-        repository.deleteAllLocations()
+        try {
+            repository.deleteAllLocations()
+        } catch (e: Exception) {
+            triggerError(
+                module = "Location Master",
+                operation = "Delete All Locations",
+                exception = e,
+                possibleReason = "Unable to delete all locations. Existing references may block this action."
+            )
+        }
     }
 
     fun addShop(shop: ShopMaster) = viewModelScope.launch(Dispatchers.IO) {
-        val resolvedShop = resolveShopCoords(getApplication(), shop)
-        repository.insertShop(resolvedShop)
-        refreshNextShopNumber()
+        try {
+            val resolvedShop = resolveShopCoords(getApplication(), shop)
+            repository.insertShop(resolvedShop)
+            refreshNextShopNumber()
+        } catch (e: Exception) {
+            triggerError(
+                module = "Shop Master",
+                operation = "Add Shop",
+                exception = e,
+                possibleReason = "The Shop Number '${shop.shopNumber}' might already exist, or some database fields are invalid."
+            )
+        }
     }
 
     fun updateShop(oldShopNumber: String, shop: ShopMaster) = viewModelScope.launch(Dispatchers.IO) {
-        val resolvedShop = resolveShopCoords(getApplication(), shop)
         try {
-            val oldShop = repository.getShopByNumber(oldShopNumber)
-            if (oldShop != null && !oldShop.storeImage.isNullOrEmpty() && oldShop.storeImage != resolvedShop.storeImage) {
-                val oldFile = File(oldShop.storeImage)
-                if (oldFile.exists()) {
-                    oldFile.delete()
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        repository.updateShop(oldShopNumber, resolvedShop)
-        refreshNextShopNumber()
-        // Run background image cleanup
-        com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
-    }
-
-    fun deleteShop(shop: ShopMaster) = viewModelScope.launch {
-        repository.deleteShop(shop)
-        if (!shop.storeImage.isNullOrEmpty()) {
+            val resolvedShop = resolveShopCoords(getApplication(), shop)
             try {
-                val file = File(shop.storeImage)
-                if (file.exists()) {
-                    file.delete()
+                val oldShop = repository.getShopByNumber(oldShopNumber)
+                if (oldShop != null && !oldShop.storeImage.isNullOrEmpty() && oldShop.storeImage != resolvedShop.storeImage) {
+                    val oldFile = File(oldShop.storeImage)
+                    if (oldFile.exists()) {
+                        oldFile.delete()
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+            repository.updateShop(oldShopNumber, resolvedShop)
+            refreshNextShopNumber()
+            // Run background image cleanup
+            com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
+        } catch (e: Exception) {
+            triggerError(
+                module = "Shop Master",
+                operation = "Update Shop",
+                exception = e,
+                possibleReason = "An unexpected error occurred while updating the Shop Master."
+            )
         }
-        refreshNextShopNumber()
-        // Run background image cleanup
-        com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
+    }
+
+    fun deleteShop(shop: ShopMaster) = viewModelScope.launch {
+        try {
+            repository.deleteShop(shop)
+            if (!shop.storeImage.isNullOrEmpty()) {
+                try {
+                    val file = File(shop.storeImage)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            refreshNextShopNumber()
+            // Run background image cleanup
+            com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
+        } catch (e: Exception) {
+            triggerError(
+                module = "Shop Master",
+                operation = "Delete Shop",
+                exception = e,
+                possibleReason = "Unable to delete this shop. There may be associated Sales Master entries."
+            )
+        }
     }
 
     fun deleteAllShops() = viewModelScope.launch {
         try {
-            val filesDir = getApplication<Application>().filesDir
-            val imageFiles = filesDir.listFiles { file ->
-                file.name.startsWith("shop_img_")
+            try {
+                val filesDir = getApplication<Application>().filesDir
+                val imageFiles = filesDir.listFiles { file ->
+                    file.name.startsWith("shop_img_")
+                }
+                imageFiles?.forEach { it.delete() }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            imageFiles?.forEach { it.delete() }
+            repository.deleteAllShops()
+            refreshNextShopNumber()
         } catch (e: Exception) {
-            e.printStackTrace()
+            triggerError(
+                module = "Shop Master",
+                operation = "Delete All Shops",
+                exception = e,
+                possibleReason = "Unable to delete all shops. Active Sales Master records may block this action."
+            )
         }
-        repository.deleteAllShops()
-        refreshNextShopNumber()
     }
 
     // --- Excel Import State and Function ---
@@ -1371,11 +1572,41 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     // Clean up any old/orphaned shop images after importing
                     com.example.utils.BackupHelper.cleanupUnusedImages(context)
                     _importSummary.value = summary.copy(invalidCoordinatesCount = invalidCoordsCount)
+
+                    // Log resolved shops with missing coordinates
+                    resolvedShops.forEach { shop ->
+                        if (shop.latitude == null || shop.longitude == null) {
+                            triggerError(
+                                module = "Coordinate Resolution",
+                                operation = "Import Coordinate Parsing",
+                                errorMessage = "Shop ${shop.shopNumber} (${shop.storeName}): Coordinates could not be resolved from link: ${shop.googleMapLink ?: "None"}",
+                                stackTrace = "Coordinate status: ${shop.coordinateStatus}. Reason: ${shop.coordinateError ?: "No coordinate status"}",
+                                possibleReason = "Action: Coordinates could not be resolved. Please verify the Google Maps Link manually in the Shop Master."
+                            )
+                        }
+                    }
                 } else {
                     _importSummary.value = summary
                 }
+
+                if (summary.skippedRows > 0) {
+                    val msg = "Imported shops with ${summary.skippedRows} skipped/failed rows (Duplicates: ${summary.duplicateRecordsCount}, Invalid Locations: ${summary.invalidLocationNumbersCount}, Validation Failures: ${summary.failedRowsCount})"
+                    triggerError(
+                        module = "Shop Excel Import",
+                        operation = "importShopsFromExcel",
+                        errorMessage = msg,
+                        stackTrace = "Skipped rows occurred during Excel parsing.",
+                        possibleReason = "Ensure Location Numbers exist in Location Master, and there are no duplicate Shop Numbers."
+                    )
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
+                triggerError(
+                    module = "Shop Excel Import",
+                    operation = "importShopsFromExcel",
+                    exception = e,
+                    possibleReason = "The Excel file might be corrupt, have incorrect headers, or contain invalid values."
+                )
             } finally {
                 _isImporting.value = false
             }
@@ -1395,8 +1626,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     repository.insertLocations(summary.parsedLocations)
                 }
                 _importSummary.value = summary
+
+                if (summary.skippedRows > 0) {
+                    triggerError(
+                        module = "Location Excel Import",
+                        operation = "importLocationsFromExcel",
+                        errorMessage = "Imported locations with ${summary.skippedRows} skipped rows (Duplicates: ${summary.duplicateRecordsCount}, Failures: ${summary.failedRowsCount})",
+                        stackTrace = "Skipped rows during parsing.",
+                        possibleReason = "Ensure that Location Numbers are unique."
+                    )
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
+                triggerError(
+                    module = "Location Excel Import",
+                    operation = "importLocationsFromExcel",
+                    exception = e,
+                    possibleReason = "The Excel file might be corrupt, have incorrect columns, or contain invalid values."
+                )
             } finally {
                 _isImporting.value = false
             }
@@ -1419,8 +1666,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     repository.insertSalesList(summary.parsedSales)
                 }
                 _importSummary.value = summary
+
+                if (summary.skippedRows > 0) {
+                    triggerError(
+                        module = "Sales Excel Import",
+                        operation = "importSalesFromExcel",
+                        errorMessage = "Imported sales with ${summary.skippedRows} skipped rows (Invalid Shops: ${summary.invalidShopNumbersCount}, Invalid Products: ${summary.invalidProductsCount}, Invalid Dates: ${summary.invalidDatesCount}, Failures: ${summary.failedRowsCount})",
+                        stackTrace = "Skipped rows during parsing.",
+                        possibleReason = "Ensure all referenced Shop Numbers and Product Names exist and dates are in correct format."
+                    )
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
+                triggerError(
+                    module = "Sales Excel Import",
+                    operation = "importSalesFromExcel",
+                    exception = e,
+                    possibleReason = "The Excel file might be corrupt, or missing expected headers like Shop Number, Product, and Date."
+                )
             } finally {
                 _isImporting.value = false
             }
@@ -1489,15 +1752,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 
-                _importSummary.value = summary.copy(
+                val finalSummary = summary.copy(
                     type = com.example.utils.Exporter.ImportType.PRODUCTS,
                     successfullyImported = successCount,
                     updatedRecordsCount = updateCount,
                     duplicateRecordsCount = duplicateCount,
                     skippedRows = summary.failedRowsCount + duplicateCount
                 )
+                _importSummary.value = finalSummary
+
+                if (finalSummary.skippedRows > 0) {
+                    triggerError(
+                        module = "Product Excel Import",
+                        operation = "importProductsFromExcel",
+                        errorMessage = "Imported products with ${finalSummary.skippedRows} skipped rows (Duplicates: $duplicateCount, Failures: ${summary.failedRowsCount})",
+                        stackTrace = "Skipped rows during parsing.",
+                        possibleReason = "Ensure column types are numeric for pricing values."
+                    )
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
+                triggerError(
+                    module = "Product Excel Import",
+                    operation = "importProductsFromExcel",
+                    exception = e,
+                    possibleReason = "The Excel file might be corrupt, or missing expected columns like Product Name, Category, Price, Profit."
+                )
             } finally {
                 _isImporting.value = false
             }
@@ -1513,55 +1793,161 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun addProduct(product: ProductMaster): Long {
-        return repository.insertProduct(product)
+        return try {
+            repository.insertProduct(product)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Add Product",
+                exception = e,
+                possibleReason = "A product with the name '${product.productName}' might already exist, or a database field is invalid."
+            )
+            -1L
+        }
     }
 
     suspend fun addProductWithPrices(product: ProductMaster, prices: List<ProductPrice>) {
-        repository.insertProductWithPrices(product, prices)
+        try {
+            repository.insertProductWithPrices(product, prices)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Add Product with Prices",
+                exception = e,
+                possibleReason = "A product with the name '${product.productName}' might already exist, or its price configuration violates a constraint."
+            )
+            throw e
+        }
     }
 
     fun updateProduct(product: ProductMaster) = viewModelScope.launch {
-        repository.updateProduct(product)
+        try {
+            repository.updateProduct(product)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Update Product",
+                exception = e,
+                possibleReason = "An unexpected error occurred while updating the product details."
+            )
+        }
     }
 
     fun deleteProduct(product: ProductMaster) = viewModelScope.launch {
-        repository.deleteProductWithPrices(product)
+        try {
+            repository.deleteProductWithPrices(product)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Delete Product",
+                exception = e,
+                possibleReason = "Unable to delete product '${product.productName}'. It might be referenced by active sales records."
+            )
+        }
     }
 
     fun deletePricesForProduct(productId: Int) = viewModelScope.launch {
-        repository.deletePricesForProduct(productId)
+        try {
+            repository.deletePricesForProduct(productId)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Delete Product Prices",
+                exception = e,
+                possibleReason = "An unexpected database error occurred while removing product pricing."
+            )
+        }
     }
 
     fun addPrice(price: ProductPrice) = viewModelScope.launch {
-        repository.insertPrice(price)
+        try {
+            repository.insertPrice(price)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Add Product Price",
+                exception = e,
+                possibleReason = "This product price configuration could not be added."
+            )
+        }
     }
 
     fun deleteAllProducts() = viewModelScope.launch {
-        repository.deleteAllProducts()
+        try {
+            repository.deleteAllProducts()
+        } catch (e: Exception) {
+            triggerError(
+                module = "Product Master",
+                operation = "Delete All Products",
+                exception = e,
+                possibleReason = "Unable to delete all products. Existing references in other modules may block this."
+            )
+        }
     }
 
     fun addSales(salesEntry: SalesEntry) = viewModelScope.launch {
-        repository.insertSales(salesEntry)
-        incrementSessionCombo()
+        try {
+            repository.insertSales(salesEntry)
+            incrementSessionCombo()
+        } catch (e: Exception) {
+            triggerError(
+                module = "Sales Master",
+                operation = "Add Sales Entry",
+                exception = e,
+                possibleReason = "A conflicting or duplicate sales entry may already exist."
+            )
+        }
     }
 
     fun updateSales(salesEntry: SalesEntry) = viewModelScope.launch {
-        repository.updateSales(salesEntry)
+        try {
+            repository.updateSales(salesEntry)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Sales Master",
+                operation = "Update Sales Entry",
+                exception = e,
+                possibleReason = "Unable to update sales details. Ensure all referenced fields are valid."
+            )
+        }
     }
 
     fun deleteSales(salesEntry: SalesEntry) = viewModelScope.launch {
-        repository.deleteSales(salesEntry)
+        try {
+            repository.deleteSales(salesEntry)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Sales Master",
+                operation = "Delete Sales Entry",
+                exception = e,
+                possibleReason = "An unexpected error occurred while deleting the sales record."
+            )
+        }
     }
     
     fun deleteAllSales() = viewModelScope.launch {
-        repository.deleteAllSales()
+        try {
+            repository.deleteAllSales()
+        } catch (e: Exception) {
+            triggerError(
+                module = "Sales Master",
+                operation = "Delete All Sales Entries",
+                exception = e,
+                possibleReason = "Unable to empty the sales log database."
+            )
+        }
     }
 
     // --- Persistent Shop Image Saving Utility ---
     fun saveImageToStorage(uri: Uri): String? {
         val context = getApplication<Application>()
         return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+            val contentResolver = context.contentResolver
+            val mimeType = contentResolver.getType(uri) ?: ""
+            if (mimeType.isNotEmpty() && !mimeType.contains("jpeg") && !mimeType.contains("jpg") && !mimeType.contains("png") && !mimeType.contains("webp")) {
+                throw IllegalArgumentException("Unsupported image format: '$mimeType'. Only JPG, PNG, and WEBP files are supported.")
+            }
+            val inputStream = contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("Could not open source image stream.")
             val file = File(context.filesDir, "shop_img_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { out ->
                 inputStream.copyTo(out)
@@ -1569,6 +1955,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             file.absolutePath
         } catch (e: Exception) {
             e.printStackTrace()
+            triggerError(
+                module = "Image Processing",
+                operation = "Save Shop Image",
+                exception = e,
+                possibleReason = "The image file might be corrupt, stored on an inaccessible partition, or in an invalid format."
+            )
             null
         }
     }
