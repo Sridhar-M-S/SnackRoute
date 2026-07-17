@@ -5,8 +5,6 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -744,7 +743,6 @@ fun SalesScreen(
                         var shopExpanded by remember { mutableStateOf(false) }
                         var shopSearchQuery by remember { mutableStateOf("") }
                         val activeShopName = currentShopObj?.storeName ?: "Select Store"
-                        val displayText = if (selectedShopNumber.isEmpty()) "Select Store" else "$activeShopName (${selectedShopNumber})"
 
                         val sortedShops = remember(shops) {
                             shops.sortedBy { it.storeName.lowercase() }
@@ -763,7 +761,7 @@ fun SalesScreen(
 
                         Box(modifier = Modifier.fillMaxWidth()) {
                             OutlinedTextField(
-                                value = displayText,
+                                value = if (selectedShopNumber.isEmpty()) "Select Store" else "$activeShopName (${selectedShopNumber})",
                                 onValueChange = {},
                                 label = { Text("Shop Master Store*") },
                                 readOnly = true,
@@ -796,74 +794,69 @@ fun SalesScreen(
                                     shopExpanded = false 
                                     shopSearchQuery = ""
                                 },
+                                properties = PopupProperties(focusable = true),
                                 modifier = Modifier
                                     .fillMaxWidth(0.9f)
                                     .heightIn(max = 400.dp)
                             ) {
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    OutlinedTextField(
-                                        value = shopSearchQuery,
-                                        onValueChange = { shopSearchQuery = it },
-                                        label = { Text("Search shop by name or number...") },
-                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                        trailingIcon = {
-                                            if (shopSearchQuery.isNotEmpty()) {
-                                                IconButton(onClick = { shopSearchQuery = "" }) {
-                                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
-                                                }
+                                // Search field inside dropdown
+                                OutlinedTextField(
+                                    value = shopSearchQuery,
+                                    onValueChange = { shopSearchQuery = it },
+                                    label = { Text("Search shop by name or number...") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    trailingIcon = {
+                                        if (shopSearchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { shopSearchQuery = "" }) {
+                                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
                                             }
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                                            .testTag("shop_dropdown_search_input"),
-                                        singleLine = true
-                                    )
-                                    
-                                    HorizontalDivider(modifier = Modifier.padding(bottom = 4.dp))
-                                    
-                                    val scrollState = rememberScrollState()
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f, fill = false)
-                                            .verticalScroll(scrollState)
-                                    ) {
-                                        if (filteredShops.isEmpty()) {
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                        .testTag("shop_dropdown_search_input"),
+                                    singleLine = true
+                                )
+                                
+                                HorizontalDivider(modifier = Modifier.padding(bottom = 4.dp))
+                                
+                                if (filteredShops.isEmpty()) {
+                                    DropdownMenuItem(
+                                        text = {
                                             Text(
                                                 text = "No shops found",
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(16.dp),
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
-                                        } else {
-                                            filteredShops.forEach { s ->
-                                                val isSelected = s.shopNumber == selectedShopNumber
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            text = "${s.storeName} (${s.shopNumber})",
-                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        selectedShopNumber = s.shopNumber
-                                                        shopExpanded = false
-                                                        shopError = null
-                                                        shopSearchQuery = ""
-                                                    },
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .background(
-                                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                                                            else Color.Transparent
-                                                        )
+                                        },
+                                        onClick = {},
+                                        enabled = false
+                                    )
+                                } else {
+                                    filteredShops.forEach { s ->
+                                        val isSelected = s.shopNumber == selectedShopNumber
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = "${s.storeName} (${s.shopNumber})",
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                                 )
-                                            }
-                                        }
+                                            },
+                                            onClick = {
+                                                selectedShopNumber = s.shopNumber
+                                                shopExpanded = false
+                                                shopError = null
+                                                shopSearchQuery = ""
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(
+                                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                    else Color.Transparent
+                                                )
+                                        )
                                     }
                                 }
                             }
