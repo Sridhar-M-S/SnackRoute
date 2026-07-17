@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -34,6 +35,23 @@ class MainActivity : ComponentActivity() {
                 var isAiChatOpen by remember { mutableStateOf(false) }
                 var isTimetableOpen by remember { mutableStateOf(false) }
                 var isDebugOpen by remember { mutableStateOf(false) }
+                var showExitConfirmationDialog by remember { mutableStateOf(false) }
+
+                BackHandler(enabled = true) {
+                    if (isAiChatOpen) {
+                        isAiChatOpen = false
+                    } else if (isTimetableOpen) {
+                        isTimetableOpen = false
+                    } else if (isDebugOpen) {
+                        isDebugOpen = false
+                    } else if (currentTab == "Levels") {
+                        currentTab = "Dashboard"
+                    } else if (currentTab != "Dashboard") {
+                        currentTab = "Dashboard"
+                    } else {
+                        showExitConfirmationDialog = true
+                    }
+                }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     Scaffold(
@@ -148,6 +166,56 @@ class MainActivity : ComponentActivity() {
                     }
 
                     GlobalErrorDisplay(viewModel = viewModel)
+
+                    if (showExitConfirmationDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showExitConfirmationDialog = false },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.ExitToApp,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            title = {
+                                Text(
+                                    text = "Close Application",
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = "Do you want to close this app?",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showExitConfirmationDialog = false
+                                        this@MainActivity.finish()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error
+                                    ),
+                                    modifier = Modifier.testTag("confirm_exit_button")
+                                ) {
+                                    Text("Yes")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { showExitConfirmationDialog = false },
+                                    modifier = Modifier.testTag("cancel_exit_button")
+                                ) {
+                                    Text("No")
+                                }
+                            },
+                            modifier = Modifier.testTag("exit_confirmation_dialog")
+                        )
+                    }
                 }
             }
         }
