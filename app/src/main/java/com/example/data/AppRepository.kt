@@ -30,6 +30,7 @@ class AppRepository(
     val unlockedBadges: Flow<List<UserBadge>> = badgeDao.getUnlockedBadges()
     suspend fun insertBadge(badge: Badge) = badgeDao.insertBadge(badge)
     suspend fun unlockBadge(badgeId: String) = badgeDao.unlockBadge(UserBadge(badgeId, System.currentTimeMillis()))
+    suspend fun revokeBadge(badgeId: String) = badgeDao.revokeBadge(badgeId)
 
     // --- Weekly Timetable Queries ---
     val allTimetableEntries: Flow<List<TimetableEntry>> = timetableDao.getAllTimetableEntries()

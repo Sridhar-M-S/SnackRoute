@@ -178,6 +178,9 @@ interface BadgeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun unlockBadge(userBadge: UserBadge)
+
+    @Query("DELETE FROM user_badges WHERE badgeId = :badgeId")
+    suspend fun revokeBadge(badgeId: String)
 }
 
 @Dao

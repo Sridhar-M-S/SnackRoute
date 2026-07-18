@@ -314,9 +314,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             BossChallenge("expansion_emperor", "Overthrow the Expansion Emperor", "Boss Challenge (Level 3)", "Build a franchise of 20 active shops.", totalShopsAdded, 20, 800, 400, totalShopsAdded >= 20, "Expansion Emperor"),
             BossChallenge("route_sovereign", "Dethrone the Route Sovereign", "Boss Challenge (Level 4)", "Sell in 5 different route locations in a single day.", maxLocationsInSingleDay, 5, 1200, 600, maxLocationsInSingleDay >= 5, "Route Sovereign")
         )
-    }
-
-    fun calculateGamificationState(
+    }    fun calculateGamificationState(
         sales: List<SalesEntry>,
         shops: List<ShopMaster>,
         locationsList: List<LocationMaster>,
@@ -326,13 +324,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         rewardedIds: Set<String>,
         combo: Int
     ): GamificationState {
+        val comboRes = calculateComboResult(sales)
+        val activeCombo = comboRes.currentCombo
+        val comboXp = comboRes.totalComboXp
+        val comboCoins = comboRes.totalComboCoins
+        
+        val (missionsXp, missionsCoins) = calculateCompletedMissionsXpAndCoins(sales, shops)
+        val (bossXp, bossCoins) = calculateCompletedBossXpAndCoins(sales, shops)
+        
         val baseShopXp = shops.size * 50
         val baseSalesXp = sales.size * 10
         val basePacketsXp = sales.sumOf { it.packetsSold } * 1
         val baseLocationXp = sales.map { it.locationNumber }.distinct().size * 30
         val baseBadgeXp = badges.size * 100
         
-        val totalXp = baseShopXp + baseSalesXp + basePacketsXp + baseLocationXp + baseBadgeXp + bonusXp
+        val totalXp = baseShopXp + baseSalesXp + basePacketsXp + baseLocationXp + baseBadgeXp + comboXp + missionsXp + bossXp
         
         val level = getLevelForXp(totalXp)
         val currentLevelXpStart = getXpThresholdForLevel(level)
@@ -347,7 +353,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val baseSalesCoins = sales.size * 10
         val baseBadgeCoins = badges.size * 100
         
-        val totalCoins = baseProfitCoins + baseShopCoins + baseSalesCoins + baseBadgeCoins + bonusCoins
+        val totalCoins = baseProfitCoins + baseShopCoins + baseSalesCoins + baseBadgeCoins + comboCoins + missionsCoins + bossCoins
         val rank = getRankForXp(totalXp)
         val streak = calculateStreak(sales)
         val title = getTitleForLevel(level)
@@ -402,7 +408,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             totalShopsCount = shops.size,
             totalLocationsCount = locationsList.size,
             unlockedBadgesCount = badges.size,
-            sessionCombo = combo,
+            sessionCombo = activeCombo,
             dailyMissions = daily,
             weeklyMissions = weekly,
             monthlyMissions = monthly,
@@ -1313,27 +1319,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Reactive tracking of database changes for awarding live event feed popups
-        var previousShopsCount = -1
-        var previousSalesCount = -1
-        var previousPacketsCount = -1
-
+        // Reactive tracking of completed missions & boss challenges
+        var completedMissionIds = setOf<String>()
+        var completedBossIds = setOf<String>()
+        
         viewModelScope.launch {
-            combine(repository.allShops, repository.allSales) { sh, sa -> Pair(sh, sa) }
-                .collect { (shops, sales) ->
-                    if (previousShopsCount == -1) {
-                        previousShopsCount = shops.size
-                        previousSalesCount = sales.size
-                        previousPacketsCount = sales.sumOf { it.packetsSold }
-                    } else {
-                        previousShopsCount = shops.size
-                        previousSalesCount = sales.size
-                        previousPacketsCount = sales.sumOf { it.packetsSold }
+            gamificationState.collect { state ->
+                val allMissions = state.dailyMissions + state.weeklyMissions + state.monthlyMissions
+                val currentCompletedMissions = allMissions.filter { it.isCompleted }.map { it.id }.toSet()
+                val currentCompletedBosses = state.bossChallenges.filter { it.isCompleted }.map { it.id }.toSet()
+                
+                if (completedMissionIds.isEmpty() && currentCompletedMissions.isNotEmpty()) {
+                    completedMissionIds = currentCompletedMissions
+                } else {
+                    for (mId in currentCompletedMissions) {
+                        if (mId !in completedMissionIds) {
+                            val m = allMissions.find { it.id == mId }
+                            if (m != null) {
+                                _gamificationEvents.emit(GamificationEvent.MissionComplete(m.title))
+                                _gamificationEvents.emit(GamificationEvent.XpGain(m.xpReward, "Mission: ${m.title}"))
+                                _gamificationEvents.emit(GamificationEvent.CoinGain(m.coinReward, "Mission: ${m.title}"))
+                            }
+                        }
                     }
-                    
-                    val badges = repository.unlockedBadges.first()
-                    checkAndRewardMissions(sales, shops, badges)
+                    completedMissionIds = currentCompletedMissions
                 }
+                
+                if (completedBossIds.isEmpty() && currentCompletedBosses.isNotEmpty()) {
+                    completedBossIds = currentCompletedBosses
+                } else {
+                    for (bId in currentCompletedBosses) {
+                        if (bId !in completedBossIds) {
+                            val b = state.bossChallenges.find { it.id == bId }
+                            if (b != null) {
+                                _gamificationEvents.emit(GamificationEvent.BossDefeated(b.bossName))
+                                _gamificationEvents.emit(GamificationEvent.XpGain(b.xpReward, "Boss Defeated: ${b.title}"))
+                                _gamificationEvents.emit(GamificationEvent.CoinGain(b.coinReward, "Boss Defeated: ${b.title}"))
+                            }
+                        }
+                    }
+                    completedBossIds = currentCompletedBosses
+                }
+            }
         }
     }
 
@@ -1344,41 +1371,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val totalRevenue = sales.sumOf { it.totalAmount }
         val streak = calculateStreak(sales)
         
-        if ("first_sale" !in currentlyUnlocked && sales.isNotEmpty()) {
-            repository.unlockBadge("first_sale")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("First Sale"))
-        }
-        if ("100_shops" !in currentlyUnlocked && shops.size >= 100) {
-            repository.unlockBadge("100_shops")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("100 Shops Added"))
-        }
-        if ("1000_packets" !in currentlyUnlocked && totalPackets >= 1000) {
-            repository.unlockBadge("1000_packets")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("1,000 Packets Sold"))
-        }
-        if ("10000_profit" !in currentlyUnlocked && totalProfit >= 10000) {
-            repository.unlockBadge("10000_profit")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("₹10,000 Profit"))
-        }
-        if ("1000_sales" !in currentlyUnlocked && sales.size >= 1000) {
-            repository.unlockBadge("1000_sales")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("1,000 Sales"))
-        }
-        if ("10000_packets" !in currentlyUnlocked && totalPackets >= 10000) {
-            repository.unlockBadge("10000_packets")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("10,000 Packets Sold"))
-        }
-        if ("100000_sales" !in currentlyUnlocked && totalRevenue >= 100000.0) {
-            repository.unlockBadge("100000_sales")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("₹1,00,000 Revenue"))
-        }
-        if ("50000_profit" !in currentlyUnlocked && totalProfit >= 50000.0) {
-            repository.unlockBadge("50000_profit")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("₹50,000 Profit"))
-        }
-        if ("100_day_streak" !in currentlyUnlocked && streak >= 100) {
-            repository.unlockBadge("100_day_streak")
-            _gamificationEvents.emit(GamificationEvent.AchievementUnlocked("Century Streak"))
+        val shouldUnlock = mutableMapOf<String, Boolean>()
+        shouldUnlock["first_sale"] = sales.isNotEmpty()
+        shouldUnlock["100_shops"] = shops.size >= 100
+        shouldUnlock["1000_packets"] = totalPackets >= 1000
+        shouldUnlock["10000_profit"] = totalProfit >= 10000
+        shouldUnlock["1000_sales"] = sales.size >= 1000
+        shouldUnlock["10000_packets"] = totalPackets >= 10000
+        shouldUnlock["100000_sales"] = totalRevenue >= 100000.0
+        shouldUnlock["50000_profit"] = totalProfit >= 50000.0
+        shouldUnlock["100_day_streak"] = streak >= 100
+
+        val badgeNames = mapOf(
+            "first_sale" to "First Sale",
+            "100_shops" to "100 Shops Added",
+            "1000_packets" to "1,000 Packets Sold",
+            "10000_profit" to "₹10,000 Profit",
+            "1000_sales" to "1,000 Sales",
+            "10000_packets" to "10,000 Packets Sold",
+            "100000_sales" to "₹1,00,000 Revenue",
+            "50000_profit" to "₹50,000 Profit",
+            "100_day_streak" to "Century Streak"
+        )
+
+        for ((badgeId, satisfied) in shouldUnlock) {
+            if (satisfied && badgeId !in currentlyUnlocked) {
+                repository.unlockBadge(badgeId)
+                _gamificationEvents.emit(GamificationEvent.AchievementUnlocked(badgeNames[badgeId] ?: badgeId))
+            } else if (!satisfied && badgeId in currentlyUnlocked) {
+                repository.revokeBadge(badgeId)
+            }
         }
     }
 
@@ -1575,8 +1597,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteAllShops() = viewModelScope.launch {
+    fun deleteAllShops() = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore)
+
             try {
                 val filesDir = getApplication<Application>().filesDir
                 val imageFiles = filesDir.listFiles { file ->
@@ -1588,6 +1615,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             repository.deleteAllShops()
             refreshNextShopNumber()
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter)
+
+            val diff = xpAfter - xpBefore
+            if (diff < 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "All Shops Deleted"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Shop Master",
@@ -2136,9 +2173,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun deleteAllSales() = viewModelScope.launch {
+    fun deleteAllSales() = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore)
+
             repository.deleteAllSales()
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter)
+
+            val diff = xpAfter - xpBefore
+            if (diff < 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "All Sales Deleted"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Sales Master",
@@ -2149,18 +2201,180 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    data class ComboResult(
+        val currentCombo: Int,
+        val totalComboXp: Int,
+        val totalComboCoins: Int
+    )
+
+    fun calculateComboResult(sales: List<SalesEntry>): ComboResult {
+        if (sales.isEmpty()) return ComboResult(0, 0, 0)
+        val sortedSales = sales.sortedBy { it.entryDate }
+        var currentCombo = 1
+        var lastTime = sortedSales[0].entryDate
+        var totalComboXp = 0
+        var totalComboCoins = 0
+        for (i in 1 until sortedSales.size) {
+            val currentTime = sortedSales[i].entryDate
+            if (currentTime - lastTime < 10 * 60 * 1000L) { // 10 minutes
+                currentCombo += 1
+                val xpBonus = when {
+                    currentCombo >= 10 -> 100
+                    currentCombo >= 5 -> 50
+                    currentCombo >= 3 -> 20
+                    else -> 10
+                }
+                val coinBonus = when {
+                    currentCombo >= 10 -> 50
+                    currentCombo >= 5 -> 25
+                    currentCombo >= 3 -> 10
+                    else -> 5
+                }
+                totalComboXp += xpBonus
+                totalComboCoins += coinBonus
+            } else {
+                currentCombo = 1
+            }
+            lastTime = currentTime
+        }
+        val activeCombo = if (System.currentTimeMillis() - lastTime < 10 * 60 * 1000L) {
+            currentCombo
+        } else {
+            0
+        }
+        return ComboResult(activeCombo, totalComboXp, totalComboCoins)
+    }
+
+    fun calculateCompletedMissionsXpAndCoins(
+        sales: List<SalesEntry>,
+        shops: List<ShopMaster>
+    ): Pair<Int, Int> {
+        var totalXp = 0
+        var totalCoins = 0
+        
+        val dayIds = (sales.map { sdfDay.format(Date(it.entryDate)) } + 
+                      shops.map { sdfDay.format(Date(it.startingDate)) }).distinct()
+        for (dayId in dayIds) {
+            val salesToday = sales.filter { sdfDay.format(Date(it.entryDate)) == dayId }
+            val shopsCreatedToday = shops.filter { sdfDay.format(Date(it.startingDate)) == dayId }
+            
+            if (salesToday.map { it.shopNumber }.distinct().size >= 3) {
+                totalXp += 50
+                totalCoins += 20
+            }
+            if (salesToday.sumOf { it.packetsSold } >= 50) {
+                totalXp += 50
+                totalCoins += 30
+            }
+            if (salesToday.sumOf { it.totalProfit } >= 500.0) {
+                totalXp += 60
+                totalCoins += 40
+            }
+            if (shopsCreatedToday.size >= 1) {
+                totalXp += 80
+                totalCoins += 50
+            }
+        }
+        
+        val weekIds = sales.map { sdfWeek.format(Date(it.entryDate)) }.distinct()
+        for (weekId in weekIds) {
+            val salesThisWeek = sales.filter { sdfWeek.format(Date(it.entryDate)) == weekId }
+            
+            if (salesThisWeek.map { it.shopNumber }.distinct().size >= 15) {
+                totalXp += 200
+                totalCoins += 100
+            }
+            if (salesThisWeek.sumOf { it.packetsSold } >= 300) {
+                totalXp += 250
+                totalCoins += 150
+            }
+            if (salesThisWeek.sumOf { it.totalAmount } >= 5000.0) {
+                totalXp += 300
+                totalCoins += 200
+            }
+        }
+        
+        val monthIds = (sales.map { sdfMonth.format(Date(it.entryDate)) } + 
+                        shops.map { sdfMonth.format(Date(it.startingDate)) }).distinct()
+        for (monthId in monthIds) {
+            val salesThisMonth = sales.filter { sdfMonth.format(Date(it.entryDate)) == monthId }
+            val shopsCreatedThisMonth = shops.filter { sdfMonth.format(Date(it.startingDate)) == monthId }
+            
+            if (salesThisMonth.sumOf { it.packetsSold } >= 1200) {
+                totalXp += 1000
+                totalCoins += 500
+            }
+            if (salesThisMonth.sumOf { it.totalAmount } >= 20000.0) {
+                totalXp += 1200
+                totalCoins += 600
+            }
+            if (shopsCreatedThisMonth.size >= 5) {
+                totalXp += 800
+                totalCoins += 400
+            }
+        }
+        
+        return Pair(totalXp, totalCoins)
+    }
+
+    fun calculateCompletedBossXpAndCoins(
+        sales: List<SalesEntry>,
+        shops: List<ShopMaster>
+    ): Pair<Int, Int> {
+        var totalXp = 0
+        var totalCoins = 0
+        
+        val maxPacketsInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+            .map { it.value.sumOf { s -> s.packetsSold } }
+            .maxOrNull() ?: 0
+            
+        val maxProfitInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+            .map { it.value.sumOf { s -> s.totalProfit } }
+            .maxOrNull() ?: 0.0
+            
+        val totalShopsAdded = shops.size
+        
+        val maxLocationsInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+            .map { it.value.map { s -> s.locationNumber }.distinct().size }
+            .maxOrNull() ?: 0
+            
+        if (maxPacketsInSingleDay >= 500) {
+            totalXp += 500
+            totalCoins += 200
+        }
+        if (maxProfitInSingleDay >= 10000.0) {
+            totalXp += 10000
+            totalCoins += 500
+        }
+        if (totalShopsAdded >= 20) {
+            totalXp += 800
+            totalCoins += 400
+        }
+        if (maxLocationsInSingleDay >= 5) {
+            totalXp += 1200
+            totalCoins += 600
+        }
+        
+        return Pair(totalXp, totalCoins)
+    }
+
     private fun calculateTotalXpSnapshot(
         sales: List<SalesEntry>,
         shops: List<ShopMaster>,
         badges: List<UserBadge>,
-        bXp: Int
+        bXp: Int = 0
     ): Int {
         val baseShopXp = shops.size * 50
         val baseSalesXp = sales.size * 10
         val basePacketsXp = sales.sumOf { it.packetsSold } * 1
         val baseLocationXp = sales.map { it.locationNumber }.distinct().size * 30
         val baseBadgeXp = badges.size * 100
-        return baseShopXp + baseSalesXp + basePacketsXp + baseLocationXp + baseBadgeXp + bXp
+        
+        val comboXp = calculateComboResult(sales).totalComboXp
+        val missionsXp = calculateCompletedMissionsXpAndCoins(sales, shops).first
+        val bossXp = calculateCompletedBossXpAndCoins(sales, shops).first
+        
+        return baseShopXp + baseSalesXp + basePacketsXp + baseLocationXp + baseBadgeXp + comboXp + missionsXp + bossXp
     }
 
     private fun salesListEquals(list1: List<SalesEntry>, list2: List<SalesEntry>): Boolean {
