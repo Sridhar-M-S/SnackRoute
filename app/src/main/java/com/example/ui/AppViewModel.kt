@@ -1327,13 +1327,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         previousPacketsCount = sales.sumOf { it.packetsSold }
                     } else {
                         val shopDiff = shops.size - previousShopsCount
-                        if (shopDiff > 0) {
+                        if (shopDiff > 0 && !_isImporting.value) {
                             _gamificationEvents.emit(GamificationEvent.XpGain(shopDiff * 50, "Shop Registered"))
                             _gamificationEvents.emit(GamificationEvent.CoinGain(shopDiff * 20, "Shop Registered"))
                         }
                         
                         val saleDiff = sales.size - previousSalesCount
-                        if (saleDiff > 0) {
+                        if (saleDiff > 0 && !_isImporting.value) {
                             val packetDiff = sales.sumOf { it.packetsSold } - previousPacketsCount
                             _gamificationEvents.emit(GamificationEvent.XpGain(saleDiff * 10 + packetDiff * 1, "Sales Completed"))
                             _gamificationEvents.emit(GamificationEvent.CoinGain(saleDiff * 10, "Sales Completed"))
@@ -1588,6 +1588,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     com.example.utils.BackupHelper.cleanupUnusedImages(context)
                     _importSummary.value = summary.copy(invalidCoordinatesCount = invalidCoordsCount)
 
+                    val successCount = resolvedShops.size
+                    val xpEarned = successCount * 50
+                    _gamificationEvents.emit(GamificationEvent.XpGain(xpEarned, "Imported $successCount Shops"))
+                    _gamificationEvents.emit(GamificationEvent.CoinGain(successCount * 20, "Imported $successCount Shops"))
+
                     // Log resolved shops with missing coordinates
                     resolvedShops.forEach { shop ->
                         if (shop.latitude == null || shop.longitude == null) {
@@ -1639,6 +1644,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (summary.parsedLocations.isNotEmpty()) {
                     repository.insertLocations(summary.parsedLocations)
+                    
+                    val successCount = summary.parsedLocations.size
+                    val xpEarned = successCount * 10
+                    val newXp = _bonusXp.value + xpEarned
+                    prefs.edit().putInt("bonus_xp", newXp).apply()
+                    _bonusXp.value = newXp
+                    _gamificationEvents.emit(GamificationEvent.XpGain(xpEarned, "Imported $successCount Locations"))
                 }
                 _importSummary.value = summary
 
@@ -1679,6 +1691,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (summary.parsedSales.isNotEmpty()) {
                     repository.insertSalesList(summary.parsedSales)
+                    
+                    val successCount = summary.parsedSales.size
+                    val packetCount = summary.parsedSales.sumOf { it.packetsSold }
+                    val xpEarned = successCount * 10 + packetCount * 1
+                    _gamificationEvents.emit(GamificationEvent.XpGain(xpEarned, "Imported $successCount Sales Records"))
+                    _gamificationEvents.emit(GamificationEvent.CoinGain(successCount * 10, "Imported $successCount Sales Records"))
                 }
                 _importSummary.value = summary
 
@@ -1775,6 +1793,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     skippedRows = summary.failedRowsCount + duplicateCount
                 )
                 _importSummary.value = finalSummary
+
+                if (successCount > 0) {
+                    val xpEarned = successCount * 5
+                    val newXp = _bonusXp.value + xpEarned
+                    prefs.edit().putInt("bonus_xp", newXp).apply()
+                    _bonusXp.value = newXp
+                    _gamificationEvents.emit(GamificationEvent.XpGain(xpEarned, "Imported $successCount Products"))
+                }
 
                 if (finalSummary.skippedRows > 0) {
                     triggerError(

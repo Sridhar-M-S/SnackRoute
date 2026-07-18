@@ -74,7 +74,11 @@ fun DashboardScreen(
 
     LaunchedEffect(Unit) {
         viewModel.gamificationEvents.collect { event ->
-            activeCelebration = event
+            if (event !is GamificationEvent.XpGain && 
+                event !is GamificationEvent.CoinGain && 
+                event !is GamificationEvent.ComboUpdate) {
+                activeCelebration = event
+            }
         }
     }
 

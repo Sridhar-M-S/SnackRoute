@@ -20,7 +20,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
+import androidx.compose.animation.*
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.*
 import com.example.ui.AppViewModel
+import com.example.ui.GamificationEvent
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 
@@ -34,6 +41,30 @@ class MainActivity : ComponentActivity() {
 
             MyApplicationTheme(darkTheme = isDarkMode) {
                 val viewModel: AppViewModel = viewModel()
+
+                var xpToastState by remember { mutableStateOf<Pair<Int, String>?>(null) }
+
+                LaunchedEffect(viewModel) {
+                    viewModel.gamificationEvents.collect { event ->
+                        if (event is GamificationEvent.XpGain) {
+                            val mappedReason = when {
+                                event.reason == "Shop Registered" -> "Added a new Shop"
+                                event.reason == "Sales Completed" -> "Logged a Sales Entry"
+                                event.reason.startsWith("Imported ") -> event.reason
+                                event.reason.startsWith("Mission: ") -> "Completed Today's Target"
+                                else -> event.reason
+                            }
+                            xpToastState = Pair(event.amount, mappedReason)
+                        }
+                    }
+                }
+
+                LaunchedEffect(xpToastState) {
+                    if (xpToastState != null) {
+                        kotlinx.coroutines.delay(2000)
+                        xpToastState = null
+                    }
+                }
                 var currentTab by remember { mutableStateOf("Dashboard") }
                 var isAiChatOpen by remember { mutableStateOf(false) }
                 var isTimetableOpen by remember { mutableStateOf(false) }
@@ -283,6 +314,60 @@ class MainActivity : ComponentActivity() {
                             },
                             modifier = Modifier.testTag("exit_confirmation_dialog")
                         )
+                    }
+
+                    AnimatedVisibility(
+                        visible = xpToastState != null,
+                        enter = fadeIn(animationSpec = spring()) + slideInVertically(initialOffsetY = { it / 2 }),
+                        exit = fadeOut(animationSpec = spring()) + slideOutVertically(targetOffsetY = { it / 2 }),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 100.dp, start = 16.dp, end = 16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            if (xpToastState != null) {
+                                val (amount, reason) = xpToastState!!
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(24.dp),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                                    modifier = Modifier.testTag("xp_toast")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "✨",
+                                            fontSize = 18.sp
+                                        )
+                                        Text(
+                                            text = "+$amount XP",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "—",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                                        )
+                                        Text(
+                                            text = reason,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
