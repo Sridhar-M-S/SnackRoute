@@ -372,12 +372,13 @@ fun ProductsScreen(
                             label = { Text("Category*") },
                             readOnly = true,
                             trailingIcon = {
-                                IconButton(onClick = { catExpanded = true }) {
-                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                }
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                             },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .matchParentSize()
                                 .clickable { catExpanded = true }
                         )
                         DropdownMenu(

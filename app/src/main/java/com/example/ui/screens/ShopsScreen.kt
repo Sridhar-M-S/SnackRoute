@@ -1185,12 +1185,13 @@ fun ShopsScreen(
                                 label = { Text("Route Location Master*") },
                                 readOnly = true,
                                 trailingIcon = {
-                                    IconButton(onClick = { locationExpanded = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                    }
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                                 },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
+                                    .matchParentSize()
                                     .clickable { locationExpanded = true }
                             )
                             DropdownMenu(
@@ -1249,30 +1250,35 @@ fun ShopsScreen(
                     item {
                         // Date picker starting date
                         val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
-                        OutlinedTextField(
-                            value = dateFormat.format(Date(startingDateMillis)),
-                            onValueChange = {},
-                            label = { Text("Starting Date*") },
-                            readOnly = true,
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    val calendar = Calendar.getInstance().apply { timeInMillis = startingDateMillis }
-                                    DatePickerDialog(
-                                        context,
-                                        { _, y, m, d ->
-                                            calendar.set(y, m, d)
-                                            startingDateMillis = calendar.timeInMillis
-                                        },
-                                        calendar.get(Calendar.YEAR),
-                                        calendar.get(Calendar.MONTH),
-                                        calendar.get(Calendar.DAY_OF_MONTH)
-                                    ).show()
-                                }) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = dateFormat.format(Date(startingDateMillis)),
+                                onValueChange = {},
+                                label = { Text("Starting Date*") },
+                                readOnly = true,
+                                trailingIcon = {
                                     Icon(Icons.Default.CalendarToday, contentDescription = "Select Date")
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable {
+                                        val calendar = Calendar.getInstance().apply { timeInMillis = startingDateMillis }
+                                        DatePickerDialog(
+                                            context,
+                                            { _, y, m, d ->
+                                                calendar.set(y, m, d)
+                                                startingDateMillis = calendar.timeInMillis
+                                            },
+                                            calendar.get(Calendar.YEAR),
+                                            calendar.get(Calendar.MONTH),
+                                            calendar.get(Calendar.DAY_OF_MONTH)
+                                        ).show()
+                                    }
+                            )
+                        }
                     }
 
                     item {
