@@ -48,8 +48,8 @@ class MainActivity : ComponentActivity() {
                     viewModel.gamificationEvents.collect { event ->
                         if (event is GamificationEvent.XpGain) {
                             val mappedReason = when {
-                                event.reason == "Shop Registered" -> "Added a new Shop"
-                                event.reason == "Sales Completed" -> "Logged a Sales Entry"
+                                event.reason == "Shop Registered" -> "New Shop Added"
+                                event.reason == "Sales Completed" -> "New Sales Record Added"
                                 event.reason.startsWith("Imported ") -> event.reason
                                 event.reason.startsWith("Mission: ") -> "Completed Today's Target"
                                 else -> event.reason
@@ -318,15 +318,15 @@ class MainActivity : ComponentActivity() {
 
                     AnimatedVisibility(
                         visible = xpToastState != null,
-                        enter = fadeIn(animationSpec = spring()) + slideInVertically(initialOffsetY = { it / 2 }),
-                        exit = fadeOut(animationSpec = spring()) + slideOutVertically(targetOffsetY = { it / 2 }),
+                        enter = fadeIn(animationSpec = spring()) + slideInVertically(initialOffsetY = { -it / 2 }),
+                        exit = fadeOut(animationSpec = spring()) + slideOutVertically(targetOffsetY = { -it / 2 }),
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(bottom = 100.dp, start = 16.dp, end = 16.dp)
+                            .padding(top = 90.dp, start = 16.dp, end = 16.dp)
                     ) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.BottomCenter
+                            contentAlignment = Alignment.TopCenter
                         ) {
                             if (xpToastState != null) {
                                 val (amount, reason) = xpToastState!!
@@ -344,15 +344,36 @@ class MainActivity : ComponentActivity() {
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        val isNegative = amount < 0
+                                        val isNoChanges = amount == 0 && reason == "No Changes Detected"
+
+                                        val emoji = when {
+                                            isNoChanges -> "ℹ️"
+                                            isNegative -> "📉"
+                                            else -> "✨"
+                                        }
+
+                                        val xpText = when {
+                                            isNoChanges -> "No XP Awarded"
+                                            isNegative -> "$amount XP"
+                                            else -> "+$amount XP"
+                                        }
+
+                                        val xpColor = when {
+                                            isNoChanges -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            isNegative -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.primary
+                                        }
+
                                         Text(
-                                            text = "✨",
+                                            text = emoji,
                                             fontSize = 18.sp
                                         )
                                         Text(
-                                            text = "+$amount XP",
+                                            text = xpText,
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = androidx.compose.ui.text.font.FontWeight.Black,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = xpColor
                                         )
                                         Text(
                                             text = "—",

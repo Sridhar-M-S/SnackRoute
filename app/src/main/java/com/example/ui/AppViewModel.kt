@@ -1326,19 +1326,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         previousSalesCount = sales.size
                         previousPacketsCount = sales.sumOf { it.packetsSold }
                     } else {
-                        val shopDiff = shops.size - previousShopsCount
-                        if (shopDiff > 0 && !_isImporting.value) {
-                            _gamificationEvents.emit(GamificationEvent.XpGain(shopDiff * 50, "Shop Registered"))
-                            _gamificationEvents.emit(GamificationEvent.CoinGain(shopDiff * 20, "Shop Registered"))
-                        }
-                        
-                        val saleDiff = sales.size - previousSalesCount
-                        if (saleDiff > 0 && !_isImporting.value) {
-                            val packetDiff = sales.sumOf { it.packetsSold } - previousPacketsCount
-                            _gamificationEvents.emit(GamificationEvent.XpGain(saleDiff * 10 + packetDiff * 1, "Sales Completed"))
-                            _gamificationEvents.emit(GamificationEvent.CoinGain(saleDiff * 10, "Sales Completed"))
-                        }
-                        
                         previousShopsCount = shops.size
                         previousSalesCount = sales.size
                         previousPacketsCount = sales.sumOf { it.packetsSold }
@@ -1460,9 +1447,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addShop(shop: ShopMaster) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             val resolvedShop = resolveShopCoords(getApplication(), shop)
             repository.insertShop(resolvedShop)
             refreshNextShopNumber()
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            if (diff > 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "New Shop Added"))
+                _gamificationEvents.emit(GamificationEvent.CoinGain(20, "New Shop Added"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Shop Master",
@@ -1475,9 +1478,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateShop(oldShopNumber: String, shop: ShopMaster) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val oldShop = repository.getShopByNumber(oldShopNumber)
+            val isChanged = oldShop == null ||
+                oldShop.shopNumber != shop.shopNumber ||
+                oldShop.locationNumber != shop.locationNumber ||
+                oldShop.storeName != shop.storeName ||
+                oldShop.storeImage != shop.storeImage ||
+                oldShop.rating != shop.rating ||
+                oldShop.googleMapLink != shop.googleMapLink ||
+                oldShop.mobileNumber != shop.mobileNumber ||
+                oldShop.notes != shop.notes ||
+                oldShop.latitude != shop.latitude ||
+                oldShop.longitude != shop.longitude
+
+            if (!isChanged) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(0, "No Changes Detected"))
+                return@launch
+            }
+
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             val resolvedShop = resolveShopCoords(getApplication(), shop)
             try {
-                val oldShop = repository.getShopByNumber(oldShopNumber)
                 if (oldShop != null && !oldShop.storeImage.isNullOrEmpty() && oldShop.storeImage != resolvedShop.storeImage) {
                     val oldFile = File(oldShop.storeImage)
                     if (oldFile.exists()) {
@@ -1491,6 +1516,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             refreshNextShopNumber()
             // Run background image cleanup
             com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Shop Updated"))
         } catch (e: Exception) {
             triggerError(
                 module = "Shop Master",
@@ -1501,8 +1534,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteShop(shop: ShopMaster) = viewModelScope.launch {
+    fun deleteShop(shop: ShopMaster) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             repository.deleteShop(shop)
             if (!shop.storeImage.isNullOrEmpty()) {
                 try {
@@ -1517,6 +1555,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             refreshNextShopNumber()
             // Run background image cleanup
             com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            if (diff < 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Shop Deleted"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Shop Master",
@@ -1926,10 +1974,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addSales(salesEntry: SalesEntry) = viewModelScope.launch {
+    fun addSales(salesEntry: SalesEntry) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             repository.insertSales(salesEntry)
             incrementSessionCombo()
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            if (diff > 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Sales Completed"))
+                _gamificationEvents.emit(GamificationEvent.CoinGain(10, "Sales Completed"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Sales Master",
@@ -1940,9 +2004,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateSales(salesEntry: SalesEntry) = viewModelScope.launch {
+    fun updateSales(salesEntry: SalesEntry) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             repository.updateSales(salesEntry)
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Sales Record Updated"))
         } catch (e: Exception) {
             triggerError(
                 module = "Sales Master",
@@ -1953,9 +2030,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteSales(salesEntry: SalesEntry) = viewModelScope.launch {
+    fun deleteSales(salesEntry: SalesEntry) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             repository.deleteSales(salesEntry)
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            if (diff < 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Sales Record Deleted"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Sales Master",
@@ -1966,9 +2058,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteSalesBySessionId(sessionId: String) = viewModelScope.launch {
+    fun deleteSalesBySessionId(sessionId: String) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             repository.deleteSalesBySessionId(sessionId)
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            if (diff < 0) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Sales Record Deleted"))
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Sales Master",
@@ -1979,10 +2086,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveSalesSession(salesList: List<SalesEntry>, oldSessionId: String?, legacyIdToDelete: Int?) = viewModelScope.launch {
+    fun saveSalesSession(salesList: List<SalesEntry>, oldSessionId: String?, legacyIdToDelete: Int?) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            val isEdit = !oldSessionId.isNullOrEmpty() || (legacyIdToDelete != null && legacyIdToDelete != 0)
+            var isChanged = true
+            if (isEdit) {
+                val oldSalesOfSession = if (!oldSessionId.isNullOrEmpty()) {
+                    repository.allSales.first().filter { it.sessionId == oldSessionId }
+                } else {
+                    repository.allSales.first().filter { it.id == legacyIdToDelete }
+                }
+                isChanged = !salesListEquals(oldSalesOfSession, salesList)
+            }
+
+            if (isEdit && !isChanged) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(0, "No Changes Detected"))
+                return@launch
+            }
+
+            val salesBefore = repository.allSales.first()
+            val shopsBefore = repository.allShops.first()
+            val badgesBefore = repository.unlockedBadges.first()
+            val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
+
             repository.saveSalesSession(salesList, oldSessionId, legacyIdToDelete)
             incrementSessionCombo()
+
+            val salesAfter = repository.allSales.first()
+            val shopsAfter = repository.allShops.first()
+            val badgesAfter = repository.unlockedBadges.first()
+            val xpAfter = calculateTotalXpSnapshot(salesAfter, shopsAfter, badgesAfter, _bonusXp.value)
+
+            val diff = xpAfter - xpBefore
+            if (isEdit) {
+                _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Sales Record Updated"))
+            } else {
+                if (diff > 0) {
+                    _gamificationEvents.emit(GamificationEvent.XpGain(diff, "Sales Completed"))
+                    _gamificationEvents.emit(GamificationEvent.CoinGain(salesList.size * 10, "Sales Completed"))
+                }
+            }
         } catch (e: Exception) {
             triggerError(
                 module = "Sales Master",
@@ -2004,6 +2147,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 possibleReason = "Unable to empty the sales log database."
             )
         }
+    }
+
+    private fun calculateTotalXpSnapshot(
+        sales: List<SalesEntry>,
+        shops: List<ShopMaster>,
+        badges: List<UserBadge>,
+        bXp: Int
+    ): Int {
+        val baseShopXp = shops.size * 50
+        val baseSalesXp = sales.size * 10
+        val basePacketsXp = sales.sumOf { it.packetsSold } * 1
+        val baseLocationXp = sales.map { it.locationNumber }.distinct().size * 30
+        val baseBadgeXp = badges.size * 100
+        return baseShopXp + baseSalesXp + basePacketsXp + baseLocationXp + baseBadgeXp + bXp
+    }
+
+    private fun salesListEquals(list1: List<SalesEntry>, list2: List<SalesEntry>): Boolean {
+        if (list1.size != list2.size) return false
+        val sorted1 = list1.sortedWith(compareBy({ it.productName }, { it.packetsGiven }, { it.packetsReturned }))
+        val sorted2 = list2.sortedWith(compareBy({ it.productName }, { it.packetsGiven }, { it.packetsReturned }))
+        for (i in sorted1.indices) {
+            val e1 = sorted1[i]
+            val e2 = sorted2[i]
+            if (e1.productName != e2.productName ||
+                e1.packetsGiven != e2.packetsGiven ||
+                e1.packetsReturned != e2.packetsReturned ||
+                e1.ratePerPacket != e2.ratePerPacket ||
+                e1.totalAmount != e2.totalAmount ||
+                e1.profitPerPacket != e2.profitPerPacket ||
+                e1.totalProfit != e2.totalProfit ||
+                e1.status != e2.status ||
+                e1.remarks != e2.remarks ||
+                e1.shopNumber != e2.shopNumber ||
+                e1.locationNumber != e2.locationNumber) {
+                return false
+            }
+        }
+        return true
     }
 
     // --- Persistent Shop Image Saving Utility ---
