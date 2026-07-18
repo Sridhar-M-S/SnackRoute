@@ -609,6 +609,21 @@ fun ShopsScreen(
                         }
                     }
 
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (filteredShops.size == shops.size) "Total Shops: ${shops.size}" else "Showing ${filteredShops.size} of ${shops.size} shops",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     // --- Shops List ---
                     if (filteredShops.isEmpty()) {
                         Box(
