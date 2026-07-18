@@ -122,6 +122,12 @@ interface SalesDao {
     @Query("DELETE FROM sales")
     suspend fun deleteAllSales()
 
+    @Query("DELETE FROM sales WHERE sessionId = :sessionId")
+    suspend fun deleteSalesBySessionId(sessionId: String)
+
+    @Query("DELETE FROM sales WHERE id = :id")
+    suspend fun deleteSalesById(id: Int)
+
     @Query("UPDATE sales SET shopName = :newShopName, locationNumber = :newLocationNumber WHERE shopNumber = :shopNumber")
     suspend fun updateSalesShopDetails(shopNumber: String, newShopName: String, newLocationNumber: String)
 

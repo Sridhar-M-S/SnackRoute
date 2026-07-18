@@ -168,6 +168,18 @@ class AppRepository(
     suspend fun updateSales(sales: SalesEntry) = salesDao.updateSales(sales)
     suspend fun deleteSales(sales: SalesEntry) = salesDao.deleteSales(sales)
     suspend fun deleteAllSales() = salesDao.deleteAllSales()
+    suspend fun deleteSalesBySessionId(sessionId: String) = salesDao.deleteSalesBySessionId(sessionId)
+    suspend fun deleteSalesById(id: Int) = salesDao.deleteSalesById(id)
+    suspend fun saveSalesSession(salesList: List<SalesEntry>, oldSessionId: String?, legacyIdToDelete: Int?) {
+        database.withTransaction {
+            if (!oldSessionId.isNullOrEmpty()) {
+                salesDao.deleteSalesBySessionId(oldSessionId)
+            } else if (legacyIdToDelete != null && legacyIdToDelete != 0) {
+                salesDao.deleteSalesById(legacyIdToDelete)
+            }
+            salesDao.insertSalesList(salesList)
+        }
+    }
 
     // --- Backup and Restore Logic ---
     fun backupDatabase(context: Context): Boolean {

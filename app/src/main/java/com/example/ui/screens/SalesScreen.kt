@@ -94,21 +94,12 @@ fun SalesScreen(
     // Form fields
     var entryDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var selectedShopNumber by remember { mutableStateOf("") }
-    var selectedProductName by remember { mutableStateOf("") }
-    var packetsGivenStr by remember { mutableStateOf("") }
-    var packetsReturnedStr by remember { mutableStateOf("") }
-    var ratePerPacketStr by remember { mutableStateOf("") }
-    var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
-    var isCustomRate by remember { mutableStateOf(false) }
-    var customProfitStr by remember { mutableStateOf("") }
     var payStatus by remember { mutableStateOf("Paid") } // Paid, Pending, Partially Paid
     var remarks by remember { mutableStateOf("") }
+    var saleItems by remember { mutableStateOf<List<SaleItemState>>(emptyList()) }
 
     // Validation
     var shopError by remember { mutableStateOf<String?>(null) }
-    var productError by remember { mutableStateOf<String?>(null) }
-    var packetsError by remember { mutableStateOf<String?>(null) }
-    var rateError by remember { mutableStateOf<String?>(null) }
 
     // --- Filter logic ---
     LaunchedEffect(
@@ -169,23 +160,18 @@ fun SalesScreen(
             entryDateMillis = System.currentTimeMillis()
             selectedShopNumber = shopNumber
             
-            // Set first active product as default
-            val activeProds = products.filter { it.status == "Active" }
-            if (activeProds.isNotEmpty()) {
-                selectedProductName = activeProds.first().productName
-                ratePerPacketStr = "0.0" // Need to fetch price for selected product
-            } else if (products.isNotEmpty()) {
-                selectedProductName = products.first().productName
-                ratePerPacketStr = "0.0" // Need to fetch price for selected product
-            }
-            packetsGivenStr = ""
-            packetsReturnedStr = ""
+            val defaultProdName = products.filter { it.status == "Active" }.firstOrNull()?.productName 
+                ?: products.firstOrNull()?.productName 
+                ?: ""
+            
+            saleItems = listOf(
+                SaleItemState(
+                    productName = defaultProdName
+                )
+            )
             payStatus = "Paid"
             remarks = ""
             shopError = null
-            productError = null
-            packetsError = null
-            rateError = null
             
             isShopLocked = true
             showAddEditScreen = true
@@ -345,18 +331,19 @@ fun SalesScreen(
                             isShopLocked = false
                             entryDateMillis = System.currentTimeMillis()
                             selectedShopNumber = shops.first().shopNumber
-                            val activeProds = products.filter { it.status == "Active" }
-                            selectedProductName = if (activeProds.isNotEmpty()) activeProds.first().productName else products.first().productName
-                            packetsGivenStr = ""
-                            packetsReturnedStr = ""
-                            val prodObj = products.firstOrNull { it.productName == selectedProductName }
-                            ratePerPacketStr = "0.0" // TODO: Implement price selection from ProductPrice table
+                            
+                            val defaultProdName = products.filter { it.status == "Active" }.firstOrNull()?.productName 
+                                ?: products.firstOrNull()?.productName 
+                                ?: ""
+                            
+                            saleItems = listOf(
+                                SaleItemState(
+                                    productName = defaultProdName
+                                )
+                            )
                             payStatus = "Paid"
                             remarks = ""
                             shopError = null
-                            productError = null
-                            packetsError = null
-                            rateError = null
                             showAddEditScreen = true
                         }
                     },
@@ -627,17 +614,29 @@ fun SalesScreen(
                                     selectedSalesForEdit = sale
                                     entryDateMillis = sale.entryDate
                                     selectedShopNumber = sale.shopNumber
-                                    selectedProductName = sale.productName
-                                    packetsGivenStr = sale.packetsGiven.toString()
-                                    packetsReturnedStr = sale.packetsReturned.toString()
-                                    ratePerPacketStr = sale.ratePerPacket.toString()
-                                    customProfitStr = sale.profitPerPacket.toString()
                                     payStatus = sale.status
                                     remarks = sale.remarks ?: ""
                                     shopError = null
-                                    productError = null
-                                    packetsError = null
-                                    rateError = null
+                                    isShopLocked = false
+
+                                    val sessionSales = if (!sale.sessionId.isNullOrEmpty()) {
+                                        sales.filter { it.sessionId == sale.sessionId }
+                                    } else {
+                                        listOf(sale)
+                                    }
+
+                                    saleItems = sessionSales.map { s ->
+                                        SaleItemState(
+                                            id = java.util.UUID.randomUUID().toString(),
+                                            dbId = s.id,
+                                            productName = s.productName,
+                                            ratePerPacketStr = s.ratePerPacket.toString(),
+                                            packetsGivenStr = s.packetsGiven.toString(),
+                                            packetsReturnedStr = s.packetsReturned.toString(),
+                                            customProfitStr = s.profitPerPacket.toString(),
+                                            isCustomRate = false
+                                        )
+                                    }
                                     showAddEditScreen = true
                                 },
                                 onDelete = {
@@ -656,32 +655,6 @@ fun SalesScreen(
 
         // Derive objects live for calculations
         val currentShopObj = shops.firstOrNull { it.shopNumber == selectedShopNumber }
-        val currentProductObj = products.firstOrNull { it.productName == selectedProductName }
-
-        LaunchedEffect(currentProductObj) {
-            if (currentProductObj != null) {
-                viewModel.getPricesForProduct(currentProductObj.id).collect { prices ->
-                    availablePrices = prices
-                }
-            }
-        }
-
-        LaunchedEffect(availablePrices, selectedSalesForEdit) {
-            if (selectedSalesForEdit != null && availablePrices.isNotEmpty()) {
-                isCustomRate = availablePrices.none { it.sellingPrice == selectedSalesForEdit?.ratePerPacket }
-            }
-        }
-
-        // Live Auto-Calculations
-        val givenCount = packetsGivenStr.toIntOrNull() ?: 0
-        val returnedCount = packetsReturnedStr.toIntOrNull() ?: 0
-        val soldCalculated = maxOf(0, givenCount - returnedCount)
-        
-        val liveRate = ratePerPacketStr.toDoubleOrNull() ?: 0.0
-        val totalAmountCalculated = soldCalculated * liveRate
-        
-        val liveProfitPerPacket = customProfitStr.toDoubleOrNull() ?: 0.0
-        val totalProfitCalculated = soldCalculated * liveProfitPerPacket
 
         Scaffold(
             topBar = {
@@ -881,160 +854,116 @@ fun SalesScreen(
                         )
                     }
 
-                    item {
-                        // Product Selection
-                        var prodExpanded by remember { mutableStateOf(false) }
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            OutlinedTextField(
-                                value = selectedProductName,
-                                onValueChange = {},
-                                label = { Text("Snack Product*") },
-                                readOnly = true,
-                                trailingIcon = {
-                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                },
-                                isError = productError != null,
-                                supportingText = productError?.let { { Text(it) } },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clickable { prodExpanded = true }
-                            )
-                            DropdownMenu(expanded = prodExpanded, onDismissRequest = { prodExpanded = false }, modifier = Modifier.fillMaxWidth(0.9f)) {
-                                products.forEach { p ->
-                                    DropdownMenuItem(
-                                        text = { Text("${p.productName} (Price list)") }, // TODO: Implement price selection
-                                        onClick = {
-                                            selectedProductName = p.productName
-                                            ratePerPacketStr = "0.0" // TODO: Implement price selection
-                                            prodExpanded = false
-                                            productError = null
-                                        }
-                                    )
+                    // Iterate and render each product row in saleItems list
+                    items(saleItems.size) { index ->
+                        val item = saleItems[index]
+                        SaleItemRow(
+                            item = item,
+                            products = products,
+                            viewModel = viewModel,
+                            onItemChange = { updatedItem ->
+                                saleItems = saleItems.toMutableList().apply {
+                                    this[index] = updatedItem
                                 }
-                            }
-                        }
-                    }
-
-                    item {
-                        // Given and Returned packet counts
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedTextField(
-                                value = packetsGivenStr,
-                                onValueChange = {
-                                    packetsGivenStr = it
-                                    packetsError = null
-                                },
-                                label = { Text("Packets Given*") },
-                                placeholder = { Text("e.g. 50") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                isError = packetsError != null,
-                                modifier = Modifier.weight(1f),
-                                singleLine = true
-                            )
-
-                            OutlinedTextField(
-                                value = packetsReturnedStr,
-                                onValueChange = { packetsReturnedStr = it },
-                                label = { Text("Packets Returned") },
-                                placeholder = { Text("e.g. 2") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f),
-                                singleLine = true
-                            )
-                        }
-                    }
-
-                    item {
-                        // Rate per packet (dropdown + custom input)
-                        var rateMenuExpanded by remember { mutableStateOf(false) }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ExposedDropdownMenuBox(
-                                expanded = rateMenuExpanded,
-                                onExpandedChange = { rateMenuExpanded = !rateMenuExpanded }
-                            ) {
-                                OutlinedTextField(
-                                    value = if (isCustomRate) "Custom Price" else (availablePrices.find { it.sellingPrice.toString() == ratePerPacketStr }?.let { "₹${it.sellingPrice}" } ?: "Select Rate"),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("Rate Per Packet*") },
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = rateMenuExpanded) },
-                                    modifier = Modifier.menuAnchor().fillMaxWidth()
-                                )
-                                ExposedDropdownMenu(expanded = rateMenuExpanded, onDismissRequest = { rateMenuExpanded = false }) {
-                                    availablePrices.forEach { price ->
-                                        DropdownMenuItem(
-                                            text = { Text("₹${price.sellingPrice}") },
-                                            onClick = {
-                                                isCustomRate = false
-                                                ratePerPacketStr = price.sellingPrice.toString()
-                                                customProfitStr = price.profitPerPacket.toString()
-                                                rateMenuExpanded = false
-                                            }
-                                        )
+                            },
+                            onRemove = {
+                                if (saleItems.size > 1) {
+                                    saleItems = saleItems.toMutableList().apply {
+                                        removeAt(index)
                                     }
-                                    DropdownMenuItem(
-                                        text = { Text("Custom Price") },
-                                        onClick = {
-                                            isCustomRate = true
-                                            ratePerPacketStr = ""
-                                            customProfitStr = ""
-                                            rateMenuExpanded = false
-                                        }
-                                    )
                                 }
-                            }
+                            },
+                            showRemoveButton = saleItems.size > 1
+                        )
+                    }
 
-                            if (isCustomRate) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                                    OutlinedTextField(
-                                        value = ratePerPacketStr,
-                                        onValueChange = { ratePerPacketStr = it },
-                                        label = { Text("Selling Price*") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = customProfitStr,
-                                        onValueChange = { customProfitStr = it },
-                                        label = { Text("Profit*") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
+                    item {
+                        // "Add Item (+)" Button
+                        OutlinedButton(
+                            onClick = {
+                                val defaultProdName = products.filter { it.status == "Active" }.firstOrNull()?.productName 
+                                    ?: products.firstOrNull()?.productName 
+                                    ?: ""
+                                saleItems = saleItems + SaleItemState(
+                                    productName = defaultProdName
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.primary
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add Item (+)", fontWeight = FontWeight.SemiBold)
                         }
                     }
 
                     item {
-                        // Live Calculations Preview Cards
+                        // Calculations Summary Card
+                        val totalProducts = saleItems.size
+                        var totalPacketsGiven = 0
+                        var totalPacketsReturned = 0
+                        var totalPacketsSold = 0
+                        var totalEstimatedProfit = 0.0
+                        var grandTotalAmount = 0.0
+                        
+                        saleItems.forEach { itm ->
+                            val given = itm.packetsGivenStr.toIntOrNull() ?: 0
+                            val returned = itm.packetsReturnedStr.toIntOrNull() ?: 0
+                            val sold = maxOf(0, given - returned)
+                            val rate = itm.ratePerPacketStr.toDoubleOrNull() ?: 0.0
+                            val profitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
+                            
+                            totalPacketsGiven += given
+                            totalPacketsReturned += returned
+                            totalPacketsSold += sold
+                            totalEstimatedProfit += (sold * profitPerUnit)
+                            grandTotalAmount += (sold * rate)
+                        }
+
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f))
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Live Calculations Summary", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    text = "Grand Summary",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                                 
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Packets Sold (Given - Returned):", fontSize = 12.sp, color = Color.Gray)
-                                    Text("$soldCalculated Packets", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Total Products:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("$totalProducts products", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Total Amount (Sold × Rate):", fontSize = 12.sp, color = Color.Gray)
-                                    Text("₹${"%.2f".format(totalAmountCalculated)}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                    Text("Total Packets Given:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("$totalPacketsGiven", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Est. Profit (Sold × Unit Profit):", fontSize = 12.sp, color = Color.Gray)
-                                    Text("₹${"%.2f".format(totalProfitCalculated)}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2E7D32))
+                                    Text("Total Packets Returned:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("$totalPacketsReturned", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Total Packets Sold:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("$totalPacketsSold", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Total Estimated Profit:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("₹${"%.2f".format(totalEstimatedProfit)}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2E7D32))
+                                }
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Grand Total Amount:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("₹${"%.2f".format(grandTotalAmount)}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }
@@ -1084,64 +1013,103 @@ fun SalesScreen(
                 // Save button
                 Button(
                     onClick = {
-                        var isValid = true
+                        var isAllValid = true
+                        
                         if (selectedShopNumber.isEmpty()) {
                             shopError = "Please select a store"
-                            isValid = false
-                        }
-                        if (selectedProductName.isEmpty()) {
-                            productError = "Please select a product"
-                            isValid = false
+                            isAllValid = false
+                        } else {
+                            shopError = null
                         }
 
-                        val givenVal = packetsGivenStr.toIntOrNull()
-                        val returnedVal = packetsReturnedStr.toIntOrNull() ?: 0
-                        if (givenVal == null || givenVal < 0) {
-                            packetsError = "Valid packets count is required"
-                            isValid = false
-                        } else if (returnedVal > givenVal) {
-                            packetsError = "Returned cannot exceed Given packets"
-                            isValid = false
-                        }
+                        // Validate each sale row
+                        val validatedItems = saleItems.map { itm ->
+                            var prodErr: String? = null
+                            var rateErr: String? = null
+                            var packErr: String? = null
 
-                        val rateVal = ratePerPacketStr.toDoubleOrNull()
-                        if (rateVal == null || rateVal < 0) {
-                            rateError = "Valid rate is required"
-                            isValid = false
-                        }
+                            if (itm.productName.isEmpty()) {
+                                prodErr = "Product is required"
+                                isAllValid = false
+                            }
 
-                        if (isValid) {
-                            val finalSold = givenVal!! - returnedVal
-                            val finalTotal = finalSold * rateVal!!
-                            val finalProfitPerUnit = customProfitStr.toDoubleOrNull() ?: 0.0
-                            val finalProfitTotal = finalSold * finalProfitPerUnit
+                            val givenVal = itm.packetsGivenStr.toIntOrNull()
+                            val returnedVal = itm.packetsReturnedStr.toIntOrNull() ?: 0
+                            if (givenVal == null || givenVal < 0) {
+                                packErr = "Valid packets count is required"
+                                isAllValid = false
+                            } else if (returnedVal > givenVal) {
+                                packErr = "Returned cannot exceed Given packets"
+                                isAllValid = false
+                            }
 
-                            val entry = SalesEntry(
-                                id = selectedSalesForEdit?.id ?: 0,
-                                entryDate = entryDateMillis,
-                                shopNumber = selectedShopNumber,
-                                shopName = currentShopObj?.storeName ?: "",
-                                locationNumber = currentShopObj?.locationNumber ?: "",
-                                productName = selectedProductName,
-                                packetsGiven = givenVal,
-                                packetsReturned = returnedVal,
-                                packetsSold = finalSold,
-                                ratePerPacket = rateVal,
-                                totalAmount = finalTotal,
-                                profitPerPacket = finalProfitPerUnit,
-                                totalProfit = finalProfitTotal,
-                                status = payStatus,
-                                remarks = remarks.trim().ifEmpty { null }
+                            val rateVal = itm.ratePerPacketStr.toDoubleOrNull()
+                            if (rateVal == null || rateVal < 0) {
+                                rateErr = "Valid rate is required"
+                                isAllValid = false
+                            }
+
+                            itm.copy(
+                                productError = prodErr,
+                                packetsError = packErr,
+                                rateError = rateErr
                             )
+                        }
 
+                        saleItems = validatedItems
+
+                        if (isAllValid) {
+                            // Generate or reuse Sales Session ID
+                            val sessionId = selectedSalesForEdit?.sessionId 
+                                ?: ("SESS_" + java.util.UUID.randomUUID().toString().substring(0, 8).uppercase())
+
+                            val salesToInsert = saleItems.map { itm ->
+                                val givenVal = itm.packetsGivenStr.toInt()
+                                val returnedVal = itm.packetsReturnedStr.toIntOrNull() ?: 0
+                                val finalSold = givenVal - returnedVal
+                                val rateVal = itm.ratePerPacketStr.toDouble()
+                                val finalTotal = finalSold * rateVal
+                                val finalProfitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
+                                val finalProfitTotal = finalSold * finalProfitPerUnit
+
+                                SalesEntry(
+                                    id = itm.dbId,
+                                    entryDate = entryDateMillis,
+                                    shopNumber = selectedShopNumber,
+                                    shopName = currentShopObj?.storeName ?: "",
+                                    locationNumber = currentShopObj?.locationNumber ?: "",
+                                    productName = itm.productName,
+                                    packetsGiven = givenVal,
+                                    packetsReturned = returnedVal,
+                                    packetsSold = finalSold,
+                                    ratePerPacket = rateVal,
+                                    totalAmount = finalTotal,
+                                    profitPerPacket = finalProfitPerUnit,
+                                    totalProfit = finalProfitTotal,
+                                    status = payStatus,
+                                    remarks = remarks.trim().ifEmpty { null },
+                                    sessionId = sessionId
+                                )
+                            }
+
+                            // If we are in edit mode, delete the previous entries of the session (and legacy non-session ID too)
+                            val legacyIdToDelete = if (selectedSalesForEdit != null && selectedSalesForEdit?.sessionId.isNullOrEmpty()) {
+                                selectedSalesForEdit?.id
+                            } else {
+                                null
+                            }
+                            
+                            val oldSessionId = selectedSalesForEdit?.sessionId
+
+                            viewModel.saveSalesSession(salesToInsert, oldSessionId, legacyIdToDelete)
+                            
                             if (isEdit) {
-                                viewModel.updateSales(entry)
                                 Toast.makeText(context, "Sales log updated", Toast.LENGTH_SHORT).show()
                             } else {
-                                viewModel.addSales(entry)
                                 Toast.makeText(context, "Sales logged successfully", Toast.LENGTH_SHORT).show()
                             }
                             showAddEditScreen = false
+                            selectedSalesForEdit = null
                         }
                     },
                     modifier = Modifier
@@ -1429,6 +1397,309 @@ fun SalesCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+data class SaleItemState(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val dbId: Int = 0,
+    val productName: String = "",
+    val ratePerPacketStr: String = "",
+    val packetsGivenStr: String = "",
+    val packetsReturnedStr: String = "",
+    val customProfitStr: String = "",
+    val isCustomRate: Boolean = false,
+    val productError: String? = null,
+    val rateError: String? = null,
+    val packetsError: String? = null
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SaleItemRow(
+    item: SaleItemState,
+    products: List<com.example.data.ProductMaster>,
+    viewModel: AppViewModel,
+    onItemChange: (SaleItemState) -> Unit,
+    onRemove: () -> Unit,
+    showRemoveButton: Boolean
+) {
+    val currentProductObj = remember(item.productName, products) {
+        products.firstOrNull { it.productName == item.productName }
+    }
+    
+    var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
+    
+    LaunchedEffect(currentProductObj) {
+        if (currentProductObj != null) {
+            viewModel.getPricesForProduct(currentProductObj.id).collect { prices ->
+                availablePrices = prices
+                
+                // If this is an existing DB row, check if its rate matches one of the prices.
+                // If not, set isCustomRate to true so the custom price/profit fields are visible.
+                if (item.ratePerPacketStr.isNotEmpty() && item.dbId != 0 && !item.isCustomRate) {
+                    val matchingPrice = prices.any { it.sellingPrice.toString() == item.ratePerPacketStr }
+                    if (!matchingPrice) {
+                        onItemChange(item.copy(isCustomRate = true))
+                    }
+                }
+            }
+        }
+    }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.ShoppingBag,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Sale Item",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                if (showRemoveButton) {
+                    IconButton(
+                        onClick = onRemove,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove item",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+            
+            // Product Selector Dropdown
+            var prodExpanded by remember { mutableStateOf(false) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = item.productName.ifEmpty { "Select Product" },
+                    onValueChange = {},
+                    label = { Text("Snack Product*") },
+                    readOnly = true,
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    },
+                    isError = item.productError != null,
+                    supportingText = item.productError?.let { { Text(it) } },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable { prodExpanded = true }
+                )
+                DropdownMenu(
+                    expanded = prodExpanded,
+                    onDismissRequest = { prodExpanded = false },
+                    modifier = Modifier.fillMaxWidth(0.85f)
+                ) {
+                    products.forEach { p ->
+                        DropdownMenuItem(
+                            text = { Text(p.productName) },
+                            onClick = {
+                                prodExpanded = false
+                                onItemChange(item.copy(
+                                    productName = p.productName,
+                                    ratePerPacketStr = "",
+                                    customProfitStr = "",
+                                    isCustomRate = false,
+                                    productError = null,
+                                    rateError = null
+                                ))
+                            }
+                        )
+                    }
+                }
+            }
+            
+            // Packets Given and Returned Row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = item.packetsGivenStr,
+                    onValueChange = {
+                        onItemChange(item.copy(
+                            packetsGivenStr = it,
+                            packetsError = null
+                        ))
+                    },
+                    label = { Text("Packets Given*") },
+                    placeholder = { Text("e.g. 50") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = item.packetsError != null,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = item.packetsReturnedStr,
+                    onValueChange = {
+                        onItemChange(item.copy(
+                            packetsReturnedStr = it,
+                            packetsError = null
+                        ))
+                    },
+                    label = { Text("Packets Returned") },
+                    placeholder = { Text("e.g. 2") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+            }
+            
+            if (item.packetsError != null) {
+                Text(
+                    text = item.packetsError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            // Rate per packet selection (dropdown + custom inputs)
+            var rateMenuExpanded by remember { mutableStateOf(false) }
+            val isCustomRate = item.isCustomRate
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExposedDropdownMenuBox(
+                    expanded = rateMenuExpanded,
+                    onExpandedChange = { rateMenuExpanded = !rateMenuExpanded }
+                ) {
+                    val selectedRateText = if (isCustomRate) {
+                        "Custom Price"
+                    } else {
+                        availablePrices.find { it.sellingPrice.toString() == item.ratePerPacketStr }?.let { "₹${it.sellingPrice}" } ?: "Select Rate"
+                    }
+                    OutlinedTextField(
+                        value = selectedRateText,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Rate Per Packet*") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = rateMenuExpanded) },
+                        isError = item.rateError != null,
+                        supportingText = item.rateError?.let { { Text(it) } },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = rateMenuExpanded,
+                        onDismissRequest = { rateMenuExpanded = false }
+                    ) {
+                        availablePrices.forEach { price ->
+                            DropdownMenuItem(
+                                text = { Text("₹${price.sellingPrice}") },
+                                onClick = {
+                                    onItemChange(item.copy(
+                                        ratePerPacketStr = price.sellingPrice.toString(),
+                                        customProfitStr = price.profitPerPacket.toString(),
+                                        isCustomRate = false,
+                                        rateError = null
+                                    ))
+                                    rateMenuExpanded = false
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Custom Price") },
+                            onClick = {
+                                onItemChange(item.copy(
+                                    ratePerPacketStr = "",
+                                    customProfitStr = "",
+                                    isCustomRate = true,
+                                    rateError = null
+                                ))
+                                rateMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+
+                if (isCustomRate) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = item.ratePerPacketStr,
+                            onValueChange = {
+                                onItemChange(item.copy(
+                                    ratePerPacketStr = it,
+                                    rateError = null
+                                ))
+                            },
+                            label = { Text("Selling Price*") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = item.customProfitStr,
+                            onValueChange = {
+                                onItemChange(item.copy(customProfitStr = it))
+                            },
+                            label = { Text("Profit*") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+                }
+            }
+            
+            // Row Level Calculations
+            val givenCount = item.packetsGivenStr.toIntOrNull() ?: 0
+            val returnedCount = item.packetsReturnedStr.toIntOrNull() ?: 0
+            val soldCalculated = maxOf(0, givenCount - returnedCount)
+            
+            val liveRate = item.ratePerPacketStr.toDoubleOrNull() ?: 0.0
+            val totalAmountCalculated = soldCalculated * liveRate
+            
+            val liveProfitPerPacket = item.customProfitStr.toDoubleOrNull() ?: 0.0
+            val totalProfitCalculated = soldCalculated * liveProfitPerPacket
+            
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Sold: $soldCalculated | Amt: ₹${"%.2f".format(totalAmountCalculated)} | Profit: ₹${"%.2f".format(totalProfitCalculated)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }

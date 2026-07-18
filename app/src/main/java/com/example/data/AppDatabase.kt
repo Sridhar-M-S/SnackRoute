@@ -19,7 +19,7 @@ import androidx.room.TypeConverters
         UserBadge::class,
         ErrorLog::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

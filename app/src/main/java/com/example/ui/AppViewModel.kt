@@ -1939,6 +1939,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
     }
+
+    fun deleteSalesBySessionId(sessionId: String) = viewModelScope.launch {
+        try {
+            repository.deleteSalesBySessionId(sessionId)
+        } catch (e: Exception) {
+            triggerError(
+                module = "Sales Master",
+                operation = "Delete Sales Entry Session",
+                exception = e,
+                possibleReason = "An unexpected error occurred while deleting the sales record session."
+            )
+        }
+    }
+
+    fun saveSalesSession(salesList: List<SalesEntry>, oldSessionId: String?, legacyIdToDelete: Int?) = viewModelScope.launch {
+        try {
+            repository.saveSalesSession(salesList, oldSessionId, legacyIdToDelete)
+            incrementSessionCombo()
+        } catch (e: Exception) {
+            triggerError(
+                module = "Sales Master",
+                operation = "Save Sales Session",
+                exception = e,
+                possibleReason = "Unable to save sales session details. Ensure all referenced fields are valid."
+            )
+        }
+    }
     
     fun deleteAllSales() = viewModelScope.launch {
         try {
