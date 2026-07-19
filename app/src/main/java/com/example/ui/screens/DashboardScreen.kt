@@ -260,16 +260,7 @@ fun DashboardScreen(
                 MissionsArenaWidget(state = gameProgress)
             }
 
-            // --- Today's Target and Achievements (moved from Shops page) ---
-            item {
-                DailyTargetWidget(
-                    dailyTarget = dailyTarget,
-                    todayPackets = todayPacketsVal,
-                    todaySales = todaySalesVal,
-                    todayProfit = todayProfitVal,
-                    onSetTarget = { viewModel.setDailyTarget(it) }
-                )
-            }
+
             item {
                 BadgeSection(allBadges = allBadges, unlockedBadges = unlockedBadges)
             }
