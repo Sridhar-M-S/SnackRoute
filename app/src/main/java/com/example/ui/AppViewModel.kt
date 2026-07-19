@@ -190,6 +190,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val sdfWeek = SimpleDateFormat("yyyy'W'ww", Locale.getDefault())
     private val sdfMonth = SimpleDateFormat("yyyy'M'MM", Locale.getDefault())
 
+    private fun formatDay(date: Date): String = synchronized(sdfDay) { sdfDay.format(date) }
+    private fun formatWeek(date: Date): String = synchronized(sdfWeek) { sdfWeek.format(date) }
+    private fun formatMonth(date: Date): String = synchronized(sdfMonth) { sdfMonth.format(date) }
+
     fun getTodayStartMillis(): Long {
         val calendar = Calendar.getInstance()
         calendar.set(Calendar.HOUR_OF_DAY, 0)
@@ -294,17 +298,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getBossChallenges(sales: List<SalesEntry>, shops: List<ShopMaster>): List<BossChallenge> {
-        val maxPacketsInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+        val maxPacketsInSingleDay = sales.groupBy { formatDay(Date(it.entryDate)) }
             .map { it.value.sumOf { s -> s.packetsSold } }
             .maxOrNull() ?: 0
 
-        val maxProfitInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+        val maxProfitInSingleDay = sales.groupBy { formatDay(Date(it.entryDate)) }
             .map { it.value.sumOf { s -> s.totalProfit } }
             .maxOrNull() ?: 0.0
 
         val totalShopsAdded = shops.size
 
-        val maxLocationsInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+        val maxLocationsInSingleDay = sales.groupBy { formatDay(Date(it.entryDate)) }
             .map { it.value.map { s -> s.locationNumber }.distinct().size }
             .maxOrNull() ?: 0
 
@@ -359,9 +363,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val title = getTitleForLevel(level)
         
         val now = Date()
-        val dayId = sdfDay.format(now)
-        val weekId = sdfWeek.format(now)
-        val monthId = sdfMonth.format(now)
+        val dayId = formatDay(now)
+        val weekId = formatWeek(now)
+        val monthId = formatMonth(now)
         
         val todayStart = getTodayStartMillis()
         val rollingWeekStart = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
@@ -497,9 +501,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val shopsCreatedThisMonth = shops.filter { it.startingDate >= rollingMonthStart }
 
             val now = Date()
-            val dayId = sdfDay.format(now)
-            val weekId = sdfWeek.format(now)
-            val monthId = sdfMonth.format(now)
+            val dayId = formatDay(now)
+            val weekId = formatWeek(now)
+            val monthId = formatMonth(now)
 
             val potentialMissions = listOf(
                 Mission("daily_visit_3_shops_$dayId", "Shop Runner", "Make sales at 3 different shops today", salesToday.map { it.shopNumber }.distinct().size, 3, 50, 20, salesToday.map { it.shopNumber }.distinct().size >= 3, "daily"),
@@ -2252,11 +2256,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         var totalXp = 0
         var totalCoins = 0
         
-        val dayIds = (sales.map { sdfDay.format(Date(it.entryDate)) } + 
-                      shops.map { sdfDay.format(Date(it.startingDate)) }).distinct()
+        val dayIds = (sales.map { formatDay(Date(it.entryDate)) } + 
+                      shops.map { formatDay(Date(it.startingDate)) }).distinct()
         for (dayId in dayIds) {
-            val salesToday = sales.filter { sdfDay.format(Date(it.entryDate)) == dayId }
-            val shopsCreatedToday = shops.filter { sdfDay.format(Date(it.startingDate)) == dayId }
+            val salesToday = sales.filter { formatDay(Date(it.entryDate)) == dayId }
+            val shopsCreatedToday = shops.filter { formatDay(Date(it.startingDate)) == dayId }
             
             if (salesToday.map { it.shopNumber }.distinct().size >= 3) {
                 totalXp += 50
@@ -2276,9 +2280,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
-        val weekIds = sales.map { sdfWeek.format(Date(it.entryDate)) }.distinct()
+        val weekIds = sales.map { formatWeek(Date(it.entryDate)) }.distinct()
         for (weekId in weekIds) {
-            val salesThisWeek = sales.filter { sdfWeek.format(Date(it.entryDate)) == weekId }
+            val salesThisWeek = sales.filter { formatWeek(Date(it.entryDate)) == weekId }
             
             if (salesThisWeek.map { it.shopNumber }.distinct().size >= 15) {
                 totalXp += 200
@@ -2294,11 +2298,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
-        val monthIds = (sales.map { sdfMonth.format(Date(it.entryDate)) } + 
-                        shops.map { sdfMonth.format(Date(it.startingDate)) }).distinct()
+        val monthIds = (sales.map { formatMonth(Date(it.entryDate)) } + 
+                        shops.map { formatMonth(Date(it.startingDate)) }).distinct()
         for (monthId in monthIds) {
-            val salesThisMonth = sales.filter { sdfMonth.format(Date(it.entryDate)) == monthId }
-            val shopsCreatedThisMonth = shops.filter { sdfMonth.format(Date(it.startingDate)) == monthId }
+            val salesThisMonth = sales.filter { formatMonth(Date(it.entryDate)) == monthId }
+            val shopsCreatedThisMonth = shops.filter { formatMonth(Date(it.startingDate)) == monthId }
             
             if (salesThisMonth.sumOf { it.packetsSold } >= 1200) {
                 totalXp += 1000
@@ -2324,17 +2328,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         var totalXp = 0
         var totalCoins = 0
         
-        val maxPacketsInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+        val maxPacketsInSingleDay = sales.groupBy { formatDay(Date(it.entryDate)) }
             .map { it.value.sumOf { s -> s.packetsSold } }
             .maxOrNull() ?: 0
             
-        val maxProfitInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+        val maxProfitInSingleDay = sales.groupBy { formatDay(Date(it.entryDate)) }
             .map { it.value.sumOf { s -> s.totalProfit } }
             .maxOrNull() ?: 0.0
             
         val totalShopsAdded = shops.size
         
-        val maxLocationsInSingleDay = sales.groupBy { sdfDay.format(Date(it.entryDate)) }
+        val maxLocationsInSingleDay = sales.groupBy { formatDay(Date(it.entryDate)) }
             .map { it.value.map { s -> s.locationNumber }.distinct().size }
             .maxOrNull() ?: 0
             
