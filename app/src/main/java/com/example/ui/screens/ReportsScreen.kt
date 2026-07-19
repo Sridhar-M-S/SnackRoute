@@ -283,22 +283,38 @@ fun ReportsScreen(
     val totalProfit = sales.sumOf { it.totalProfit }
     val totalVolume = sales.sumOf { it.packetsSold }
 
-    // Grouping for reports
-    val locationWise = sales.groupBy { it.locationNumber }.mapValues { (_, entries) ->
-        Pair(entries.sumOf { it.totalAmount }, entries.sumOf { it.totalProfit })
-    }
-    
-    val shopWise = sales.groupBy { it.shopNumber }.mapValues { (shopNum, entries) ->
-        val storeName = shops.firstOrNull { it.shopNumber == shopNum }?.storeName ?: shopNum
-        Triple(storeName, entries.sumOf { it.totalAmount }, entries.sumOf { it.totalProfit })
+    // Grouping for reports (Optimized and Cached)
+    val reportGroupings = remember(sales, shops) {
+        val locWise = sales.groupBy { it.locationNumber }.mapValues { (_, entries) ->
+            Pair(entries.sumOf { it.totalAmount }, entries.sumOf { it.totalProfit })
+        }
+        
+        val shpWise = sales.groupBy { it.shopNumber }.mapValues { (shopNum, entries) ->
+            val storeName = shops.firstOrNull { it.shopNumber == shopNum }?.storeName ?: shopNum
+            Triple(storeName, entries.sumOf { it.totalAmount }, entries.sumOf { it.totalProfit })
+        }
+
+        val prodWise = sales.groupBy { it.productName }.mapValues { (_, entries) ->
+            Pair(entries.sumOf { it.packetsSold }, entries.sumOf { it.totalProfit })
+        }
+
+        val pendingColList = sales.filter { it.status == "Pending" || it.status == "Partially Paid" }
+        val pendingColAmount = pendingColList.sumOf { it.totalAmount }
+
+        ReportsCache(
+            locationWise = locWise,
+            shopWise = shpWise,
+            productWise = prodWise,
+            pendingCollectionsList = pendingColList,
+            pendingAmount = pendingColAmount
+        )
     }
 
-    val productWise = sales.groupBy { it.productName }.mapValues { (_, entries) ->
-        Pair(entries.sumOf { it.packetsSold }, entries.sumOf { it.totalProfit })
-    }
-
-    val pendingCollectionsList = sales.filter { it.status == "Pending" || it.status == "Partially Paid" }
-    val pendingAmount = pendingCollectionsList.sumOf { it.totalAmount }
+    val locationWise = reportGroupings.locationWise
+    val shopWise = reportGroupings.shopWise
+    val productWise = reportGroupings.productWise
+    val pendingCollectionsList = reportGroupings.pendingCollectionsList
+    val pendingAmount = reportGroupings.pendingAmount
 
     Scaffold(
         topBar = {
@@ -510,7 +526,7 @@ fun ReportsScreen(
                         item {
                             Text("Top Routes by Net Profit", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                         }
-                        items(locationWise.toList().sortedByDescending { it.second.second }) { (locCode, values) ->
+                        items(locationWise.toList().sortedByDescending { it.second.second }, key = { it.first }) { (locCode, values) ->
                             val locName = locations.firstOrNull { it.locationNumber == locCode }?.locationName ?: locCode
                             Row(
                                 modifier = Modifier
@@ -533,7 +549,7 @@ fun ReportsScreen(
                         if (sortedShops.isEmpty()) {
                             item { Text("No store log data available", fontSize = 12.sp, color = Color.Gray) }
                         } else {
-                            items(sortedShops) { (shopNum, details) ->
+                            items(sortedShops, key = { it.first }) { (shopNum, details) ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -828,7 +844,7 @@ fun ReportsScreen(
                                 }
                             }
                         } else {
-                            items(sortedProducts) { prod ->
+                            items(sortedProducts, key = { it.productName }) { prod ->
                                 val isExpanded = expandedProducts.contains(prod.productName)
                                 Card(
                                     modifier = Modifier
@@ -1022,7 +1038,7 @@ fun ReportsScreen(
                         if (pendingCollectionsList.isEmpty()) {
                             item { Text("All collections are paid perfectly! Great job!", fontSize = 13.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold) }
                         } else {
-                            items(pendingCollectionsList) { sale ->
+                            items(pendingCollectionsList, key = { it.id }) { sale ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1109,7 +1125,7 @@ fun MonthlyChart(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp)
     ) {
-        items(data) { item ->
+        items(data, key = { it.monthYear }) { item ->
             val value = when (chartMetric) {
                 "Packets" -> item.totalPackets.toDouble()
                 "Sales" -> item.totalSales
@@ -1256,4 +1272,12 @@ fun SimpleComparisonChart(data: AppViewModel.MonthlyGrowthData) {
         }
     }
 }
+
+data class ReportsCache(
+    val locationWise: Map<String, Pair<Double, Double>>,
+    val shopWise: Map<String, Triple<String, Double, Double>>,
+    val productWise: Map<String, Pair<Int, Double>>,
+    val pendingCollectionsList: List<com.example.data.SalesEntry>,
+    val pendingAmount: Double
+)
 

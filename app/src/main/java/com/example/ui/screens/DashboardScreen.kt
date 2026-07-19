@@ -82,51 +82,81 @@ fun DashboardScreen(
         }
     }
 
-    // --- Statistics Calculations ---
-    val totalLocations = locations.size
-    val totalShops = shops.size
-    val totalProducts = products.size
+    // --- Statistics Calculations (Optimized and Cached) ---
+    val stats = remember(locations, shops, products, sales) {
+        val totalLocationsVal = locations.size
+        val totalShopsVal = shops.size
+        val totalProductsVal = products.size
 
-    val todayCalendar = Calendar.getInstance()
-    val todayFormat = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
-    val todayStr = todayFormat.format(todayCalendar.time)
+        val todayCalendar = Calendar.getInstance()
+        val todayFormat = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+        val todayStr = todayFormat.format(todayCalendar.time)
 
-    val todaySalesEntries = sales.filter {
-        todayFormat.format(Date(it.entryDate)) == todayStr
+        val todaySalesEntries = sales.filter {
+            todayFormat.format(Date(it.entryDate)) == todayStr
+        }
+
+        val todaySalesCountVal = todaySalesEntries.sumOf { it.packetsSold }
+        val todayRevenueVal = todaySalesEntries.sumOf { it.totalAmount }
+        val todayProfitValCalc = todaySalesEntries.sumOf { it.totalProfit }
+
+        // Monthly Profit
+        val currentMonthFormat = SimpleDateFormat("yyyyMM", Locale.getDefault())
+        val currentMonthStr = currentMonthFormat.format(todayCalendar.time)
+        val monthlySalesEntries = sales.filter {
+            currentMonthFormat.format(Date(it.entryDate)) == currentMonthStr
+        }
+        val monthlyProfitVal = monthlySalesEntries.sumOf { it.totalProfit }
+
+        // Pending Collections
+        val pendingCollectionsVal = sales.filter {
+            it.status == "Pending" || it.status == "Partially Paid"
+        }.sumOf { it.totalAmount }
+
+        // Product performance
+        val productSalesVal = sales.groupBy { it.productName }.mapValues { (_, entries) -> entries.sumOf { it.packetsSold } }
+        val topSellingProductVal = productSalesVal.maxByOrNull { it.value }?.key ?: "No Sales Yet"
+
+        // Shop performance
+        val shopSalesVal = sales.groupBy { it.shopNumber }.mapValues { (_, entries) -> entries.sumOf { it.totalProfit } }
+        val bestShopNum = shopSalesVal.maxByOrNull { it.value }?.key
+        val worstShopNum = shopSalesVal.minByOrNull { it.value }?.key
+
+        val bestPerformingShopVal = shops.firstOrNull { it.shopNumber == bestShopNum }?.storeName ?: "No Sales Yet"
+        val worstPerformingShopVal = if (shopSalesVal.size > 1) {
+            shops.firstOrNull { it.shopNumber == worstShopNum }?.storeName ?: "No Sales Yet"
+        } else {
+            "N/A"
+        }
+
+        DashboardStats(
+            totalLocations = totalLocationsVal,
+            totalShops = totalShopsVal,
+            totalProducts = totalProductsVal,
+            todaySalesCount = todaySalesCountVal,
+            todayRevenue = todayRevenueVal,
+            todayProfit = todayProfitValCalc,
+            monthlyProfit = monthlyProfitVal,
+            pendingCollections = pendingCollectionsVal,
+            productSales = productSalesVal,
+            topSellingProduct = topSellingProductVal,
+            bestPerformingShop = bestPerformingShopVal,
+            worstPerformingShop = worstPerformingShopVal
+        )
     }
 
-    val todaySalesCount = todaySalesEntries.sumOf { it.packetsSold }
-    val todayRevenue = todaySalesEntries.sumOf { it.totalAmount }
-    val todayProfit = todaySalesEntries.sumOf { it.totalProfit }
-
-    // Monthly Profit
-    val currentMonthFormat = SimpleDateFormat("yyyyMM", Locale.getDefault())
-    val currentMonthStr = currentMonthFormat.format(todayCalendar.time)
-    val monthlySalesEntries = sales.filter {
-        currentMonthFormat.format(Date(it.entryDate)) == currentMonthStr
-    }
-    val monthlyProfit = monthlySalesEntries.sumOf { it.totalProfit }
-
-    // Pending Collections
-    val pendingCollections = sales.filter {
-        it.status == "Pending" || it.status == "Partially Paid"
-    }.sumOf { it.totalAmount }
-
-    // Product performance
-    val productSales = sales.groupBy { it.productName }.mapValues { (_, entries) -> entries.sumOf { it.packetsSold } }
-    val topSellingProduct = productSales.maxByOrNull { it.value }?.key ?: "No Sales Yet"
-
-    // Shop performance
-    val shopSales = sales.groupBy { it.shopNumber }.mapValues { (_, entries) -> entries.sumOf { it.totalProfit } }
-    val bestShopNum = shopSales.maxByOrNull { it.value }?.key
-    val worstShopNum = shopSales.minByOrNull { it.value }?.key
-
-    val bestPerformingShop = shops.firstOrNull { it.shopNumber == bestShopNum }?.storeName ?: "No Sales Yet"
-    val worstPerformingShop = if (shopSales.size > 1) {
-        shops.firstOrNull { it.shopNumber == worstShopNum }?.storeName ?: "No Sales Yet"
-    } else {
-        "N/A"
-    }
+    val totalLocations = stats.totalLocations
+    val totalShops = stats.totalShops
+    val totalProducts = stats.totalProducts
+    val todaySalesCount = stats.todaySalesCount
+    val todayRevenue = stats.todayRevenue
+    val todayProfit = stats.todayProfit
+    val monthlyProfit = stats.monthlyProfit
+    val pendingCollections = stats.pendingCollections
+    val productSales = stats.productSales
+    val topSellingProduct = stats.topSellingProduct
+    val bestPerformingShop = stats.bestPerformingShop
+    val worstPerformingShop = stats.worstPerformingShop
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -279,7 +309,7 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(suggestions) { suggestion ->
+                        items(suggestions, key = { it.title + it.message }) { suggestion ->
                             SuggestionCard(suggestion = suggestion)
                         }
                     }
@@ -1807,7 +1837,7 @@ data class ConfettiParticle(
 
 @Composable
 fun BadgeSection(allBadges: List<Badge>, unlockedBadges: List<UserBadge>) {
-    val unlockedIds = unlockedBadges.map { it.badgeId }.toSet()
+    val unlockedIds = remember(unlockedBadges) { unlockedBadges.map { it.badgeId }.toSet() }
     
     if (allBadges.isEmpty()) return
 
@@ -1816,7 +1846,7 @@ fun BadgeSection(allBadges: List<Badge>, unlockedBadges: List<UserBadge>) {
             Text("Achievements", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(allBadges) { badge ->
+                items(allBadges, key = { it.id }) { badge ->
                     BadgeItem(badge, badge.id in unlockedIds)
                 }
             }
@@ -1914,3 +1944,18 @@ fun DailyTargetDialog(
         }
     )
 }
+
+data class DashboardStats(
+    val totalLocations: Int,
+    val totalShops: Int,
+    val totalProducts: Int,
+    val todaySalesCount: Int,
+    val todayRevenue: Double,
+    val todayProfit: Double,
+    val monthlyProfit: Double,
+    val pendingCollections: Double,
+    val productSales: Map<String, Int>,
+    val topSellingProduct: String,
+    val bestPerformingShop: String,
+    val worstPerformingShop: String
+)

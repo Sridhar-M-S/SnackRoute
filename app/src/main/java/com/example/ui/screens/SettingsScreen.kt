@@ -32,16 +32,52 @@ import com.google.android.gms.common.api.Scope
 import com.google.android.gms.common.api.ApiException
 import androidx.compose.foundation.text.selection.SelectionContainer
 import android.content.Context
+import android.content.pm.PackageManager
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.io.File
+
+private fun getAppSignatureSHA1(context: Context): String {
+    try {
+        val packageInfo = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+        }
+        
+        val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            packageInfo.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures
+        }
+        
+        if (signatures != null && signatures.isNotEmpty()) {
+            val md = MessageDigest.getInstance("SHA-1")
+            val publicKey = md.digest(signatures[0].toByteArray())
+            val hexString = StringBuilder()
+            for (i in publicKey.indices) {
+                val appendString = java.lang.Integer.toHexString(0xFF and publicKey[i].toInt()).uppercase(Locale.US)
+                if (appendString.length == 1) hexString.append("0")
+                hexString.append(appendString)
+                if (i < publicKey.size - 1) hexString.append(":")
+            }
+            return hexString.toString()
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("SignatureError", "Error getting app signature SHA1", e)
+    }
+    return "Error fetching signature"
+}
 
 private fun parseGoogleSignInError(e: Throwable, context: Context): String {
     val stackTraceString = android.util.Log.getStackTraceString(e)
     android.util.Log.e("GoogleSignInError", "Complete Google Sign-In Error details:\n$stackTraceString")
     
-    val baseAppId = "com.aistudio.snackroutepro.lpxmkw"
-    val debugSha1 = "8C:84:F4:69:0E:5A:CB:37:AC:F4:34:30:BE:67:44:4B:88:FF:CF:8D"
+    val baseAppId = context.packageName
+    val debugSha1 = getAppSignatureSHA1(context)
     val oauthClientId = com.example.BuildConfig.OAUTH_CLIENT_ID
     
     if (e is ApiException) {
@@ -50,10 +86,10 @@ private fun parseGoogleSignInError(e: Throwable, context: Context): String {
             10 -> { // CommonStatusCodes.DEVELOPER_ERROR
                 "DEVELOPER_ERROR (10):\n" +
                 "The application is misconfigured. This is most commonly caused by a mismatch between the SHA-1 fingerprint of the signing key and the package name registered in the Google Cloud Console / Firebase Console.\n\n" +
-                "Please verify that:\n" +
-                "1. Your package name is: $baseAppId\n" +
-                "2. Your SHA-1 Certificate Fingerprint is: $debugSha1\n" +
-                "3. Your Web Client ID is: $oauthClientId\n\n" +
+                "DURABLY VERIFIED RUNTIME METRICS:\n" +
+                "• Your Actual Package Name: $baseAppId\n" +
+                "• Your Actual SHA-1 Certificate: $debugSha1\n" +
+                "• Your Configured Web Client ID: $oauthClientId\n\n" +
                 "Make sure these match your Firebase Console/Google Cloud OAuth configuration exactly."
             }
             12500 -> { // GoogleSignInStatusCodes.SIGN_IN_FAILED
@@ -61,7 +97,10 @@ private fun parseGoogleSignInError(e: Throwable, context: Context): String {
                 "Google Sign-In failed. Possible causes:\n" +
                 "- Google Drive API is not enabled in your Google Cloud Console for this project.\n" +
                 "- There is a network issue.\n" +
-                "- The OAuth Web Client ID configuration is invalid."
+                "- The OAuth Web Client ID configuration is invalid.\n\n" +
+                "DURABLY VERIFIED RUNTIME METRICS:\n" +
+                "• Your Actual Package Name: $baseAppId\n" +
+                "• Your Actual SHA-1 Certificate: $debugSha1"
             }
             12501 -> { // GoogleSignInStatusCodes.SIGN_IN_CANCELLED
                 "SIGN_IN_CANCELLED (12501):\n" +

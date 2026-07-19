@@ -1242,6 +1242,7 @@ fun SalesCard(
     onDelete: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    val formattedDate = remember(sale.entryDate) { sale.entryDateFormatted }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1262,7 +1263,7 @@ fun SalesCard(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${sale.entryDateFormatted} • Route: ${sale.locationNumber}",
+                        text = "$formattedDate • Route: ${sale.locationNumber}",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )

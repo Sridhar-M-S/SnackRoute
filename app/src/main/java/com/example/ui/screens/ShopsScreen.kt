@@ -321,7 +321,7 @@ fun ShopsScreen(
         listState.scrollToItem(0)
     }
 
-    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales) {
+    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales, locations) {
         var list = shops.filter { shop ->
             val matchSearch = shop.storeName.contains(searchQuery, ignoreCase = true) ||
                     shop.shopNumber.contains(searchQuery, ignoreCase = true) ||
@@ -369,7 +369,19 @@ fun ShopsScreen(
             "Date" -> if (sortAscending) list.sortedBy { it.startingDate } else list.sortedByDescending { it.startingDate }
             else -> if (sortAscending) list.sortedBy { it.storeName } else list.sortedByDescending { it.storeName }
         }
-        list
+
+        list.map { shop ->
+            val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
+            val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
+            val score = viewModel.calculateHealthScore(shop, salesForShop)
+            val category = viewModel.getHealthCategory(score)
+            ShopDisplayItem(
+                shop = shop,
+                locationName = locName,
+                healthScore = score,
+                healthCategory = category
+            )
+        }
     }
 
     if (!showAddEditScreen) {
@@ -657,14 +669,13 @@ fun ShopsScreen(
                             contentPadding = PaddingValues(bottom = 80.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            items(filteredShops, key = { it.shopNumber }) { shop ->
-                                val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
-                                val score = viewModel.calculateHealthScore(shop, sales)
+                            items(filteredShops, key = { it.shop.shopNumber }) { item ->
+                                val shop = item.shop
                                 ShopCard(
                                     shop = shop,
-                                    locationName = locName,
-                                    healthScore = score,
-                                    healthCategory = viewModel.getHealthCategory(score),
+                                    locationName = item.locationName,
+                                    healthScore = item.healthScore,
+                                    healthCategory = item.healthCategory,
                                     onClick = { selectedShopForDetail = shop },
                                     onGoToSales = {
                                         viewModel.setSalesFilterShopNumber(shop.shopNumber)
@@ -672,7 +683,7 @@ fun ShopsScreen(
                                         onNavigateToTab("Sales")
                                     },
                                     onRecordSale = {
-                                        viewModel.setPrefilledSaleData(shop.shopNumber, shop.storeName, locName)
+                                        viewModel.setPrefilledSaleData(shop.shopNumber, shop.storeName, item.locationName)
                                         onNavigateToTab("Sales")
                                     },
                                     onEdit = {
@@ -2395,3 +2406,10 @@ fun NearestShopCard(
         }
     }
 }
+
+data class ShopDisplayItem(
+    val shop: com.example.data.ShopMaster,
+    val locationName: String,
+    val healthScore: Int,
+    val healthCategory: String
+)
