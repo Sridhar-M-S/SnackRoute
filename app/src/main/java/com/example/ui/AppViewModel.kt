@@ -21,6 +21,16 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import okhttp3.*
 import java.util.concurrent.TimeUnit
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.common.api.Scope
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.auth.GoogleAuthUtil
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Network
+import android.net.NetworkRequest
 
 data class AppError(
     val module: String,
@@ -184,6 +194,204 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _gamificationEvents = MutableSharedFlow<GamificationEvent>(extraBufferCapacity = 100)
     val gamificationEvents: SharedFlow<GamificationEvent> = _gamificationEvents.asSharedFlow()
+
+    // --- Google Drive Sync States & Persistence ---
+    private val _googleSignInAccount = MutableStateFlow<GoogleSignInAccount?>(null)
+    val googleSignInAccount: StateFlow<GoogleSignInAccount?> = _googleSignInAccount.asStateFlow()
+
+    private val _syncProgress = MutableStateFlow<Int>(-1)
+    val syncProgress: StateFlow<Int> = _syncProgress.asStateFlow()
+
+    private val _syncProgressText = MutableStateFlow<String>("")
+    val syncProgressText: StateFlow<String> = _syncProgressText.asStateFlow()
+
+    private val _syncStatus = MutableStateFlow<String>(prefs.getString("gdrive_sync_status", "Idle") ?: "Idle")
+    val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
+
+    private val _lastSyncedTime = MutableStateFlow<Long>(prefs.getLong("gdrive_last_sync_time", 0L))
+    val lastSyncedTime: StateFlow<Long> = _lastSyncedTime.asStateFlow()
+
+    private val _lastSyncError = MutableStateFlow<String>(prefs.getString("gdrive_last_error", "") ?: "")
+    val lastSyncError: StateFlow<String> = _lastSyncError.asStateFlow()
+
+    private val _isAutoSyncEnabled = MutableStateFlow<Boolean>(prefs.getBoolean("gdrive_auto_sync_enabled", true))
+    val isAutoSyncEnabled: StateFlow<Boolean> = _isAutoSyncEnabled.asStateFlow()
+
+    private val _isOfflineQueueActive = MutableStateFlow<Boolean>(false)
+    val isOfflineQueueActive: StateFlow<Boolean> = _isOfflineQueueActive.asStateFlow()
+
+    fun setGoogleAccount(account: GoogleSignInAccount?) {
+        _googleSignInAccount.value = account
+        if (account != null) {
+            prefs.edit()
+                .putString("gdrive_connected_email", account.email)
+                .putString("gdrive_connected_name", account.displayName)
+                .apply()
+            triggerDriveSync()
+        } else {
+            prefs.edit()
+                .remove("gdrive_connected_email")
+                .remove("gdrive_connected_name")
+                .apply()
+        }
+    }
+
+    fun setAutoSyncEnabled(enabled: Boolean) {
+        _isAutoSyncEnabled.value = enabled
+        prefs.edit().putBoolean("gdrive_auto_sync_enabled", enabled).apply()
+        if (enabled) {
+            triggerDriveSync()
+        }
+    }
+
+    fun signOutGoogle(context: Context, onComplete: () -> Unit = {}) {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+        GoogleSignIn.getClient(context, gso).signOut().addOnCompleteListener {
+            setGoogleAccount(null)
+            _syncStatus.value = "Idle"
+            _lastSyncError.value = ""
+            prefs.edit()
+                .remove("gdrive_sync_status")
+                .remove("gdrive_last_error")
+                .apply()
+            onComplete()
+        }
+    }
+
+    fun reloadPreferences() {
+        _userGeminiApiKey.value = prefs.getString("gemini_api_key", "") ?: ""
+        _bonusXp.value = prefs.getInt("bonus_xp", 0)
+        _bonusCoins.value = prefs.getInt("bonus_coins", 0)
+        _rewardedMissionIds.value = prefs.getStringSet("rewarded_mission_ids", emptySet()) ?: emptySet()
+        refreshNextShopNumber()
+    }
+
+    private fun checkAndRunAutoSync() {
+        if (_isAutoSyncEnabled.value && _googleSignInAccount.value != null) {
+            triggerDriveSync()
+        }
+    }
+
+    private fun isInternetAvailable(context: Context): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val net = cm.activeNetwork ?: return false
+            val cap = cm.getNetworkCapabilities(net) ?: return false
+            cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun triggerDriveSync() {
+        val account = _googleSignInAccount.value ?: return
+        val context = getApplication<Application>()
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!isInternetAvailable(context)) {
+                _isOfflineQueueActive.value = true
+                _syncStatus.value = "Failed"
+                _lastSyncError.value = "Device is offline. Sync has been queued and will automatically retry when internet is available."
+                prefs.edit()
+                    .putString("gdrive_sync_status", "Failed")
+                    .putString("gdrive_last_error", _lastSyncError.value)
+                    .apply()
+                return@launch
+            }
+            
+            _isOfflineQueueActive.value = false
+            _syncStatus.value = "InProgress"
+            _syncProgress.value = 0
+            _syncProgressText.value = "Starting Google Drive sync..."
+            _lastSyncError.value = ""
+            prefs.edit()
+                .putString("gdrive_sync_status", "InProgress")
+                .putString("gdrive_last_error", "")
+                .apply()
+
+            val result = com.example.utils.GoogleDriveSyncHelper.uploadBackup(context, account.account!!) { text, percent ->
+                _syncProgressText.value = text
+                _syncProgress.value = percent
+            }
+
+            _syncProgress.value = -1 // hidden
+            
+            result.onSuccess { timestamp ->
+                _syncStatus.value = "Success"
+                _lastSyncedTime.value = timestamp
+                _lastSyncError.value = ""
+                prefs.edit()
+                    .putString("gdrive_sync_status", "Success")
+                    .putLong("gdrive_last_sync_time", timestamp)
+                    .putString("gdrive_last_error", "")
+                    .apply()
+            }.onFailure { exception ->
+                val errorMsg = exception.message ?: "Unknown sync error"
+                _syncStatus.value = "Failed"
+                _lastSyncError.value = "Upload Failed: $errorMsg"
+                prefs.edit()
+                    .putString("gdrive_sync_status", "Failed")
+                    .putString("gdrive_last_error", _lastSyncError.value)
+                    .apply()
+            }
+        }
+    }
+
+    fun restoreFromGoogleDrive(onComplete: (Boolean, String) -> Unit) {
+        val account = _googleSignInAccount.value
+        if (account == null) {
+            onComplete(false, "Google account is not connected.")
+            return
+        }
+        val context = getApplication<Application>()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!isInternetAvailable(context)) {
+                onComplete(false, "Device is offline. Internet connection is required to download backups.")
+                return@launch
+            }
+
+            _syncStatus.value = "InProgress"
+            _syncProgress.value = 0
+            _syncProgressText.value = "Starting restore from Google Drive..."
+            _lastSyncError.value = ""
+            prefs.edit()
+                .putString("gdrive_sync_status", "InProgress")
+                .putString("gdrive_last_error", "")
+                .apply()
+
+            val result = com.example.utils.GoogleDriveSyncHelper.downloadAndRestoreBackup(context, account.account!!) { text, percent ->
+                _syncProgressText.value = text
+                _syncProgress.value = percent
+            }
+
+            _syncProgress.value = -1
+
+            result.onSuccess {
+                reloadPreferences()
+                
+                _syncStatus.value = "Success"
+                _lastSyncedTime.value = System.currentTimeMillis()
+                _lastSyncError.value = ""
+                prefs.edit()
+                    .putString("gdrive_sync_status", "Success")
+                    .putLong("gdrive_last_sync_time", _lastSyncedTime.value)
+                    .putString("gdrive_last_error", "")
+                    .apply()
+                
+                onComplete(true, "Application backup restored successfully!")
+            }.onFailure { exception ->
+                val errorMsg = exception.message ?: "Unknown download/restore error"
+                _syncStatus.value = "Failed"
+                _lastSyncError.value = "Download Failed: $errorMsg"
+                prefs.edit()
+                    .putString("gdrive_sync_status", "Failed")
+                    .putString("gdrive_last_error", _lastSyncError.value)
+                    .apply()
+                onComplete(false, errorMsg)
+            }
+        }
+    }
 
     // Date formats for unique mission cycle tracking
     private val sdfDay = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
@@ -1281,6 +1489,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        // Initialize Google Sign-In account on launch
+        _googleSignInAccount.value = GoogleSignIn.getLastSignedInAccount(application)
+
+        // Register connectivity observer for auto-retry when back online
+        try {
+            val cm = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    if (_isOfflineQueueActive.value) {
+                        triggerDriveSync()
+                    }
+                }
+            })
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // Centered Auto-Sync listener (handles Add, Edit, Delete, Import, Restore automatically)
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(
+                repository.allShops,
+                repository.allSales,
+                repository.allLocations,
+                repository.allProducts,
+                repository.allTimetableEntries
+            ) { sh, sa, lo, pr, ti ->
+                System.currentTimeMillis()
+            }
+            .drop(1)
+            .debounce(2500L)
+            .collect {
+                if (_isAutoSyncEnabled.value && _googleSignInAccount.value != null) {
+                    triggerDriveSync()
+                }
+            }
+        }
+
         refreshNextShopNumber()
         viewModelScope.launch(Dispatchers.IO) {
             repository.initializeTimetableIfNeeded()

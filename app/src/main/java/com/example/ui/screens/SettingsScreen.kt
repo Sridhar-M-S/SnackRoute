@@ -26,6 +26,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.AppViewModel
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.android.gms.common.api.ApiException
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,6 +48,41 @@ fun SettingsScreen(
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
     var apiKeyInput by remember(userApiKey) { mutableStateOf(userApiKey) }
     var isKeyVisible by remember { mutableStateOf(false) }
+
+    // --- Google Drive Sync States ---
+    val googleAccountState by viewModel.googleSignInAccount.collectAsState()
+    val syncStatusState by viewModel.syncStatus.collectAsState()
+    val lastSyncedTimeState by viewModel.lastSyncedTime.collectAsState()
+    val lastSyncErrorState by viewModel.lastSyncError.collectAsState()
+    val isAutoSyncEnabledState by viewModel.isAutoSyncEnabled.collectAsState()
+    val syncProgressState by viewModel.syncProgress.collectAsState()
+    val syncProgressTextState by viewModel.syncProgressText.collectAsState()
+    val isOfflineQueueActiveState by viewModel.isOfflineQueueActive.collectAsState()
+
+    var showGDriveRestoreConfirm by remember { mutableStateOf(false) }
+
+    val gso = remember {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestProfile()
+            .requestScopes(Scope("https://www.googleapis.com/auth/drive.file"))
+            .build()
+    }
+    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            viewModel.setGoogleAccount(account)
+            Toast.makeText(context, "Successfully connected to Google Drive!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Google Sign-In failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -331,7 +372,7 @@ fun SettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Google Drive Row
+                    // Google Drive integration
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -345,52 +386,254 @@ fun SettingsScreen(
                             Icon(
                                 imageVector = Icons.Default.CloudCircle,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
                             )
                             Column {
-                                Text("Google Drive", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Sync database and backups to Google Drive", fontSize = 11.sp, color = Color.Gray)
+                                Text("Google Drive", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                if (googleAccountState != null) {
+                                    Text("Connected as ${googleAccountState?.email}", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
+                                } else {
+                                    Text("Sync database and backups to Google Drive", fontSize = 11.sp, color = Color.Gray)
+                                }
                             }
                         }
-                        AssistChip(
-                            onClick = { Toast.makeText(context, "Google Drive sync is being prepared. Standard local backup and restore is fully functional!", Toast.LENGTH_SHORT).show() },
-                            label = { Text("Upcoming") },
-                            enabled = false,
-                            modifier = Modifier.testTag("google_drive_chip")
-                        )
+                        
+                        if (googleAccountState == null) {
+                            Button(
+                                onClick = {
+                                    val signInIntent = googleSignInClient.signInIntent
+                                    launcher.launch(signInIntent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("google_drive_signin_btn")
+                            ) {
+                                Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Connect", fontSize = 12.sp)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.signOutGoogle(context) {
+                                        Toast.makeText(context, "Google Drive disconnected.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("google_drive_signout_btn")
+                            ) {
+                                Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Disconnect", fontSize = 12.sp)
+                            }
+                        }
                     }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    if (googleAccountState != null) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                    // OneDrive Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                        // Settings section
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Cloud,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Auto Sync", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Automatically backup after add, edit, delete, import, or restore", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Switch(
+                                checked = isAutoSyncEnabledState,
+                                onCheckedChange = { viewModel.setAutoSyncEnabled(it) },
+                                modifier = Modifier.testTag("auto_sync_switch")
                             )
-                            Column {
-                                Text("OneDrive", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Sync database and backups to Microsoft OneDrive", fontSize = 11.sp, color = Color.Gray)
+                        }
+
+                        // Sync Status Line
+                        val formattedLastSync = remember(lastSyncedTimeState) {
+                            if (lastSyncedTimeState == 0L) {
+                                "Never"
+                            } else {
+                                val sdf = SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault())
+                                sdf.format(java.util.Date(lastSyncedTimeState))
                             }
                         }
-                        AssistChip(
-                            onClick = { Toast.makeText(context, "OneDrive sync is being prepared. Standard local backup and restore is fully functional!", Toast.LENGTH_SHORT).show() },
-                            label = { Text("Upcoming") },
-                            enabled = false,
-                            modifier = Modifier.testTag("onedrive_chip")
-                        )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Sync Status:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    when (syncStatusState) {
+                                        "InProgress" -> {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text("Sync in Progress...", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                        }
+                                        "Success" -> {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = Color(0xFF4CAF50),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text("Success", fontSize = 12.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.SemiBold)
+                                        }
+                                        "Failed" -> {
+                                            Icon(
+                                                imageVector = Icons.Default.Warning,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text("Failed", fontSize = 12.sp, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                                        }
+                                        else -> {
+                                            Icon(
+                                                imageVector = Icons.Default.CloudQueue,
+                                                contentDescription = null,
+                                                tint = Color.Gray,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text("Connected", fontSize = 12.sp, color = Color.Gray)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (syncStatusState == "InProgress" && syncProgressState >= 0) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    LinearProgressIndicator(
+                                        progress = { syncProgressState / 100f },
+                                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.outlineVariant,
+                                    )
+                                    Text(
+                                        text = "$syncProgressTextState (${syncProgressState}%)",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            Text("Last Backup Sync: $formattedLastSync", fontSize = 11.sp, color = Color.Gray)
+
+                            if (lastSyncErrorState.isNotEmpty()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(8.dp)
+                                ) {
+                                    Text("Error details:", fontSize = 11.sp, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                                    Text(lastSyncErrorState, fontSize = 11.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                            }
+                        }
+
+                        if (isOfflineQueueActiveState) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFFFF3CD), shape = RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color(0xFF856404), modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = "Offline Mode: Drive sync is queued and will automatically retry when internet connection is restored.",
+                                    color = Color(0xFF856404),
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                        }
+
+                        // Actions Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.triggerDriveSync() },
+                                modifier = Modifier.weight(1f).testTag("sync_now_button"),
+                                contentPadding = PaddingValues(vertical = 8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                enabled = syncStatusState != "InProgress"
+                            ) {
+                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Sync Now", fontSize = 12.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = { showGDriveRestoreConfirm = true },
+                                modifier = Modifier.weight(1f).testTag("restore_from_gdrive_button"),
+                                contentPadding = PaddingValues(vertical = 8.dp),
+                                enabled = syncStatusState != "InProgress"
+                            ) {
+                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Restore Backup", fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
+            }
+
+            if (showGDriveRestoreConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showGDriveRestoreConfirm = false },
+                    title = { Text("Restore backup from Google Drive?") },
+                    text = { Text("WARNING: This will completely replace your current local data, including shops, sales, products, images, XP/level, and settings with the cloud backup. This action cannot be undone.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showGDriveRestoreConfirm = false
+                                viewModel.restoreFromGoogleDrive { success, message ->
+                                    if (success) {
+                                        Toast.makeText(context, "Cloud restore complete! Restored all shops, sales, and settings.", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(context, "Restore failed: $message", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Restore Now")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showGDriveRestoreConfirm = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
 
             // --- Data Management ---

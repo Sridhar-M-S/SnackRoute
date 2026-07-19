@@ -202,4 +202,57 @@ object BackupHelper {
             false
         }
     }
+
+    object EncryptionHelper {
+        private val keyBytes = "SnackRouteKey2026SecurePass12345".toByteArray(Charsets.UTF_8).take(32).toByteArray()
+        private val ivBytes = "SnackRouteIv2026".toByteArray(Charsets.UTF_8).take(16).toByteArray()
+
+        fun encrypt(inputFile: File, outputFile: File) {
+            val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+            val secretKey = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+            val iv = javax.crypto.spec.IvParameterSpec(ivBytes)
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKey, iv)
+
+            FileInputStream(inputFile).use { input ->
+                FileOutputStream(outputFile).use { output ->
+                    val buffer = ByteArray(4096)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        val outputBytes = cipher.update(buffer, 0, bytesRead)
+                        if (outputBytes != null) {
+                            output.write(outputBytes)
+                        }
+                    }
+                    val finalBytes = cipher.doFinal()
+                    if (finalBytes != null) {
+                        output.write(finalBytes)
+                    }
+                }
+            }
+        }
+
+        fun decrypt(inputFile: File, outputFile: File) {
+            val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+            val secretKey = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+            val iv = javax.crypto.spec.IvParameterSpec(ivBytes)
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKey, iv)
+
+            FileInputStream(inputFile).use { input ->
+                FileOutputStream(outputFile).use { output ->
+                    val buffer = ByteArray(4096)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        val outputBytes = cipher.update(buffer, 0, bytesRead)
+                        if (outputBytes != null) {
+                            output.write(outputBytes)
+                        }
+                    }
+                    val finalBytes = cipher.doFinal()
+                    if (finalBytes != null) {
+                        output.write(finalBytes)
+                    }
+                }
+            }
+        }
+    }
 }
