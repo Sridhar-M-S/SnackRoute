@@ -347,7 +347,12 @@ fun CalculateCostTabContent(
                             readOnly = true,
                             label = { Text("Snack Category") },
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                            modifier = Modifier.fillMaxWidth().clickable { catExpanded = true }.testTag("selector_category")
+                            modifier = Modifier.fillMaxWidth().testTag("selector_category")
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { catExpanded = true }
                         )
                         DropdownMenu(
                             expanded = catExpanded,
@@ -393,9 +398,15 @@ fun CalculateCostTabContent(
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = isVarietyEnabled) { varExpanded = true }
                                 .testTag("selector_variety")
                         )
+                        if (isVarietyEnabled) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { varExpanded = true }
+                            )
+                        }
                         DropdownMenu(
                             expanded = varExpanded,
                             onDismissRequest = { varExpanded = false },
@@ -448,9 +459,15 @@ fun CalculateCostTabContent(
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = isPriceEnabled) { priceExpanded = true }
                                 .testTag("selector_price")
                         )
+                        if (isPriceEnabled) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { priceExpanded = true }
+                            )
+                        }
                         DropdownMenu(
                             expanded = priceExpanded,
                             onDismissRequest = { priceExpanded = false },
@@ -706,7 +723,12 @@ fun CalculateCostTabContent(
                                         readOnly = true,
                                         label = { Text("Unit") },
                                         trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                                        modifier = Modifier.fillMaxWidth().clickable { unitExpanded = true }.testTag("dropdown_unit_${ingredient.id}")
+                                        modifier = Modifier.fillMaxWidth().testTag("dropdown_unit_${ingredient.id}")
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .clickable { unitExpanded = true }
                                     )
                                     DropdownMenu(
                                         expanded = unitExpanded,
@@ -1076,7 +1098,12 @@ fun IngredientMasterTabContent(
                         readOnly = true,
                         label = { Text("Category") },
                         trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                        modifier = Modifier.fillMaxWidth().clickable { catFilterExpanded = true }.testTag("ingredient_filter_dropdown")
+                        modifier = Modifier.fillMaxWidth().testTag("ingredient_filter_dropdown")
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { catFilterExpanded = true }
                     )
                     DropdownMenu(
                         expanded = catFilterExpanded,
@@ -1338,7 +1365,12 @@ fun IngredientMasterTabContent(
                             readOnly = true,
                             label = { Text("Category") },
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                            modifier = Modifier.fillMaxWidth().clickable { catDropdownExpanded = true }.testTag("input_ingredient_category_dropdown")
+                            modifier = Modifier.fillMaxWidth().testTag("input_ingredient_category_dropdown")
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { catDropdownExpanded = true }
                         )
                         DropdownMenu(
                             expanded = catDropdownExpanded,
@@ -1451,7 +1483,12 @@ fun IngredientMasterTabContent(
                                     readOnly = true,
                                     label = { Text("Unit") },
                                     trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                                    modifier = Modifier.fillMaxWidth().clickable { unitDropdownExpanded = true }.testTag("input_purchase_unit")
+                                    modifier = Modifier.fillMaxWidth().testTag("input_purchase_unit")
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { unitDropdownExpanded = true }
                                 )
                                 DropdownMenu(
                                     expanded = unitDropdownExpanded,
