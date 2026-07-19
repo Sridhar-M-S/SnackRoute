@@ -242,17 +242,22 @@ fun CalculateCostTabContent(
 
     // Derive Categories
     val categories = remember(products) {
-        products.map { it.productCategory }.distinct().sorted()
+        products.filter { it.status == "Active" }
+            .map { it.productCategory }
+            .distinct()
+            .sorted()
     }
 
     // Derive Varieties for Selected Category
     val filteredProducts = remember(products, selectedCategory) {
         if (selectedCategory.isEmpty()) emptyList()
-        else products.filter { it.productCategory == selectedCategory }
+        else products.filter { it.status == "Active" && it.productCategory == selectedCategory }
     }
 
     // Derive Prices for Selected Product Variety
-    val filteredPrices = allPricesForSelectedProduct
+    val filteredPrices = remember(allPricesForSelectedProduct) {
+        allPricesForSelectedProduct.filter { it.status == "Active" }
+    }
 
     val selectedProductObj = remember(products, selectedVarietyProductId) {
         products.find { it.id == selectedVarietyProductId }
@@ -371,15 +376,25 @@ fun CalculateCostTabContent(
                     }
 
                     // 2. Product Variety Dropdown
+                    val isVarietyEnabled = selectedCategory.isNotEmpty() && filteredProducts.isNotEmpty()
+                    val varietyValue = when {
+                        selectedCategory.isEmpty() -> "Select Snack Category first"
+                        filteredProducts.isEmpty() -> "No active varieties found for this category"
+                        else -> selectedVarietyProductId?.let { id -> products.find { it.id == id }?.productName } ?: "Select Variety"
+                    }
+
                     Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
-                            value = selectedVarietyProductId?.let { id -> products.find { it.id == id }?.productName } ?: "Select Variety",
+                            value = varietyValue,
                             onValueChange = {},
                             readOnly = true,
-                            enabled = selectedCategory.isNotEmpty(),
+                            enabled = isVarietyEnabled,
                             label = { Text("Product Variety") },
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                            modifier = Modifier.fillMaxWidth().clickable { if (selectedCategory.isNotEmpty()) varExpanded = true }.testTag("selector_variety")
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = isVarietyEnabled) { varExpanded = true }
+                                .testTag("selector_variety")
                         )
                         DropdownMenu(
                             expanded = varExpanded,
@@ -406,16 +421,35 @@ fun CalculateCostTabContent(
                         }
                     }
 
+                    if (selectedCategory.isNotEmpty() && filteredProducts.isEmpty()) {
+                        Text(
+                            text = "No varieties exist for the selected category. Please create one in Product Master first.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                    }
+
                     // 3. Selling Price Dropdown
+                    val isPriceEnabled = selectedVarietyProductId != null && filteredPrices.isNotEmpty()
+                    val priceValue = when {
+                        selectedVarietyProductId == null -> "Select Product Variety first"
+                        filteredPrices.isEmpty() -> "No selling prices exist for this variety"
+                        else -> selectedPriceObj?.let { "₹${it.sellingPrice} (Current Profit: ₹${it.profitPerPacket})" } ?: "Select Price Variant"
+                    }
+
                     Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
-                            value = selectedPriceObj?.let { "₹${it.sellingPrice} (Current Profit: ₹${it.profitPerPacket})" } ?: "Select Price Variant",
+                            value = priceValue,
                             onValueChange = {},
                             readOnly = true,
-                            enabled = selectedVarietyProductId != null,
+                            enabled = isPriceEnabled,
                             label = { Text("Selling Price Variant") },
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                            modifier = Modifier.fillMaxWidth().clickable { if (selectedVarietyProductId != null) priceExpanded = true }.testTag("selector_price")
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = isPriceEnabled) { priceExpanded = true }
+                                .testTag("selector_price")
                         )
                         DropdownMenu(
                             expanded = priceExpanded,
@@ -439,6 +473,15 @@ fun CalculateCostTabContent(
                                 )
                             }
                         }
+                    }
+
+                    if (selectedVarietyProductId != null && filteredPrices.isEmpty()) {
+                        Text(
+                            text = "No selling prices exist for this variety. Please configure prices in Product Master first.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
 
                     // Enable Dynamic profit toggle inside
