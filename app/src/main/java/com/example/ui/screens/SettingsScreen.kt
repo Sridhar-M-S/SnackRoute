@@ -137,7 +137,8 @@ fun SettingsScreen(
     onToggleDarkMode: (Boolean) -> Unit,
     onOpenChat: () -> Unit,
     onOpenTimetable: () -> Unit,
-    onOpenDebug: () -> Unit
+    onOpenDebug: () -> Unit,
+    onOpenCostEngine: () -> Unit
 ) {
     val context = LocalContext.current
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
@@ -259,6 +260,72 @@ fun SettingsScreen(
                         onCheckedChange = onToggleDarkMode,
                         modifier = Modifier.testTag("dark_mode_switch")
                     )
+                }
+            }
+
+            // --- Dynamic Cost & Profit Engine Settings (Steps 17, 18, 20) ---
+            val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsState()
+            Text("Cost & Profit Engine", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("cost_engine_settings_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Calculate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text("Dynamic Cost Engine", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Calculate snack margins dynamically from raw ingredient purchases.", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                        Switch(
+                            checked = isDynamicProfitEnabled,
+                            onCheckedChange = { viewModel.setDynamicProfitEnabled(it) },
+                            modifier = Modifier.testTag("dynamic_profit_settings_toggle")
+                        )
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Configure ingredients, unit conversions, covers, stickers, cups, petrol, electricity, and custom recipe snapshots.",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        )
+                        Button(
+                            onClick = onOpenCostEngine,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.testTag("btn_settings_open_cost_engine")
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Configure", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
 

@@ -132,5 +132,55 @@ data class DailyTask(
     val isReminderEnabled: Boolean = false
 )
 
+@Entity(tableName = "ingredients")
+data class Ingredient(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,         // e.g. "Corn", "Seasoning", "Oil", "Cover", "Sticker", "Cup", "Petrol", "Electricity", etc.
+    val variety: String = "", // e.g. "Mushroom Corn", "Cheese", "Sunflower", "Normal", "Logo Sticker"
+    val category: String = "Other", // For grouping and future extension
+    val status: String = "Active" // "Active", "Archived"
+)
+
+@Entity(tableName = "ingredient_purchases")
+data class IngredientPurchase(
+    @PrimaryKey(autoGenerate = true) val purchaseId: Int = 0,
+    val ingredientId: Int,
+    val purchaseQuantity: Double,
+    val unit: String,
+    val purchasePrice: Double,
+    val purchaseDate: String, // "yyyy-MM-dd"
+    val supplier: String? = "",
+    val remarks: String? = "",
+    val sealCost: Double = 0.0, // Used for Covers (Step 6)
+    val printingCost: Double = 0.0, // Used for Covers (Step 6)
+    val largeCoverDistribution: Int = 1 // Default 1. If 10, cost is divided by 10 (Step 6)
+)
+
+@Entity(tableName = "cost_calculations")
+data class CostCalculation(
+    @PrimaryKey(autoGenerate = true) val calculationId: Int = 0,
+    val productPriceId: Int, // Links to ProductPrice.priceId
+    val version: Int, // Incremental cost version (e.g., 1, 2, 3...)
+    val calculationDate: String, // "yyyy-MM-dd"
+    val totalProductionCost: Double,
+    val sellingPriceSnapshot: Double, // Snapshot of sellingPrice
+    val profitSnapshot: Double, // Snapshot of profit
+    val remarks: String? = ""
+)
+
+@Entity(tableName = "cost_calculation_items")
+data class CostCalculationItem(
+    @PrimaryKey(autoGenerate = true) val itemId: Int = 0,
+    val costCalculationId: Int, // Links to CostCalculation.calculationId
+    val ingredientId: Int,
+    val ingredientName: String, // Snapshot
+    val ingredientVariety: String, // Snapshot
+    val usageQuantity: Double,
+    val usageUnit: String,
+    val costPerUnitSnapshot: Double, // Snapshot of cost per purchase unit
+    val calculatedCost: Double, // The final computed cost contribution
+    val purchaseUnitSnapshot: String // The unit in which it was purchased
+)
+
 
 

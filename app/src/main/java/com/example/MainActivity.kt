@@ -225,13 +225,22 @@ class MainActivity : ComponentActivity() {
                                             onToggleDarkMode = { isDarkMode = it },
                                             onOpenChat = { isAiChatOpen = true },
                                             onOpenTimetable = { isTimetableOpen = true },
-                                            onOpenDebug = { isDebugOpen = true }
+                                            onOpenDebug = { isDebugOpen = true },
+                                            onOpenCostEngine = { navigateToChildTab("CostEngine") }
                                         )
                                     }
                                 }
                                 if (navigationHistory.contains("Levels")) {
                                     Box(modifier = if (currentTab == "Levels") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         LevelsScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("CostEngine")) {
+                                    Box(modifier = if (currentTab == "CostEngine") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        CostEngineScreen(
                                             viewModel = viewModel,
                                             onBack = { navigateBack() }
                                         )

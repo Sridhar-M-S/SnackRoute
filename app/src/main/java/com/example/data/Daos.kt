@@ -219,5 +219,63 @@ interface DailyTaskDao {
     suspend fun deleteTaskById(id: Int)
 }
 
+@Dao
+interface DynamicCostDao {
+    // --- Ingredient ---
+    @Query("SELECT * FROM ingredients ORDER BY name ASC, variety ASC")
+    fun getAllIngredients(): Flow<List<Ingredient>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIngredient(ingredient: Ingredient): Long
+
+    @Update
+    suspend fun updateIngredient(ingredient: Ingredient)
+
+    @Delete
+    suspend fun deleteIngredient(ingredient: Ingredient)
+
+    // --- Ingredient Purchase ---
+    @Query("SELECT * FROM ingredient_purchases ORDER BY purchaseDate DESC, purchaseId DESC")
+    fun getAllPurchases(): Flow<List<IngredientPurchase>>
+
+    @Query("SELECT * FROM ingredient_purchases WHERE ingredientId = :ingredientId ORDER BY purchaseDate DESC, purchaseId DESC")
+    fun getPurchasesForIngredient(ingredientId: Int): Flow<List<IngredientPurchase>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPurchase(purchase: IngredientPurchase): Long
+
+    @Update
+    suspend fun updatePurchase(purchase: IngredientPurchase)
+
+    @Delete
+    suspend fun deletePurchase(purchase: IngredientPurchase)
+
+    @Query("DELETE FROM ingredient_purchases WHERE purchaseId = :id")
+    suspend fun deletePurchaseById(id: Int)
+
+    // --- Cost Calculation ---
+    @Query("SELECT * FROM cost_calculations ORDER BY calculationId DESC")
+    fun getAllCalculations(): Flow<List<CostCalculation>>
+
+    @Query("SELECT * FROM cost_calculations WHERE productPriceId = :productPriceId ORDER BY version DESC")
+    fun getCalculationsForProductPrice(productPriceId: Int): Flow<List<CostCalculation>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCalculation(calculation: CostCalculation): Long
+
+    @Delete
+    suspend fun deleteCalculation(calculation: CostCalculation)
+
+    // --- Cost Calculation Item ---
+    @Query("SELECT * FROM cost_calculation_items WHERE costCalculationId = :calculationId")
+    fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCalculationItems(items: List<CostCalculationItem>)
+
+    @Query("DELETE FROM cost_calculation_items WHERE costCalculationId = :calculationId")
+    suspend fun deleteCalculationItemsForCalculation(calculationId: Int)
+}
+
 
 

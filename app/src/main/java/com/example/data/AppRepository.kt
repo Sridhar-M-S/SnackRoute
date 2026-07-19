@@ -19,7 +19,8 @@ class AppRepository(
     private val dailyTargetDao: DailyTargetDao,
     private val badgeDao: BadgeDao,
     private val errorLogDao: ErrorLogDao,
-    private val dailyTaskDao: DailyTaskDao
+    private val dailyTaskDao: DailyTaskDao,
+    private val dynamicCostDao: DynamicCostDao
 ) {
     // --- Error Log Queries ---
     val allErrorLogs: Flow<List<ErrorLog>> = errorLogDao.getAllErrorLogs()
@@ -261,4 +262,37 @@ class AppRepository(
     suspend fun updateTask(task: DailyTask) = dailyTaskDao.updateTask(task)
     suspend fun deleteTask(task: DailyTask) = dailyTaskDao.deleteTask(task)
     suspend fun deleteTaskById(id: Int) = dailyTaskDao.deleteTaskById(id)
+
+    // --- Dynamic Cost calculation methods ---
+    val allIngredients: Flow<List<Ingredient>> = dynamicCostDao.getAllIngredients()
+    suspend fun insertIngredient(ingredient: Ingredient): Long = dynamicCostDao.insertIngredient(ingredient)
+    suspend fun updateIngredient(ingredient: Ingredient) = dynamicCostDao.updateIngredient(ingredient)
+    suspend fun deleteIngredient(ingredient: Ingredient) = dynamicCostDao.deleteIngredient(ingredient)
+
+    val allPurchases: Flow<List<IngredientPurchase>> = dynamicCostDao.getAllPurchases()
+    fun getPurchasesForIngredient(id: Int): Flow<List<IngredientPurchase>> = dynamicCostDao.getPurchasesForIngredient(id)
+    suspend fun insertPurchase(purchase: IngredientPurchase): Long = dynamicCostDao.insertPurchase(purchase)
+    suspend fun updatePurchase(purchase: IngredientPurchase) = dynamicCostDao.updatePurchase(purchase)
+    suspend fun deletePurchase(purchase: IngredientPurchase) = dynamicCostDao.deletePurchase(purchase)
+    suspend fun deletePurchaseById(id: Int) = dynamicCostDao.deletePurchaseById(id)
+
+    val allCalculations: Flow<List<CostCalculation>> = dynamicCostDao.getAllCalculations()
+    fun getCalculationsForProductPrice(productPriceId: Int): Flow<List<CostCalculation>> = dynamicCostDao.getCalculationsForProductPrice(productPriceId)
+    
+    suspend fun saveCostCalculation(calculation: CostCalculation, items: List<CostCalculationItem>) {
+        database.withTransaction {
+            val calcId = dynamicCostDao.insertCalculation(calculation)
+            val finalItems = items.map { it.copy(costCalculationId = calcId.toInt()) }
+            dynamicCostDao.insertCalculationItems(finalItems)
+        }
+    }
+
+    suspend fun deleteCalculation(calculation: CostCalculation) {
+        database.withTransaction {
+            dynamicCostDao.deleteCalculationItemsForCalculation(calculation.calculationId)
+            dynamicCostDao.deleteCalculation(calculation)
+        }
+    }
+
+    fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>> = dynamicCostDao.getCalculationItems(calculationId)
 }

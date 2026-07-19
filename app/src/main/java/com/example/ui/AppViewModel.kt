@@ -56,7 +56,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.dailyTargetDao(),
         db.badgeDao(),
         db.errorLogDao(),
-        db.dailyTaskDao()
+        db.dailyTaskDao(),
+        db.dynamicCostDao()
     )
 
     // --- Centralized Error States ---
@@ -2988,6 +2989,146 @@ User Question: $userQuestion
                 triggerError("DailyTasks", "copyPrevTasks", "DatabaseError", e.message ?: "Failed to copy tasks", "Check database connection", e)
             }
         }
+    }
+
+    // --- Dynamic Profit Calculation Settings & Flows ---
+    private val _isDynamicProfitEnabled = MutableStateFlow(prefs.getBoolean("is_dynamic_profit_enabled", false))
+    val isDynamicProfitEnabled: StateFlow<Boolean> = _isDynamicProfitEnabled.asStateFlow()
+
+    fun setDynamicProfitEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("is_dynamic_profit_enabled", enabled).apply()
+        _isDynamicProfitEnabled.value = enabled
+    }
+
+    val allIngredients: StateFlow<List<Ingredient>> = repository.allIngredients
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val allIngredientPurchases: StateFlow<List<IngredientPurchase>> = repository.allPurchases
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val allCostCalculations: StateFlow<List<CostCalculation>> = repository.allCalculations
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun addIngredient(name: String, variety: String, category: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.insertIngredient(
+                    Ingredient(name = name, variety = variety, category = category)
+                )
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "addIngredient", "DatabaseError", e.message ?: "Failed to add ingredient", "Check database connection", e)
+            }
+        }
+    }
+
+    fun updateIngredient(ingredient: Ingredient) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.updateIngredient(ingredient)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "updateIngredient", "DatabaseError", e.message ?: "Failed to update ingredient", "Check database connection", e)
+            }
+        }
+    }
+
+    fun deleteIngredient(ingredient: Ingredient) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.deleteIngredient(ingredient)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "deleteIngredient", "DatabaseError", e.message ?: "Failed to delete ingredient", "Check database connection", e)
+            }
+        }
+    }
+
+    fun addPurchase(
+        ingredientId: Int,
+        quantity: Double,
+        unit: String,
+        price: Double,
+        date: String,
+        supplier: String? = "",
+        remarks: String? = "",
+        sealCost: Double = 0.0,
+        printingCost: Double = 0.0,
+        largeCoverDistribution: Int = 1
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.insertPurchase(
+                    IngredientPurchase(
+                        ingredientId = ingredientId,
+                        purchaseQuantity = quantity,
+                        unit = unit,
+                        purchasePrice = price,
+                        purchaseDate = date,
+                        supplier = supplier,
+                        remarks = remarks,
+                        sealCost = sealCost,
+                        printingCost = printingCost,
+                        largeCoverDistribution = largeCoverDistribution
+                    )
+                )
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "addPurchase", "DatabaseError", e.message ?: "Failed to add purchase", "Check database connection", e)
+            }
+        }
+    }
+
+    fun updatePurchase(purchase: IngredientPurchase) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.updatePurchase(purchase)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "updatePurchase", "DatabaseError", e.message ?: "Failed to update purchase", "Check database connection", e)
+            }
+        }
+    }
+
+    fun deletePurchase(purchase: IngredientPurchase) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.deletePurchase(purchase)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "deletePurchase", "DatabaseError", e.message ?: "Failed to delete purchase", "Check database connection", e)
+            }
+        }
+    }
+
+    fun saveCostCalculation(calculation: CostCalculation, items: List<CostCalculationItem>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.saveCostCalculation(calculation, items)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "saveCostCalculation", "DatabaseError", e.message ?: "Failed to save calculation", "Check database connection", e)
+            }
+        }
+    }
+
+    fun deleteCalculation(calculation: CostCalculation) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.deleteCalculation(calculation)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "deleteCalculation", "DatabaseError", e.message ?: "Failed to delete calculation", "Check database connection", e)
+            }
+        }
+    }
+
+    fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>> {
+        return repository.getCalculationItems(calculationId)
     }
 }
 

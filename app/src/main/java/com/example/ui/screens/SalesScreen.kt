@@ -1431,6 +1431,9 @@ fun SaleItemRow(
         products.firstOrNull { it.productName == item.productName }
     }
     
+    val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
+    val calculations by viewModel.allCostCalculations.collectAsStateWithLifecycle()
+    
     var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
     
     LaunchedEffect(currentProductObj) {
@@ -1617,12 +1620,18 @@ fun SaleItemRow(
                         onDismissRequest = { rateMenuExpanded = false }
                     ) {
                         availablePrices.forEach { price ->
+                            val dynamicProfitOpt = if (isDynamicProfitEnabled) {
+                                calculations.filter { it.productPriceId == price.priceId }.maxByOrNull { it.version }?.profitSnapshot
+                            } else null
+                            val profitToUse = dynamicProfitOpt ?: price.profitPerPacket
+                            val labelSuffix = if (dynamicProfitOpt != null) " (Dynamic Profit: ₹${String.format("%.2f", dynamicProfitOpt)})" else " (Profit: ₹${price.profitPerPacket})"
+                            
                             DropdownMenuItem(
-                                text = { Text("₹${price.sellingPrice}") },
+                                text = { Text("₹${price.sellingPrice}$labelSuffix") },
                                 onClick = {
                                     onItemChange(item.copy(
                                         ratePerPacketStr = price.sellingPrice.toString(),
-                                        customProfitStr = price.profitPerPacket.toString(),
+                                        customProfitStr = String.format(Locale.US, "%.2f", profitToUse),
                                         isCustomRate = false,
                                         rateError = null
                                     ))
