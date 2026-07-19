@@ -55,7 +55,8 @@ fun DashboardScreen(
     onNavigateToTab: (String) -> Unit,
     onQuickAddSales: () -> Unit,
     onOpenChat: () -> Unit,
-    onOpenTimetable: () -> Unit
+    onOpenTimetable: () -> Unit,
+    onOpenDailyTasks: () -> Unit
 ) {
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val shops by viewModel.shops.collectAsStateWithLifecycle()
@@ -190,6 +191,17 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onOpenDailyTasks,
+                        modifier = Modifier.testTag("open_daily_tasks_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlaylistAddCheck,
+                            contentDescription = "Daily Tasks",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                     IconButton(
                         onClick = onOpenChat,
                         modifier = Modifier.testTag("open_ai_chat_button")

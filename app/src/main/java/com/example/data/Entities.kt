@@ -121,4 +121,16 @@ data class ErrorLog(
         get() = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
 }
 
+@Entity(tableName = "daily_tasks")
+data class DailyTask(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val description: String = "",
+    val isCompleted: Boolean = false,
+    val taskDate: String, // format: "yyyy-MM-dd"
+    val reminderTime: String? = null, // "HH:mm" e.g., "09:30"
+    val isReminderEnabled: Boolean = false
+)
+
+
 

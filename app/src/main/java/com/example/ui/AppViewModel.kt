@@ -55,7 +55,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.timetableDao(),
         db.dailyTargetDao(),
         db.badgeDao(),
-        db.errorLogDao()
+        db.errorLogDao(),
+        db.dailyTaskDao()
     )
 
     // --- Centralized Error States ---
@@ -2866,6 +2867,127 @@ User Question: $userQuestion
                 text = "Welcome to the SnackRoute Pro AI Business Assistant! 📊🤖\n\nI have real-time access to your Locations, Shops, Products, and Sales history.\n\nAsk me anything like:\n• \"Which product is the most profitable?\"\n• \"Which shop has the lowest sales volume?\"\n• \"Provide pricing strategies to boost my earnings.\"\n• \"Give me a summary of total sales and profits.\""
             )
         )
+    }
+
+    // --- Daily Tasks ---
+    private val _selectedTaskDate = MutableStateFlow(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()))
+    val selectedTaskDate: StateFlow<String> = _selectedTaskDate.asStateFlow()
+
+    fun setSelectedTaskDate(date: String) {
+        _selectedTaskDate.value = date
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val tasksForSelectedDate: StateFlow<List<DailyTask>> = _selectedTaskDate
+        .flatMapLatest { date ->
+            repository.getTasksByDate(date)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val distinctTaskDates: StateFlow<List<String>> = repository.distinctTaskDates
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun addTask(title: String, description: String, date: String, reminderTime: String? = null, isReminderEnabled: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.insertTask(
+                    DailyTask(
+                        title = title,
+                        description = description,
+                        taskDate = date,
+                        reminderTime = reminderTime,
+                        isReminderEnabled = isReminderEnabled
+                    )
+                )
+            } catch (e: Exception) {
+                triggerError("DailyTasks", "addTask", "DatabaseError", e.message ?: "Failed to add task", "Check database connection", e)
+            }
+        }
+    }
+
+    fun updateTask(task: DailyTask) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.updateTask(task)
+            } catch (e: Exception) {
+                triggerError("DailyTasks", "updateTask", "DatabaseError", e.message ?: "Failed to update task", "Check database connection", e)
+            }
+        }
+    }
+
+    fun deleteTask(task: DailyTask) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.deleteTask(task)
+            } catch (e: Exception) {
+                triggerError("DailyTasks", "deleteTask", "DatabaseError", e.message ?: "Failed to delete task", "Check database connection", e)
+            }
+        }
+    }
+
+    fun toggleTaskCompletion(task: DailyTask) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val updatedTask = task.copy(isCompleted = !task.isCompleted)
+                repository.updateTask(updatedTask)
+                if (updatedTask.isCompleted) {
+                    val xpReward = 15
+                    val newXp = _bonusXp.value + xpReward
+                    prefs.edit().putInt("bonus_xp", newXp).apply()
+                    _bonusXp.value = newXp
+                    _gamificationEvents.emit(GamificationEvent.XpGain(xpReward, "Daily Task Completed"))
+                }
+            } catch (e: Exception) {
+                triggerError("DailyTasks", "toggleTask", "DatabaseError", e.message ?: "Failed to toggle task status", "Check database connection", e)
+            }
+        }
+    }
+
+    fun copyUnfinishedTasksFromPreviousDay(currentDate: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                val todayVal = sdf.parse(currentDate) ?: Date()
+                val cal = Calendar.getInstance()
+                cal.time = todayVal
+                
+                var foundTasks: List<DailyTask> = emptyList()
+                for (i in 1..14) {
+                    cal.add(Calendar.DAY_OF_YEAR, -1)
+                    val prevDateStr = sdf.format(cal.time)
+                    val tasks = repository.getTasksByDate(prevDateStr).first()
+                    val incomplete = tasks.filter { !it.isCompleted }
+                    if (incomplete.isNotEmpty()) {
+                        foundTasks = incomplete
+                        break
+                    }
+                }
+
+                if (foundTasks.isNotEmpty()) {
+                    foundTasks.forEach { task ->
+                        repository.insertTask(
+                            DailyTask(
+                                title = task.title,
+                                description = task.description,
+                                taskDate = currentDate,
+                                reminderTime = task.reminderTime,
+                                isReminderEnabled = task.isReminderEnabled
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                triggerError("DailyTasks", "copyPrevTasks", "DatabaseError", e.message ?: "Failed to copy tasks", "Check database connection", e)
+            }
+        }
     }
 }
 

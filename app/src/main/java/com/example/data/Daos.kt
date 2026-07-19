@@ -195,4 +195,29 @@ interface ErrorLogDao {
     suspend fun clearErrorLogs()
 }
 
+@Dao
+interface DailyTaskDao {
+    @Query("SELECT * FROM daily_tasks ORDER BY id ASC")
+    fun getAllTasks(): Flow<List<DailyTask>>
+
+    @Query("SELECT * FROM daily_tasks WHERE taskDate = :date ORDER BY id ASC")
+    fun getTasksByDate(date: String): Flow<List<DailyTask>>
+
+    @Query("SELECT DISTINCT taskDate FROM daily_tasks ORDER BY taskDate DESC")
+    fun getDistinctTaskDates(): Flow<List<String>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTask(task: DailyTask): Long
+
+    @Update
+    suspend fun updateTask(task: DailyTask)
+
+    @Delete
+    suspend fun deleteTask(task: DailyTask)
+
+    @Query("DELETE FROM daily_tasks WHERE id = :id")
+    suspend fun deleteTaskById(id: Int)
+}
+
+
 

@@ -18,7 +18,8 @@ class AppRepository(
     private val timetableDao: TimetableDao,
     private val dailyTargetDao: DailyTargetDao,
     private val badgeDao: BadgeDao,
-    private val errorLogDao: ErrorLogDao
+    private val errorLogDao: ErrorLogDao,
+    private val dailyTaskDao: DailyTaskDao
 ) {
     // --- Error Log Queries ---
     val allErrorLogs: Flow<List<ErrorLog>> = errorLogDao.getAllErrorLogs()
@@ -250,4 +251,14 @@ class AppRepository(
             false
         }
     }
+
+    // --- Daily Task Queries & Mutations ---
+    val allTasks: Flow<List<DailyTask>> = dailyTaskDao.getAllTasks()
+    fun getTasksByDate(date: String): Flow<List<DailyTask>> = dailyTaskDao.getTasksByDate(date)
+    val distinctTaskDates: Flow<List<String>> = dailyTaskDao.getDistinctTaskDates()
+
+    suspend fun insertTask(task: DailyTask): Long = dailyTaskDao.insertTask(task)
+    suspend fun updateTask(task: DailyTask) = dailyTaskDao.updateTask(task)
+    suspend fun deleteTask(task: DailyTask) = dailyTaskDao.deleteTask(task)
+    suspend fun deleteTaskById(id: Int) = dailyTaskDao.deleteTaskById(id)
 }

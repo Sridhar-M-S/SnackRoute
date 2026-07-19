@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
                 var isAiChatOpen by remember { mutableStateOf(false) }
                 var isTimetableOpen by remember { mutableStateOf(false) }
                 var isDebugOpen by remember { mutableStateOf(false) }
+                var isDailyTasksOpen by remember { mutableStateOf(false) }
                 var showExitConfirmationDialog by remember { mutableStateOf(false) }
 
                 val navigationHistory = remember { mutableStateListOf<String>("Dashboard") }
@@ -105,6 +106,8 @@ class MainActivity : ComponentActivity() {
                         isTimetableOpen = false
                     } else if (isDebugOpen) {
                         isDebugOpen = false
+                    } else if (isDailyTasksOpen) {
+                        isDailyTasksOpen = false
                     } else {
                         navigateBack()
                     }
@@ -152,7 +155,8 @@ class MainActivity : ComponentActivity() {
                                             onNavigateToTab = { navigateToChildTab(it) },
                                             onQuickAddSales = { navigateToChildTab("Sales") },
                                             onOpenChat = { isAiChatOpen = true },
-                                            onOpenTimetable = { isTimetableOpen = true }
+                                            onOpenTimetable = { isTimetableOpen = true },
+                                            onOpenDailyTasks = { isDailyTasksOpen = true }
                                         )
                                     }
                                 }
@@ -261,6 +265,15 @@ class MainActivity : ComponentActivity() {
                             color = MaterialTheme.colorScheme.background
                         ) {
                             DebugScreen(viewModel = viewModel, onClose = { isDebugOpen = false })
+                        }
+                    }
+
+                    if (isDailyTasksOpen) {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            DailyTasksScreen(viewModel = viewModel, onClose = { isDailyTasksOpen = false })
                         }
                     }
 

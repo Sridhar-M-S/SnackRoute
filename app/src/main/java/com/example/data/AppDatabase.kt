@@ -17,9 +17,10 @@ import androidx.room.TypeConverters
         DailyTarget::class,
         Badge::class,
         UserBadge::class,
-        ErrorLog::class
+        ErrorLog::class,
+        DailyTask::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -33,6 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dailyTargetDao(): DailyTargetDao
     abstract fun badgeDao(): BadgeDao
     abstract fun errorLogDao(): ErrorLogDao
+    abstract fun dailyTaskDao(): DailyTaskDao
 
     companion object {
         @Volatile
