@@ -30,9 +30,65 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.android.gms.common.api.ApiException
+import androidx.compose.foundation.text.selection.SelectionContainer
+import android.content.Context
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.io.File
+
+private fun parseGoogleSignInError(e: Throwable, context: Context): String {
+    val stackTraceString = android.util.Log.getStackTraceString(e)
+    android.util.Log.e("GoogleSignInError", "Complete Google Sign-In Error details:\n$stackTraceString")
+    
+    val baseAppId = "com.aistudio.snackroutepro.lpxmkw"
+    val debugSha1 = "8C:84:F4:69:0E:5A:CB:37:AC:F4:34:30:BE:67:44:4B:88:FF:CF:8D"
+    val oauthClientId = com.example.BuildConfig.OAUTH_CLIENT_ID
+    
+    if (e is ApiException) {
+        val statusCode = e.statusCode
+        return when (statusCode) {
+            10 -> { // CommonStatusCodes.DEVELOPER_ERROR
+                "DEVELOPER_ERROR (10):\n" +
+                "The application is misconfigured. This is most commonly caused by a mismatch between the SHA-1 fingerprint of the signing key and the package name registered in the Google Cloud Console / Firebase Console.\n\n" +
+                "Please verify that:\n" +
+                "1. Your package name is: $baseAppId\n" +
+                "2. Your SHA-1 Certificate Fingerprint is: $debugSha1\n" +
+                "3. Your Web Client ID is: $oauthClientId\n\n" +
+                "Make sure these match your Firebase Console/Google Cloud OAuth configuration exactly."
+            }
+            12500 -> { // GoogleSignInStatusCodes.SIGN_IN_FAILED
+                "SIGN_IN_FAILED (12500):\n" +
+                "Google Sign-In failed. Possible causes:\n" +
+                "- Google Drive API is not enabled in your Google Cloud Console for this project.\n" +
+                "- There is a network issue.\n" +
+                "- The OAuth Web Client ID configuration is invalid."
+            }
+            12501 -> { // GoogleSignInStatusCodes.SIGN_IN_CANCELLED
+                "SIGN_IN_CANCELLED (12501):\n" +
+                "The sign-in flow was cancelled by the user."
+            }
+            12502 -> { // GoogleSignInStatusCodes.SIGN_IN_CURRENTLY_IN_PROGRESS
+                "SIGN_IN_IN_PROGRESS (12502):\n" +
+                "Sign-In is already in progress. Please wait."
+            }
+            7 -> { // CommonStatusCodes.NETWORK_ERROR
+                "NETWORK_ERROR (7):\n" +
+                "A network error occurred. Please check your internet connection."
+            }
+            5 -> { // CommonStatusCodes.INVALID_ACCOUNT
+                "INVALID_ACCOUNT (5):\n" +
+                "The Google Account selected is invalid."
+            }
+            8 -> { // CommonStatusCodes.INTERNAL_ERROR
+                "INTERNAL_ERROR (8):\n" +
+                "An internal Google Play Services error occurred."
+            }
+            else -> "Google Sign-In failed (Status Code $statusCode): ${e.localizedMessage}\n\nFull stack trace printed to Logcat."
+        }
+    }
+    
+    return "Google Sign-In failed: ${e.localizedMessage}\n\nType: ${e.javaClass.simpleName}\n\nFull stack trace printed to Logcat."
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,13 +116,19 @@ fun SettingsScreen(
     val isOfflineQueueActiveState by viewModel.isOfflineQueueActive.collectAsState()
 
     var showGDriveRestoreConfirm by remember { mutableStateOf(false) }
+    var gdriveErrorDetails by remember { mutableStateOf<String?>(null) }
 
     val gso = remember {
-        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
             .requestScopes(Scope("https://www.googleapis.com/auth/drive.file"))
-            .build()
+        
+        val oauthClientId = com.example.BuildConfig.OAUTH_CLIENT_ID
+        if (oauthClientId.isNotEmpty()) {
+            builder.requestIdToken(oauthClientId)
+        }
+        builder.build()
     }
     val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
 
@@ -77,10 +139,13 @@ fun SettingsScreen(
         try {
             val account = task.getResult(ApiException::class.java)
             viewModel.setGoogleAccount(account)
+            gdriveErrorDetails = null
             Toast.makeText(context, "Successfully connected to Google Drive!", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(context, "Google Sign-In failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            val parsedError = parseGoogleSignInError(e, context)
+            gdriveErrorDetails = parsedError
+            Toast.makeText(context, "Google Connection Failed (Details on Screen)", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -631,6 +696,61 @@ fun SettingsScreen(
                     dismissButton = {
                         TextButton(onClick = { showGDriveRestoreConfirm = false }) {
                             Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            if (gdriveErrorDetails != null) {
+                AlertDialog(
+                    onDismissRequest = { gdriveErrorDetails = null },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Text("Connection Configuration Error", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        SelectionContainer {
+                            Column(
+                                modifier = Modifier
+                                    .verticalScroll(rememberScrollState())
+                                    .fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(gdriveErrorDetails!!, fontSize = 13.sp, lineHeight = 18.sp)
+                                
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                
+                                Text(
+                                    "Additional Context:\n" +
+                                    "- Application ID: com.aistudio.snackroutepro.lpxmkw\n" +
+                                    "- Workspace File: /app/google-services.json\n" +
+                                    "- Keystore: debug.keystore",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("Google Sign-In Configuration Details", gdriveErrorDetails)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Details copied to clipboard!", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Text("Copy Details")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { gdriveErrorDetails = null }) {
+                            Text("Dismiss")
                         }
                     }
                 )

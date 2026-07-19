@@ -21,15 +21,50 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Dynamically inject values from firebase-applet-config.json if available
+    val configMap = try {
+      val configFile = file("${rootDir}/firebase-applet-config.json")
+      if (configFile.exists()) {
+        val content = configFile.readText()
+        val extractValue = { key: String ->
+          "\"$key\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(content)?.groupValues?.get(1) ?: ""
+        }
+        mapOf(
+          "OAUTH_CLIENT_ID" to extractValue("oAuthClientId"),
+          "PROJECT_ID" to extractValue("projectId"),
+          "API_KEY" to extractValue("apiKey"),
+          "APP_ID" to extractValue("appId")
+        )
+      } else {
+        emptyMap()
+      }
+    } catch (e: Exception) {
+      emptyMap()
+    }
+
+    buildConfigField("String", "OAUTH_CLIENT_ID", "\"${configMap["OAUTH_CLIENT_ID"] ?: ""}\"")
+    buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${configMap["PROJECT_ID"] ?: ""}\"")
+    buildConfigField("String", "FIREBASE_API_KEY", "\"${configMap["API_KEY"] ?: ""}\"")
+    buildConfigField("String", "FIREBASE_APP_ID", "\"${configMap["APP_ID"] ?: ""}\"")
   }
 
   signingConfigs {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      val keyFile = file(keystorePath)
+      if (keyFile.exists() && System.getenv("STORE_PASSWORD") != null) {
+        storeFile = keyFile
+        storePassword = System.getenv("STORE_PASSWORD")
+        keyAlias = "upload"
+        keyPassword = System.getenv("KEY_PASSWORD")
+      } else {
+        // Fallback to debug key if release keystore or password is not provided
+        storeFile = file("${rootDir}/debug.keystore")
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
