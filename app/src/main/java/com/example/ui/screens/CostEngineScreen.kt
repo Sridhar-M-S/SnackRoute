@@ -222,6 +222,11 @@ fun CalculateCostTabContent(
     var selectedCategory by remember { mutableStateOf("") }
     var selectedVarietyProductId by remember { mutableStateOf<Int?>(null) }
     var selectedPriceId by remember { mutableStateOf<Int?>(null) }
+    var isProceeded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedCategory, selectedVarietyProductId, selectedPriceId) {
+        isProceeded = false
+    }
 
     var allPricesForSelectedProduct by remember { mutableStateOf<List<ProductPrice>>(emptyList()) }
     LaunchedEffect(selectedVarietyProductId) {
@@ -340,42 +345,45 @@ fun CalculateCostTabContent(
                     )
 
                     // 1. Snack Category Dropdown
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    var catExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = catExpanded,
+                        onExpandedChange = { catExpanded = !catExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         OutlinedTextField(
                             value = selectedCategory.ifEmpty { "Select Snack Category" },
                             onValueChange = {},
                             readOnly = true,
                             label = { Text("Snack Category") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                            modifier = Modifier.fillMaxWidth().testTag("selector_category")
-                        )
-                        Box(
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded) },
                             modifier = Modifier
-                                .matchParentSize()
-                                .clickable { catExpanded = true }
+                                .menuAnchor()
+                                .fillMaxWidth()
+                                .testTag("selector_category")
                         )
-                        DropdownMenu(
+                        ExposedDropdownMenu(
                             expanded = catExpanded,
-                            onDismissRequest = { catExpanded = false },
-                            modifier = Modifier.fillMaxWidth(0.9f)
+                            onDismissRequest = { catExpanded = false }
                         ) {
                             if (categories.isEmpty()) {
                                 DropdownMenuItem(
-                                    text = { Text("No categories found. Create a product first.") },
+                                    text = { Text("No Categories Found. Create a product first.") },
                                     onClick = { catExpanded = false }
                                 )
-                            }
-                            categories.forEach { cat ->
-                                DropdownMenuItem(
-                                    text = { Text(cat) },
-                                    onClick = {
-                                        selectedCategory = cat
-                                        selectedVarietyProductId = null
-                                        selectedPriceId = null
-                                        catExpanded = false
-                                    },
-                                    modifier = Modifier.testTag("cat_option_$cat")
-                                )
+                            } else {
+                                categories.forEach { cat ->
+                                    DropdownMenuItem(
+                                        text = { Text(cat) },
+                                        onClick = {
+                                            selectedCategory = cat
+                                            selectedVarietyProductId = null
+                                            selectedPriceId = null
+                                            catExpanded = false
+                                        },
+                                        modifier = Modifier.testTag("cat_option_$cat")
+                                    )
+                                }
                             }
                         }
                     }
@@ -384,57 +392,51 @@ fun CalculateCostTabContent(
                     val isVarietyEnabled = selectedCategory.isNotEmpty() && filteredProducts.isNotEmpty()
                     val varietyValue = when {
                         selectedCategory.isEmpty() -> "Select Snack Category first"
-                        filteredProducts.isEmpty() -> "No active varieties found for this category"
+                        filteredProducts.isEmpty() -> "No varieties found for this category"
                         else -> selectedVarietyProductId?.let { id -> products.find { it.id == id }?.productName } ?: "Select Variety"
                     }
+                    var varExpanded by remember { mutableStateOf(false) }
 
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    ExposedDropdownMenuBox(
+                        expanded = varExpanded && isVarietyEnabled,
+                        onExpandedChange = { if (isVarietyEnabled) varExpanded = !varExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         OutlinedTextField(
                             value = varietyValue,
                             onValueChange = {},
                             readOnly = true,
                             enabled = isVarietyEnabled,
                             label = { Text("Product Variety") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = varExpanded) },
                             modifier = Modifier
+                                .menuAnchor()
                                 .fillMaxWidth()
                                 .testTag("selector_variety")
                         )
                         if (isVarietyEnabled) {
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clickable { varExpanded = true }
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = varExpanded,
-                            onDismissRequest = { varExpanded = false },
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            if (filteredProducts.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No varieties found") },
-                                    onClick = { varExpanded = false }
-                                )
-                            }
-                            filteredProducts.forEach { prod ->
-                                DropdownMenuItem(
-                                    text = { Text(prod.productName) },
-                                    onClick = {
-                                        selectedVarietyProductId = prod.id
-                                        selectedPriceId = null
-                                        varExpanded = false
-                                    },
-                                    modifier = Modifier.testTag("var_option_${prod.productName}")
-                                )
+                            ExposedDropdownMenu(
+                                expanded = varExpanded,
+                                onDismissRequest = { varExpanded = false }
+                            ) {
+                                filteredProducts.forEach { prod ->
+                                    DropdownMenuItem(
+                                        text = { Text(prod.productName) },
+                                        onClick = {
+                                            selectedVarietyProductId = prod.id
+                                            selectedPriceId = null
+                                            varExpanded = false
+                                        },
+                                        modifier = Modifier.testTag("var_option_${prod.productName}")
+                                    )
+                                }
                             }
                         }
                     }
 
                     if (selectedCategory.isNotEmpty() && filteredProducts.isEmpty()) {
                         Text(
-                            text = "No varieties exist for the selected category. Please create one in Product Master first.",
+                            text = "No Varieties Found. Please create a variety for this category in Product Master.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 4.dp)
@@ -448,53 +450,47 @@ fun CalculateCostTabContent(
                         filteredPrices.isEmpty() -> "No selling prices exist for this variety"
                         else -> selectedPriceObj?.let { "₹${it.sellingPrice} (Current Profit: ₹${it.profitPerPacket})" } ?: "Select Price Variant"
                     }
+                    var priceExpanded by remember { mutableStateOf(false) }
 
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    ExposedDropdownMenuBox(
+                        expanded = priceExpanded && isPriceEnabled,
+                        onExpandedChange = { if (isPriceEnabled) priceExpanded = !priceExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         OutlinedTextField(
                             value = priceValue,
                             onValueChange = {},
                             readOnly = true,
                             enabled = isPriceEnabled,
                             label = { Text("Selling Price Variant") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = priceExpanded) },
                             modifier = Modifier
+                                .menuAnchor()
                                 .fillMaxWidth()
                                 .testTag("selector_price")
                         )
                         if (isPriceEnabled) {
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clickable { priceExpanded = true }
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = priceExpanded,
-                            onDismissRequest = { priceExpanded = false },
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            if (filteredPrices.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No price variants found") },
-                                    onClick = { priceExpanded = false }
-                                )
-                            }
-                            filteredPrices.forEach { price ->
-                                DropdownMenuItem(
-                                    text = { Text("₹${price.sellingPrice} (Profit: ₹${price.profitPerPacket})") },
-                                    onClick = {
-                                        selectedPriceId = price.priceId
-                                        priceExpanded = false
-                                    },
-                                    modifier = Modifier.testTag("price_option_${price.sellingPrice.toInt()}")
-                                )
+                            ExposedDropdownMenu(
+                                expanded = priceExpanded,
+                                onDismissRequest = { priceExpanded = false }
+                            ) {
+                                filteredPrices.forEach { price ->
+                                    DropdownMenuItem(
+                                        text = { Text("₹${price.sellingPrice} (Profit: ₹${price.profitPerPacket})") },
+                                        onClick = {
+                                            selectedPriceId = price.priceId
+                                            priceExpanded = false
+                                        },
+                                        modifier = Modifier.testTag("price_option_${price.sellingPrice.toInt()}")
+                                    )
+                                }
                             }
                         }
                     }
 
                     if (selectedVarietyProductId != null && filteredPrices.isEmpty()) {
                         Text(
-                            text = "No selling prices exist for this variety. Please configure prices in Product Master first.",
+                            text = "No Selling Prices Found. Please configure prices for this variety in Product Master.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 4.dp)
@@ -519,25 +515,60 @@ fun CalculateCostTabContent(
                             modifier = Modifier.testTag("dynamic_switch_card")
                         )
                     }
+
+                    // Continue Button (Step 4 & Validation requirement)
+                    val isContinueEnabled = selectedCategory.isNotEmpty() &&
+                            selectedVarietyProductId != null &&
+                            selectedPriceId != null &&
+                            filteredProducts.isNotEmpty() &&
+                            filteredPrices.isNotEmpty()
+
+                    Button(
+                        onClick = { isProceeded = true },
+                        enabled = isContinueEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .testTag("continue_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Continue to Calculation", fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(Icons.Default.ArrowForward, contentDescription = null)
+                        }
+                    }
                 }
             }
         }
 
-        // Return if product is not selected
-        if (selectedPriceObj == null) {
+        // Return if product selection is not complete or not proceeded yet
+        if (selectedPriceObj == null || !isProceeded) {
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("info_prompt_card"),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp).fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Icon(
+                            imageVector = if (selectedPriceObj == null) Icons.Default.Info else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (selectedPriceObj == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            "Please select Category, Variety, and Selling Price to view or create dynamic cost calculations.",
+                            text = if (selectedPriceObj == null) {
+                                "Please select Snack Category, Product Variety, and Selling Price Variant above."
+                            } else {
+                                "Selections completed! Click 'Continue to Calculation' above to proceed to the Dynamic Cost & Profit Calculation screen."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 8.dp)
