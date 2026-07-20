@@ -11,6 +11,7 @@ import com.example.data.ProductPrice
 import com.example.data.SalesEntry
 import com.example.data.ShopMaster
 import com.example.data.ErrorLog
+import com.example.data.DailyTask
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.apache.poi.ss.usermodel.*
 import java.io.File
@@ -30,7 +31,7 @@ object Exporter {
     )
 
     enum class ImportType {
-        SHOPS, LOCATIONS, SALES, PRODUCTS
+        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS
     }
 
     data class ImportSummary(
@@ -50,6 +51,7 @@ object Exporter {
         val parsedSales: List<SalesEntry> = emptyList(),
         val invalidDatesCount: Int = 0,
         val parsedProducts: List<Pair<ProductMaster, List<ProductPrice>>> = emptyList(),
+        val parsedDailyTasks: List<DailyTask> = emptyList(),
         val updatedRecordsCount: Int = 0,
         val totalImagesFound: Int = 0,
         val imagesImportedSuccessfully: Int = 0,
@@ -1612,6 +1614,246 @@ object Exporter {
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- DAILY TASK EXPORTS & IMPORTS ---
+    fun exportDailyTasks(context: Context, tasks: List<DailyTask>) {
+        val fileName = "Daily_Tasks_Export_${System.currentTimeMillis()}.xlsx"
+        val file = File(context.cacheDir, fileName)
+
+        try {
+            val workbook = XSSFWorkbook()
+            val sheet = workbook.createSheet("Daily Tasks")
+            
+            // Header styling
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.getIndex()
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                fillForegroundColor = IndexedColors.TEAL.getIndex()
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.CENTER
+            }
+            
+            // Header Row
+            val headers = listOf("Task ID", "Title", "Description", "Is Completed", "Task Date", "Reminder Time", "Is Reminder Enabled")
+            val headerRow = sheet.createRow(0)
+            for (i in headers.indices) {
+                val cell = headerRow.createCell(i)
+                cell.setCellValue(headers[i])
+                cell.cellStyle = headerStyle
+            }
+            
+            // Data Rows
+            var rowIdx = 1
+            for (task in tasks) {
+                val row = sheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(task.id.toDouble())
+                row.createCell(1).setCellValue(task.title)
+                row.createCell(2).setCellValue(task.description)
+                row.createCell(3).setCellValue(if (task.isCompleted) "Yes" else "No")
+                row.createCell(4).setCellValue(task.taskDate)
+                row.createCell(5).setCellValue(task.reminderTime ?: "")
+                row.createCell(6).setCellValue(if (task.isReminderEnabled) "Yes" else "No")
+            }
+            
+            // Set fixed column widths
+            sheet.setColumnWidth(0, 3000) // Task ID
+            sheet.setColumnWidth(1, 8000) // Title
+            sheet.setColumnWidth(2, 10000) // Description
+            sheet.setColumnWidth(3, 4000) // Is Completed
+            sheet.setColumnWidth(4, 4000) // Task Date
+            sheet.setColumnWidth(5, 4500) // Reminder Time
+            sheet.setColumnWidth(6, 5000) // Is Reminder Enabled
+            
+            FileOutputStream(file).use { out ->
+                workbook.write(out)
+            }
+            workbook.close()
+            
+            shareFile(context, file, "Daily Tasks Export")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun importDailyTasks(
+        context: Context,
+        uri: Uri,
+        existingTasks: List<DailyTask>
+    ): ImportSummary {
+        val errorRows = mutableListOf<List<String>>()
+        val successTasks = mutableListOf<DailyTask>()
+        
+        var totalRows = 0
+        var successfullyImported = 0
+        var duplicateRecordsCount = 0
+        var failedRowsCount = 0
+        var updatedRecordsCount = 0
+
+        val existingTasksById = existingTasks.associateBy { it.id }
+        val existingTasksByTitleAndDate = existingTasks.groupBy { Pair(it.title.lowercase().trim(), it.taskDate) }
+
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open file stream")
+            val workbook = XSSFWorkbook(inputStream)
+            val sheet = workbook.getSheetAt(0) ?: throw Exception("Workbook is empty")
+            
+            val headerRow = sheet.getRow(0) ?: throw Exception("Excel file header row is missing")
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal] = c
+                }
+            }
+            
+            val idIdx = getHeaderIndex(headerMap, "Task ID", "ID", "TaskId", "Task_ID")
+            val titleIdx = getHeaderIndex(headerMap, "Title", "Task Title", "TaskTitle", "Task_Title")
+            val descIdx = getHeaderIndex(headerMap, "Description", "Task Description", "TaskDescription")
+            val completedIdx = getHeaderIndex(headerMap, "Is Completed", "Completed", "IsCompleted", "Status")
+            val dateIdx = getHeaderIndex(headerMap, "Task Date", "Date", "TaskDate", "Task_Date")
+            val reminderTimeIdx = getHeaderIndex(headerMap, "Reminder Time", "Time", "ReminderTime")
+            val reminderEnabledIdx = getHeaderIndex(headerMap, "Is Reminder Enabled", "Reminder Enabled", "IsReminderEnabled", "ReminderEnabled")
+            
+            val missingHeaders = mutableListOf<String>()
+            if (titleIdx == null) missingHeaders.add("Title")
+            if (dateIdx == null) missingHeaders.add("Task Date")
+            if (missingHeaders.isNotEmpty()) {
+                throw Exception("Missing required column headers: ${missingHeaders.joinToString(", ")}")
+            }
+            
+            val lastRowNum = sheet.lastRowNum
+            for (r in 1..lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                if (isRowEmpty(row)) continue
+                
+                totalRows++
+                
+                val taskIdVal = if (idIdx != null) getCellValueAsString(row, idIdx)?.trim() ?: "" else ""
+                val title = if (titleIdx != null) getCellValueAsString(row, titleIdx)?.trim() ?: "" else ""
+                val desc = if (descIdx != null) getCellValueAsString(row, descIdx)?.trim() ?: "" else ""
+                val completedVal = if (completedIdx != null) getCellValueAsString(row, completedIdx)?.trim() ?: "" else ""
+                val dateVal = if (dateIdx != null) getCellValueAsString(row, dateIdx)?.trim() ?: "" else ""
+                val reminderTime = if (reminderTimeIdx != null) getCellValueAsString(row, reminderTimeIdx)?.trim() ?: "" else ""
+                val reminderEnabledVal = if (reminderEnabledIdx != null) getCellValueAsString(row, reminderEnabledIdx)?.trim() ?: "" else ""
+                
+                val originalRowData = listOf(taskIdVal, title, desc, completedVal, dateVal, reminderTime, reminderEnabledVal)
+                
+                if (title.isEmpty() || dateVal.isEmpty()) {
+                    val missing = buildString {
+                        if (title.isEmpty()) append("Title is empty. ")
+                        if (dateVal.isEmpty()) append("Task Date is empty. ")
+                    }.trim()
+                    failedRowsCount++
+                    errorRows.add(listOf("${r + 1}", title, dateVal, "Required fields missing: $missing") + originalRowData)
+                    continue
+                }
+                
+                // Validate date format: yyyy-MM-dd
+                val dateRegex = Regex("^\\d{4}-\\d{2}-\\d{2}$")
+                if (!dateRegex.matches(dateVal)) {
+                    failedRowsCount++
+                    errorRows.add(listOf("${r + 1}", title, dateVal, "Invalid date format. Expected: yyyy-MM-dd") + originalRowData)
+                    continue
+                }
+                
+                // Validate reminder time format if not empty: HH:mm
+                var formattedReminderTime: String? = null
+                if (reminderTime.isNotEmpty()) {
+                    val timeRegex = Regex("^\\d{2}:\\d{2}$")
+                    if (!timeRegex.matches(reminderTime)) {
+                        failedRowsCount++
+                        errorRows.add(listOf("${r + 1}", title, dateVal, "Invalid reminder time format. Expected: HH:mm") + originalRowData)
+                        continue
+                    }
+                    formattedReminderTime = reminderTime
+                }
+                
+                val isCompleted = completedVal.lowercase() in listOf("yes", "true", "1", "completed", "y")
+                val isReminderEnabled = reminderEnabledVal.lowercase() in listOf("yes", "true", "1", "enabled", "y")
+                
+                // Check if updating an existing record or creating a new one
+                var matchedTask: DailyTask? = null
+                val idParsed = taskIdVal.toDoubleOrNull()?.toInt() ?: taskIdVal.toIntOrNull()
+                if (idParsed != null && idParsed > 0) {
+                    matchedTask = existingTasksById[idParsed]
+                }
+                
+                if (matchedTask == null) {
+                    // Match by title + date
+                    val titleLower = title.lowercase().trim()
+                    val matchedGroup = existingTasksByTitleAndDate[Pair(titleLower, dateVal)]
+                    if (!matchedGroup.isNullOrEmpty()) {
+                        matchedTask = matchedGroup.first()
+                    }
+                }
+                
+                if (matchedTask != null) {
+                    // Update existing task
+                    val updatedTask = matchedTask.copy(
+                        title = title,
+                        description = desc,
+                        isCompleted = isCompleted || matchedTask.isCompleted, // Preserve task completion status (if either is true)
+                        taskDate = dateVal,
+                        reminderTime = formattedReminderTime,
+                        isReminderEnabled = isReminderEnabled
+                    )
+                    successTasks.add(updatedTask)
+                    updatedRecordsCount++
+                } else {
+                    // Create new task
+                    val newTask = DailyTask(
+                        title = title,
+                        description = desc,
+                        isCompleted = isCompleted,
+                        taskDate = dateVal,
+                        reminderTime = formattedReminderTime,
+                        isReminderEnabled = isReminderEnabled
+                    )
+                    successTasks.add(newTask)
+                }
+                
+                successfullyImported++
+            }
+            
+            var errorReportFile: File? = null
+            if (errorRows.isNotEmpty()) {
+                errorReportFile = generateErrorReportGeneric(
+                    context = context,
+                    reportNamePrefix = "Daily_Tasks_Import",
+                    headers = listOf("Row No", "Title", "Task Date", "Error Reason", "Task ID", "Title", "Description", "Is Completed", "Task Date", "Reminder Time", "Is Reminder Enabled"),
+                    rows = errorRows
+                )
+            }
+            
+            return ImportSummary(
+                type = ImportType.DAILY_TASKS,
+                totalRows = totalRows,
+                successfullyImported = successfullyImported,
+                skippedRows = 0,
+                duplicateRecordsCount = duplicateRecordsCount,
+                failedRowsCount = failedRowsCount,
+                errorReportFile = errorReportFile,
+                parsedDailyTasks = successTasks,
+                updatedRecordsCount = updatedRecordsCount
+            )
+            
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return ImportSummary(
+                type = ImportType.DAILY_TASKS,
+                totalRows = 0,
+                successfullyImported = 0,
+                skippedRows = 0,
+                failedRowsCount = 1,
+                imageImportReasons = listOf("Fatal Excel error: ${e.message}")
+            )
         }
     }
 }

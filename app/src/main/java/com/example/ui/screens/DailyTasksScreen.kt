@@ -30,6 +30,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.utils.Exporter
 import com.example.data.DailyTask
 import com.example.ui.AppViewModel
 import java.text.SimpleDateFormat
@@ -45,6 +48,17 @@ fun DailyTasksScreen(
     val selectedDate by viewModel.selectedTaskDate.collectAsState()
     val tasks by viewModel.tasksForSelectedDate.collectAsState()
     val distinctDates by viewModel.distinctTaskDates.collectAsState()
+
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importSummary by viewModel.importSummary.collectAsState()
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importDailyTasksFromExcel(context, uri)
+        }
+    }
 
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var taskToEdit by remember { mutableStateOf<DailyTask?>(null) }
@@ -96,6 +110,26 @@ fun DailyTasksScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        modifier = Modifier.testTag("import_daily_tasks_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Upload,
+                            contentDescription = "Import Excel",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
+                        onClick = { viewModel.exportDailyTasksToExcel(context) },
+                        modifier = Modifier.testTag("export_daily_tasks_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Export Excel",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     // Let users add a task from the top bar too
                     IconButton(
                         onClick = { showAddTaskDialog = true },
@@ -199,6 +233,98 @@ fun DailyTasksScreen(
                 }
             }
         }
+    }
+
+    // --- Excel Import Progress Dialog ---
+    if (isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing Daily Tasks") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Reading spreadsheet and validating tasks...")
+                }
+            }
+        )
+    }
+
+    // --- Excel Import Summary Dialog ---
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.DAILY_TASKS) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.failedRowsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The spreadsheet import has completed. Here are the details:")
+                    
+                    HorizontalDivider()
+                    
+                    SummaryRow(label = "Total Rows Scanned:", value = "${summary.totalRows}")
+                    SummaryRow(label = "Successfully Imported:", value = "${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary)
+                    SummaryRow(label = "Updated Existing:", value = "${summary.updatedRecordsCount}", color = MaterialTheme.colorScheme.secondary)
+                    SummaryRow(label = "Failed Rows:", value = "${summary.failedRowsCount}", color = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    
+                    if (summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                             text = "Some rows could not be imported due to formatting or validation errors. Download the error report to review.",
+                             style = MaterialTheme.typography.bodySmall,
+                             color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                Exporter.shareFile(context, summary.errorReportFile, "Daily Tasks Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
     }
 
     // Add Task Dialog
@@ -806,5 +932,16 @@ fun TaskAddEditDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = color)
     }
 }

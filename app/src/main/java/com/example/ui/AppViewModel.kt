@@ -2952,6 +2952,68 @@ User Question: $userQuestion
         }
     }
 
+    val allTasks: StateFlow<List<DailyTask>> = repository.allTasks
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun exportDailyTasksToExcel(context: Context) {
+        viewModelScope.launch {
+            try {
+                val tasks = repository.allTasks.first()
+                com.example.utils.Exporter.exportDailyTasks(context, tasks)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "Daily Tasks",
+                    operation = "exportDailyTasksToExcel",
+                    errorMessage = e.message ?: "Failed to export tasks",
+                    stackTrace = e.stackTraceToString(),
+                    possibleReason = "Excel export failure."
+                )
+            }
+        }
+    }
+
+    fun importDailyTasksFromExcel(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _isImporting.value = true
+            _importSummary.value = null
+            try {
+                val existingTasks = repository.allTasks.first()
+                val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.utils.Exporter.importDailyTasks(context, uri, existingTasks)
+                }
+
+                if (summary.parsedDailyTasks.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        summary.parsedDailyTasks.forEach { task ->
+                            if (task.id > 0) {
+                                repository.updateTask(task)
+                            } else {
+                                repository.insertTask(task)
+                            }
+                        }
+                    }
+                }
+                _importSummary.value = summary
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "Daily Tasks",
+                    operation = "importDailyTasksFromExcel",
+                    errorMessage = e.message ?: "Failed to import tasks",
+                    stackTrace = e.stackTraceToString(),
+                    possibleReason = "Corrupt file or parsing error."
+                )
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
     fun copyUnfinishedTasksFromPreviousDay(currentDate: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
