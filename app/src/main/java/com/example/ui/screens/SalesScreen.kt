@@ -861,6 +861,7 @@ fun SalesScreen(
                             item = item,
                             products = products,
                             viewModel = viewModel,
+                            saleDate = entryDateMillis,
                             onItemChange = { updatedItem ->
                                 saleItems = saleItems.toMutableList().apply {
                                     this[index] = updatedItem
@@ -1423,6 +1424,7 @@ fun SaleItemRow(
     item: SaleItemState,
     products: List<com.example.data.ProductMaster>,
     viewModel: AppViewModel,
+    saleDate: Long,
     onItemChange: (SaleItemState) -> Unit,
     onRemove: () -> Unit,
     showRemoveButton: Boolean
@@ -1435,6 +1437,29 @@ fun SaleItemRow(
     val calculations by viewModel.allCostCalculations.collectAsStateWithLifecycle()
     
     var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
+    
+    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations) {
+        if (!item.isCustomRate && item.ratePerPacketStr.isNotEmpty() && item.productName.isNotEmpty() && availablePrices.isNotEmpty()) {
+            val matchingPrice = availablePrices.find { it.sellingPrice.toString() == item.ratePerPacketStr }
+            if (matchingPrice != null) {
+                val profitToUse = if (isDynamicProfitEnabled) {
+                    val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                    calculations
+                        .filter { it.productPriceId == matchingPrice.priceId && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                        ?.profitSnapshot
+                        ?: matchingPrice.profitPerPacket
+                } else {
+                    matchingPrice.profitPerPacket
+                }
+                
+                val formattedProfit = String.format(java.util.Locale.US, "%.2f", profitToUse)
+                if (item.customProfitStr != formattedProfit) {
+                    onItemChange(item.copy(customProfitStr = formattedProfit))
+                }
+            }
+        }
+    }
     
     LaunchedEffect(currentProductObj) {
         if (currentProductObj != null) {
@@ -1621,7 +1646,11 @@ fun SaleItemRow(
                     ) {
                         availablePrices.forEach { price ->
                             val dynamicProfitOpt = if (isDynamicProfitEnabled) {
-                                calculations.filter { it.productPriceId == price.priceId }.maxByOrNull { it.version }?.profitSnapshot
+                                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                                calculations
+                                    .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
+                                    .maxByOrNull { it.calculationDate }
+                                    ?.profitSnapshot
                             } else null
                             val profitToUse = dynamicProfitOpt ?: price.profitPerPacket
                             val labelSuffix = if (dynamicProfitOpt != null) " (Dynamic Profit: ₹${String.format("%.2f", dynamicProfitOpt)})" else " (Profit: ₹${price.profitPerPacket})"

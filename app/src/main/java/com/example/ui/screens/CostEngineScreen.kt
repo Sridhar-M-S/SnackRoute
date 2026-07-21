@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import android.app.DatePickerDialog
+import java.util.Calendar
 
 // --- Unit System Helpers (Step 3) ---
 object UnitConverter {
@@ -123,6 +125,44 @@ fun CostEngineScreen(
 
     var activeTab by remember { mutableStateOf(0) } // 0: Calculate Cost, 1: Ingredient Master
 
+    // --- Hoisted States for Tab 0: Calculate Cost ---
+    var editingCalculation by remember { mutableStateOf<CostCalculation?>(null) }
+    var selectedCategory by remember { mutableStateOf("") }
+    var selectedVarietyProductId by remember { mutableStateOf<Int?>(null) }
+    var selectedPriceId by remember { mutableStateOf<Int?>(null) }
+    var isProceeded by remember { mutableStateOf(false) }
+    var effectiveDate by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())) }
+    var checkedIngredients by remember { mutableStateOf(setOf<Int>()) }
+    var ingredientUsages by remember { mutableStateOf(mapOf<Int, Double>()) }
+    var ingredientUnits by remember { mutableStateOf(mapOf<Int, String>()) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var historicalItemsMap by remember { mutableStateOf<Map<Int, List<CostCalculationItem>>>(emptyMap()) }
+
+    // --- Hoisted States for Tab 1: Ingredient Master ---
+    var searchQuery by remember { mutableStateOf("") }
+    var categoryFilter by remember { mutableStateOf("All") }
+    var showAddEditIngredientDialog by remember { mutableStateOf(false) }
+    var selectedIngredientForEdit by remember { mutableStateOf<Ingredient?>(null) }
+    var showAddPurchaseDialog by remember { mutableStateOf(false) }
+    var selectedIngredientForPurchase by remember { mutableStateOf<Ingredient?>(null) }
+
+    LaunchedEffect(selectedPriceId, effectiveDate, calculations) {
+        if (selectedPriceId != null) {
+            val found = calculations.find { it.productPriceId == selectedPriceId && it.calculationDate == effectiveDate }
+            if (found != null) {
+                if (editingCalculation != found) {
+                    editingCalculation = found
+                }
+            } else {
+                if (editingCalculation != null && (editingCalculation!!.productPriceId != selectedPriceId || editingCalculation!!.calculationDate != effectiveDate)) {
+                    editingCalculation = null
+                }
+            }
+        } else {
+            editingCalculation = null
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -187,7 +227,30 @@ fun CostEngineScreen(
                         purchases = purchases,
                         calculations = calculations,
                         isDynamicProfitEnabled = isDynamicProfitEnabled,
-                        onToggleDynamic = { viewModel.setDynamicProfitEnabled(it) }
+                        onToggleDynamic = { viewModel.setDynamicProfitEnabled(it) },
+                        // Hoisted States
+                        editingCalculation = editingCalculation,
+                        onEditingCalculationChange = { editingCalculation = it },
+                        selectedCategory = selectedCategory,
+                        onSelectedCategoryChange = { selectedCategory = it },
+                        selectedVarietyProductId = selectedVarietyProductId,
+                        onSelectedVarietyProductIdChange = { selectedVarietyProductId = it },
+                        selectedPriceId = selectedPriceId,
+                        onSelectedPriceIdChange = { selectedPriceId = it },
+                        isProceeded = isProceeded,
+                        onIsProceededChange = { isProceeded = it },
+                        effectiveDate = effectiveDate,
+                        onEffectiveDateChange = { effectiveDate = it },
+                        checkedIngredients = checkedIngredients,
+                        onCheckedIngredientsChange = { checkedIngredients = it },
+                        ingredientUsages = ingredientUsages,
+                        onIngredientUsagesChange = { ingredientUsages = it },
+                        ingredientUnits = ingredientUnits,
+                        onIngredientUnitsChange = { ingredientUnits = it },
+                        showHistoryDialog = showHistoryDialog,
+                        onShowHistoryDialogChange = { showHistoryDialog = it },
+                        historicalItemsMap = historicalItemsMap,
+                        onHistoricalItemsMapChange = { historicalItemsMap = it }
                     )
                 } else {
                     IngredientMasterTabContent(
@@ -213,22 +276,40 @@ fun CalculateCostTabContent(
     purchases: List<IngredientPurchase>,
     calculations: List<CostCalculation>,
     isDynamicProfitEnabled: Boolean,
-    onToggleDynamic: (Boolean) -> Unit
+    onToggleDynamic: (Boolean) -> Unit,
+    // Hoisted States
+    editingCalculation: CostCalculation?,
+    onEditingCalculationChange: (CostCalculation?) -> Unit,
+    selectedCategory: String,
+    onSelectedCategoryChange: (String) -> Unit,
+    selectedVarietyProductId: Int?,
+    onSelectedVarietyProductIdChange: (Int?) -> Unit,
+    selectedPriceId: Int?,
+    onSelectedPriceIdChange: (Int?) -> Unit,
+    isProceeded: Boolean,
+    onIsProceededChange: (Boolean) -> Unit,
+    effectiveDate: String,
+    onEffectiveDateChange: (String) -> Unit,
+    checkedIngredients: Set<Int>,
+    onCheckedIngredientsChange: (Set<Int>) -> Unit,
+    ingredientUsages: Map<Int, Double>,
+    onIngredientUsagesChange: (Map<Int, Double>) -> Unit,
+    ingredientUnits: Map<Int, String>,
+    onIngredientUnitsChange: (Map<Int, String>) -> Unit,
+    showHistoryDialog: Boolean,
+    onShowHistoryDialogChange: (Boolean) -> Unit,
+    historicalItemsMap: Map<Int, List<CostCalculationItem>>,
+    onHistoricalItemsMapChange: (Map<Int, List<CostCalculationItem>>) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var editingCalculation by remember { mutableStateOf<CostCalculation?>(null) }
-
-    // Dynamic Selectors State (Step 1)
-    var selectedCategory by remember { mutableStateOf("") }
-    var selectedVarietyProductId by remember { mutableStateOf<Int?>(null) }
-    var selectedPriceId by remember { mutableStateOf<Int?>(null) }
-    var isProceeded by remember { mutableStateOf(false) }
+    var showRecalculateDialog by remember { mutableStateOf(false) }
+    var recalculateEffectiveDate by remember { mutableStateOf("") }
 
     LaunchedEffect(selectedCategory, selectedVarietyProductId, selectedPriceId) {
         if (editingCalculation == null) {
-            isProceeded = false
+            onIsProceededChange(false)
         }
     }
 
@@ -276,11 +357,6 @@ fun CalculateCostTabContent(
         allPricesForSelectedProduct.find { it.priceId == selectedPriceId }
     }
 
-    // Recipe State mapping: ingredientId -> UsageQuantity & UsageUnit
-    var checkedIngredients by remember { mutableStateOf(setOf<Int>()) }
-    var ingredientUsages by remember { mutableStateOf(mapOf<Int, Double>()) }
-    var ingredientUnits by remember { mutableStateOf(mapOf<Int, String>()) }
-
     // Historical calculations for selected price variant
     val variantCalculations = remember(calculations, selectedPriceId) {
         if (selectedPriceId == null) emptyList()
@@ -288,10 +364,6 @@ fun CalculateCostTabContent(
     }
 
     val activeCalculation = variantCalculations.firstOrNull()
-
-    // History Dialog State
-    var showHistoryDialog by remember { mutableStateOf(false) }
-    var historicalItemsMap by remember { mutableStateOf<Map<Int, List<CostCalculationItem>>>(emptyMap()) }
 
     val hasChanges = remember(
         selectedPriceId,
@@ -333,7 +405,7 @@ fun CalculateCostTabContent(
         variantCalculations.forEach { calc ->
             if (!historicalItemsMap.containsKey(calc.calculationId)) {
                 viewModel.getCalculationItems(calc.calculationId).first().let { items ->
-                    historicalItemsMap = historicalItemsMap + (calc.calculationId to items)
+                    onHistoricalItemsMapChange(historicalItemsMap + (calc.calculationId to items))
                 }
             }
         }
@@ -352,15 +424,34 @@ fun CalculateCostTabContent(
                     usages[item.ingredientId] = item.usageQuantity
                     units[item.ingredientId] = item.usageUnit
                 }
-                checkedIngredients = checked
-                ingredientUsages = usages
-                ingredientUnits = units
+                onCheckedIngredientsChange(checked)
+                onIngredientUsagesChange(usages)
+                onIngredientUnitsChange(units)
             }
         } else {
             // Reset
-            checkedIngredients = emptySet()
-            ingredientUsages = emptyMap()
-            ingredientUnits = emptyMap()
+            onCheckedIngredientsChange(emptySet())
+            onIngredientUsagesChange(emptyMap())
+            onIngredientUnitsChange(emptyMap())
+        }
+    }
+
+    // Auto-load existing version if calculation already exists for Category + Variety + Selling Price Variant on selected date
+    LaunchedEffect(selectedPriceId, effectiveDate, calculations) {
+        if (selectedPriceId != null) {
+            val existing = calculations.find { it.productPriceId == selectedPriceId && it.calculationDate == effectiveDate }
+            if (existing != null) {
+                if (editingCalculation?.calculationId != existing.calculationId) {
+                    onEditingCalculationChange(existing)
+                }
+            } else {
+                // If editing calculation date doesn't match effective date and wasn't loaded from history, reset editing mode
+                if (editingCalculation != null && editingCalculation!!.calculationDate != effectiveDate) {
+                    onEditingCalculationChange(null)
+                }
+            }
+        } else {
+            onEditingCalculationChange(null)
         }
     }
 
@@ -377,12 +468,32 @@ fun CalculateCostTabContent(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "Step 1: Select Product Details",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Step 1: Select Product Details",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (selectedCategory.isNotEmpty() || selectedVarietyProductId != null || selectedPriceId != null) {
+                            TextButton(
+                                onClick = {
+                                    onSelectedCategoryChange("")
+                                    onSelectedVarietyProductIdChange(null)
+                                    onSelectedPriceIdChange(null)
+                                    onEffectiveDateChange(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()))
+                                    onEditingCalculationChange(null)
+                                },
+                                modifier = Modifier.testTag("btn_reset_selection")
+                            ) {
+                                Text("Reset", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
 
                     // 1. Snack Category Dropdown
                     var catExpanded by remember { mutableStateOf(false) }
@@ -416,9 +527,9 @@ fun CalculateCostTabContent(
                                     DropdownMenuItem(
                                         text = { Text(cat) },
                                         onClick = {
-                                            selectedCategory = cat
-                                            selectedVarietyProductId = null
-                                            selectedPriceId = null
+                                            onSelectedCategoryChange(cat)
+                                            onSelectedVarietyProductIdChange(null)
+                                            onSelectedPriceIdChange(null)
                                             catExpanded = false
                                         },
                                         modifier = Modifier.testTag("cat_option_$cat")
@@ -463,8 +574,8 @@ fun CalculateCostTabContent(
                                     DropdownMenuItem(
                                         text = { Text(prod.productName) },
                                         onClick = {
-                                            selectedVarietyProductId = prod.id
-                                            selectedPriceId = null
+                                            onSelectedVarietyProductIdChange(prod.id)
+                                            onSelectedPriceIdChange(null)
                                             varExpanded = false
                                         },
                                         modifier = Modifier.testTag("var_option_${prod.productName}")
@@ -518,7 +629,7 @@ fun CalculateCostTabContent(
                                     DropdownMenuItem(
                                         text = { Text("₹${price.sellingPrice} (Profit: ₹${price.profitPerPacket})") },
                                         onClick = {
-                                            selectedPriceId = price.priceId
+                                            onSelectedPriceIdChange(price.priceId)
                                             priceExpanded = false
                                         },
                                         modifier = Modifier.testTag("price_option_${price.sellingPrice.toInt()}")
@@ -556,6 +667,47 @@ fun CalculateCostTabContent(
                         )
                     }
 
+                    // Effective Date Picker
+                    Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        OutlinedTextField(
+                            value = effectiveDate,
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text("Cost Calculation Effective Date*") },
+                            modifier = Modifier.fillMaxWidth().testTag("input_effective_date"),
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    val parts = effectiveDate.split("-")
+                                    val cal = Calendar.getInstance()
+                                    val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                    val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                    val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                    DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                        val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                        onEffectiveDateChange(formattedDate)
+                                    }, y, m, d).show()
+                                }) {
+                                    Icon(Icons.Default.DateRange, contentDescription = "Select Date")
+                                }
+                            }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable {
+                                    val parts = effectiveDate.split("-")
+                                    val cal = Calendar.getInstance()
+                                    val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                    val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                    val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                    DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                        val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                        onEffectiveDateChange(formattedDate)
+                                    }, y, m, d).show()
+                                }
+                        )
+                    }
+
                     // Continue Button (Step 4 & Validation requirement)
                     val isContinueEnabled = selectedCategory.isNotEmpty() &&
                             selectedVarietyProductId != null &&
@@ -564,7 +716,7 @@ fun CalculateCostTabContent(
                             filteredPrices.isNotEmpty()
 
                     Button(
-                        onClick = { isProceeded = true },
+                        onClick = { onIsProceededChange(true) },
                         enabled = isContinueEnabled,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -644,7 +796,7 @@ fun CalculateCostTabContent(
                             )
                         }
                         TextButton(
-                            onClick = { editingCalculation = null },
+                            onClick = { onEditingCalculationChange(null) },
                             modifier = Modifier.testTag("btn_cancel_edit")
                         ) {
                             Text("Cancel Edit", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
@@ -683,7 +835,7 @@ fun CalculateCostTabContent(
                     }
                     if (variantCalculations.isNotEmpty()) {
                         Button(
-                            onClick = { showHistoryDialog = true },
+                            onClick = { onShowHistoryDialogChange(true) },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                             modifier = Modifier.testTag("btn_view_history")
                         ) {
@@ -698,13 +850,26 @@ fun CalculateCostTabContent(
 
         // --- INGREDIENT USAGES SHEET (Step 5) ---
         item {
-            Text(
-                "Step 2: Define Ingredient Usages (Per Packet)",
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Step 2: Define Usages",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                TextButton(
+                    onClick = { onIsProceededChange(false) },
+                    modifier = Modifier.testTag("btn_back_to_step1")
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Back to Step 1")
+                }
+            }
         }
 
         if (ingredients.none { it.status == "Active" }) {
@@ -766,11 +931,12 @@ fun CalculateCostTabContent(
                             Checkbox(
                                 checked = isChecked,
                                 onCheckedChange = { checked ->
-                                    checkedIngredients = if (checked) {
+                                    val nextChecked = if (checked) {
                                         checkedIngredients + ingredient.id
                                     } else {
                                         checkedIngredients - ingredient.id
                                     }
+                                    onCheckedIngredientsChange(nextChecked)
                                 },
                                 modifier = Modifier.testTag("checkbox_ingredient_${ingredient.id}")
                             )
@@ -812,7 +978,7 @@ fun CalculateCostTabContent(
                                     value = if (usageQty == 0.0) "" else usageQty.toString(),
                                     onValueChange = { input ->
                                         val qty = input.toDoubleOrNull() ?: 0.0
-                                        ingredientUsages = ingredientUsages + (ingredient.id to qty)
+                                        onIngredientUsagesChange(ingredientUsages + (ingredient.id to qty))
                                     },
                                     label = { Text("Usage Amount") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -850,7 +1016,7 @@ fun CalculateCostTabContent(
                                             DropdownMenuItem(
                                                 text = { Text(u) },
                                                 onClick = {
-                                                    ingredientUnits = ingredientUnits + (ingredient.id to u)
+                                                    onIngredientUnitsChange(ingredientUnits + (ingredient.id to u))
                                                     unitExpanded = false
                                                 }
                                             )
@@ -999,10 +1165,9 @@ fun CalculateCostTabContent(
                                     return@Button
                                 }
                                 
-                                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                                 val updatedCalculation = editingCalculation!!.copy(
                                     productPriceId = selectedPriceObj.priceId,
-                                    calculationDate = todayStr,
+                                    calculationDate = effectiveDate,
                                     totalProductionCost = totalProductionCost,
                                     sellingPriceSnapshot = sellingPrice,
                                     profitSnapshot = dynamicProfit
@@ -1041,15 +1206,16 @@ fun CalculateCostTabContent(
 
                                 viewModel.updateCostCalculation(updatedCalculation, itemsList)
                                 Toast.makeText(context, "Updated Cost Version v${editingCalculation!!.version}!", Toast.LENGTH_SHORT).show()
-                                editingCalculation = null
+                                onEditingCalculationChange(null)
+                                recalculateEffectiveDate = effectiveDate
+                                showRecalculateDialog = true
                             } else {
                                 val nextVersion = (activeCalculation?.version ?: 0) + 1
-                                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                                 
                                 val calculation = CostCalculation(
                                     productPriceId = selectedPriceObj.priceId,
                                     version = nextVersion,
-                                    calculationDate = todayStr,
+                                    calculationDate = effectiveDate,
                                     totalProductionCost = totalProductionCost,
                                     sellingPriceSnapshot = sellingPrice,
                                     profitSnapshot = dynamicProfit,
@@ -1089,6 +1255,8 @@ fun CalculateCostTabContent(
 
                                 viewModel.saveCostCalculation(calculation, itemsList)
                                 Toast.makeText(context, "Locked & Saved Cost Version v$nextVersion!", Toast.LENGTH_SHORT).show()
+                                recalculateEffectiveDate = effectiveDate
+                                showRecalculateDialog = true
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("btn_save_calculation"),
@@ -1106,7 +1274,7 @@ fun CalculateCostTabContent(
     // --- HISTORY DIALOG (Step 15, 16) ---
     if (showHistoryDialog) {
         AlertDialog(
-            onDismissRequest = { showHistoryDialog = false },
+            onDismissRequest = { onShowHistoryDialogChange(false) },
             title = { Text("Cost Calculation History") },
             text = {
                 Box(modifier = Modifier.sizeIn(maxHeight = 450.dp)) {
@@ -1161,12 +1329,13 @@ fun CalculateCostTabContent(
                                                     if (priceObj != null) {
                                                         val prodObj = products.find { it.id == priceObj.productId }
                                                         if (prodObj != null) {
-                                                            selectedCategory = prodObj.productCategory
-                                                            selectedVarietyProductId = prodObj.id
-                                                            selectedPriceId = priceObj.priceId
-                                                            editingCalculation = calc
-                                                            isProceeded = true
-                                                            showHistoryDialog = false
+                                                            onSelectedCategoryChange(prodObj.productCategory)
+                                                            onSelectedVarietyProductIdChange(prodObj.id)
+                                                            onSelectedPriceIdChange(priceObj.priceId)
+                                                            onEffectiveDateChange(calc.calculationDate)
+                                                            onEditingCalculationChange(calc)
+                                                            onIsProceededChange(true)
+                                                            onShowHistoryDialogChange(false)
                                                         }
                                                     }
                                                 }
@@ -1193,8 +1362,38 @@ fun CalculateCostTabContent(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showHistoryDialog = false }) {
+                TextButton(onClick = { onShowHistoryDialogChange(false) }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    if (showRecalculateDialog) {
+        AlertDialog(
+            onDismissRequest = { showRecalculateDialog = false },
+            title = { Text("Retroactive Recalculation") },
+            text = {
+                Text("Do you want to recalculate and update profits for all historical sales matching this product variety and price variant?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.recalculateHistoricalSales(recalculateEffectiveDate, true)
+                        Toast.makeText(context, "Recalculation started in background.", Toast.LENGTH_SHORT).show()
+                        showRecalculateDialog = false
+                    },
+                    modifier = Modifier.testTag("btn_confirm_recalculate")
+                ) {
+                    Text("Yes, Recalculate")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showRecalculateDialog = false },
+                    modifier = Modifier.testTag("btn_cancel_recalculate")
+                ) {
+                    Text("No, Keep Manual/Previous Values")
                 }
             }
         )
@@ -1267,6 +1466,19 @@ fun IngredientMasterTabContent(
                     onValueChange = { searchQuery = it },
                     placeholder = { Text("Search ingredients...") },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = if (searchQuery.isNotEmpty() || categoryFilter != "All") {
+                        {
+                            IconButton(
+                                onClick = {
+                                    searchQuery = ""
+                                    categoryFilter = "All"
+                                },
+                                modifier = Modifier.testTag("btn_reset_filters")
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = "Reset Filters")
+                            }
+                        }
+                    } else null,
                     modifier = Modifier.weight(1.5f).testTag("ingredient_search_bar"),
                     singleLine = true
                 )
@@ -1700,13 +1912,45 @@ fun IngredientMasterTabContent(
                         }
 
                         item {
-                            OutlinedTextField(
-                                value = date,
-                                onValueChange = { date = it },
-                                label = { Text("Purchase Date (yyyy-MM-dd)") },
-                                modifier = Modifier.fillMaxWidth().testTag("input_purchase_date"),
-                                singleLine = true
-                            )
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                OutlinedTextField(
+                                    value = date,
+                                    onValueChange = { },
+                                    readOnly = true,
+                                    label = { Text("Purchase Date (yyyy-MM-dd)") },
+                                    modifier = Modifier.fillMaxWidth().testTag("input_purchase_date"),
+                                    trailingIcon = {
+                                        IconButton(onClick = {
+                                            val parts = date.split("-")
+                                            val cal = Calendar.getInstance()
+                                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                                val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                                date = formattedDate
+                                            }, y, m, d).show()
+                                        }) {
+                                            Icon(Icons.Default.DateRange, contentDescription = "Select Date")
+                                        }
+                                    }
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable {
+                                            val parts = date.split("-")
+                                            val cal = Calendar.getInstance()
+                                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                                val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                                date = formattedDate
+                                            }, y, m, d).show()
+                                        }
+                                )
+                            }
                         }
 
                         item {

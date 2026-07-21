@@ -2321,6 +2321,64 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun recalculateHistoricalSales(effectiveDateStr: String, recalculateAll: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val sales = repository.allSales.first()
+                val productsList = repository.allProducts.first()
+                val pricesList = repository.getAllPrices()
+                val calculationsList = repository.allCalculations.first()
+                
+                val effectiveTime = try {
+                    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(effectiveDateStr)?.time ?: 0L
+                } catch (e: Exception) {
+                    0L
+                }
+                
+                val updatedSales = sales.mapNotNull { sale ->
+                    if (!recalculateAll && sale.entryDate < effectiveTime) {
+                        return@mapNotNull null
+                    }
+                    
+                    val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
+                    val price = if (product != null) {
+                        pricesList.find { it.productId == product.id && it.sellingPrice == sale.ratePerPacket }
+                    } else null
+                    
+                    val profitPerPacket = if (price != null) {
+                        val saleDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(sale.entryDate))
+                        val calc = calculationsList
+                            .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
+                            .maxByOrNull { it.calculationDate }
+                        calc?.profitSnapshot ?: price.profitPerPacket
+                    } else {
+                        sale.profitPerPacket // keep existing if no match
+                    }
+                    
+                    if (sale.profitPerPacket != profitPerPacket) {
+                        sale.copy(
+                            profitPerPacket = profitPerPacket,
+                            totalProfit = sale.packetsSold * profitPerPacket
+                        )
+                    } else {
+                        null
+                    }
+                }
+                
+                if (updatedSales.isNotEmpty()) {
+                    repository.updateSalesList(updatedSales)
+                }
+            } catch (e: Exception) {
+                triggerError(
+                    module = "DynamicCost",
+                    operation = "Recalculate Historical Sales",
+                    exception = e,
+                    possibleReason = "An error occurred while retroactively recalculating profit values."
+                )
+            }
+        }
+    }
+
     fun deleteSales(salesEntry: SalesEntry) = viewModelScope.launch(Dispatchers.IO) {
         try {
             val salesBefore = repository.allSales.first()

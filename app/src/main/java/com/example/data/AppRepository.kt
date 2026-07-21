@@ -169,6 +169,7 @@ class AppRepository(
     suspend fun insertSales(sales: SalesEntry) = salesDao.insertSales(sales)
     suspend fun insertSalesList(salesList: List<SalesEntry>) = salesDao.insertSalesList(salesList)
     suspend fun updateSales(sales: SalesEntry) = salesDao.updateSales(sales)
+    suspend fun updateSalesList(salesList: List<SalesEntry>) = salesDao.updateSalesList(salesList)
     suspend fun deleteSales(sales: SalesEntry) = salesDao.deleteSales(sales)
     suspend fun deleteAllSales() = salesDao.deleteAllSales()
     suspend fun deleteSalesBySessionId(sessionId: String) = salesDao.deleteSalesBySessionId(sessionId)

@@ -116,6 +116,9 @@ interface SalesDao {
     @Update
     suspend fun updateSales(sales: SalesEntry)
 
+    @Update
+    suspend fun updateSalesList(salesList: List<SalesEntry>)
+
     @Delete
     suspend fun deleteSales(sales: SalesEntry)
 

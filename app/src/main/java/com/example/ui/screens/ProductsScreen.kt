@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ProductMaster
+import java.util.Locale
 import com.example.data.ProductPrice
 import com.example.ui.AppViewModel
 import com.example.utils.Exporter
@@ -47,6 +48,8 @@ fun ProductsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val products by viewModel.products.collectAsStateWithLifecycle()
+    val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
+    val calculations by viewModel.allCostCalculations.collectAsStateWithLifecycle()
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
     
@@ -402,12 +405,26 @@ fun ProductsScreen(
                     Text("Price Configurations", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                     
                     priceConfigurations.forEach { price ->
+                        val latestCalc = if (isDynamicProfitEnabled) {
+                            calculations.filter { it.productPriceId == price.priceId }.maxByOrNull { it.version }
+                        } else null
+                        
+                        val displayedProfit = latestCalc?.profitSnapshot ?: price.profitPerPacket
+                        val displayedCost = if (latestCalc != null) latestCalc.totalProductionCost else (price.sellingPrice - price.profitPerPacket)
+                        
+                        val profitLabelSuffix = if (latestCalc != null) " (Dynamic)" else ""
+                        val costLabelSuffix = if (latestCalc != null) " (Dynamic)" else ""
+
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("₹${price.sellingPrice} / Profit: ₹${price.profitPerPacket}")
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Price: ₹${price.sellingPrice}", fontWeight = FontWeight.Bold)
+                                Text("Production Cost: ₹${String.format(Locale.US, "%.2f", displayedCost)}$costLabelSuffix", fontSize = 12.sp, color = Color.Gray)
+                                Text("Profit: ₹${String.format(Locale.US, "%.2f", displayedProfit)}$profitLabelSuffix", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                            }
                             Row {
                                 IconButton(onClick = { 
                                     newSellingPrice = price.sellingPrice.toString()
