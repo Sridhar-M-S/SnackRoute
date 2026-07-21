@@ -86,6 +86,9 @@ interface ProductPriceDao {
     @Query("SELECT * FROM product_prices")
     suspend fun getAllPrices(): List<ProductPrice>
 
+    @Query("SELECT * FROM product_prices")
+    fun getAllPricesFlow(): Flow<List<ProductPrice>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPrice(price: ProductPrice)
 

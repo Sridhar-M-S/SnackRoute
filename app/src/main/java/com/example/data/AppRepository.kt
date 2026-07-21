@@ -159,6 +159,7 @@ class AppRepository(
     // --- Product Price Queries ---
     fun getPricesForProduct(productId: Int) = productPriceDao.getPricesForProduct(productId)
     suspend fun getAllPrices() = productPriceDao.getAllPrices()
+    fun getAllPricesFlow() = productPriceDao.getAllPricesFlow()
     suspend fun insertPrice(price: ProductPrice) = productPriceDao.insertPrice(price)
     suspend fun updatePrice(price: ProductPrice) = productPriceDao.updatePrice(price)
     suspend fun deletePrice(price: ProductPrice) = productPriceDao.deletePrice(price)

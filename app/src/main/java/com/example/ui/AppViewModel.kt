@@ -222,6 +222,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _isOfflineQueueActive = MutableStateFlow<Boolean>(false)
     val isOfflineQueueActive: StateFlow<Boolean> = _isOfflineQueueActive.asStateFlow()
 
+    // --- Dynamic Profit Calculation Settings & Flows ---
+    private val _isDynamicProfitEnabled = MutableStateFlow(prefs.getBoolean("is_dynamic_profit_enabled", false))
+    val isDynamicProfitEnabled: StateFlow<Boolean> = _isDynamicProfitEnabled.asStateFlow()
+
+    fun setDynamicProfitEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("is_dynamic_profit_enabled", enabled).apply()
+        _isDynamicProfitEnabled.value = enabled
+    }
+
+    val allCostCalculations: StateFlow<List<CostCalculation>> = repository.allCalculations
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     fun setGoogleAccount(account: GoogleSignInAccount?) {
         _googleSignInAccount.value = account
         if (account != null) {
@@ -630,26 +646,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    val gamificationState: StateFlow<GamificationState> = combine(
-        repository.allSales,
-        repository.allShops,
-        repository.allLocations,
-        repository.unlockedBadges,
-        _bonusXp,
-        _bonusCoins,
-        _rewardedMissionIds,
-        _sessionCombo
-    ) { array ->
-        val sales = array[0] as List<SalesEntry>
-        val shops = array[1] as List<ShopMaster>
-        val locs = array[2] as List<LocationMaster>
-        val badges = array[3] as List<UserBadge>
-        val bXp = array[4] as Int
-        val bCoins = array[5] as Int
-        val rIds = array[6] as Set<String>
-        val combo = array[7] as Int
-        calculateGamificationState(sales, shops, locs, badges, bXp, bCoins, rIds, combo)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GamificationState())
+
 
     fun incrementSessionCombo() {
         val now = System.currentTimeMillis()
@@ -784,24 +781,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val dailyTarget: StateFlow<DailyTarget?> = repository.dailyTarget
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val currentDailySales: StateFlow<List<SalesEntry>> = repository.allSales
-        .map { salesList ->
-            val calendar = Calendar.getInstance()
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val today = calendar.timeInMillis
-            salesList.filter { it.entryDate >= today }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val todayPackets = currentDailySales.map { it.sumOf { s -> s.packetsSold } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-    val todaySales = currentDailySales.map { it.sumOf { s -> s.totalAmount } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
-    val todayProfit = currentDailySales.map { it.sumOf { s -> s.totalProfit } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     fun setDailyTarget(target: DailyTarget) = viewModelScope.launch(Dispatchers.IO) {
         repository.insertDailyTarget(target)
@@ -865,7 +845,128 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val profitGrowthPercent: Double
     )
 
-    val monthlyGrowth: StateFlow<MonthlyGrowthData?> = repository.allSales
+
+
+    // --- Badge Flows ---
+    val allBadges: StateFlow<List<Badge>> = repository.allBadges
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val unlockedBadges: StateFlow<List<UserBadge>> = repository.unlockedBadges
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val timetable: StateFlow<List<TimetableEntry>> = repository.allTimetableEntries
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val locations: StateFlow<List<LocationMaster>> = repository.allLocations
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val products: StateFlow<List<ProductMaster>> = repository.allProducts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val sales: StateFlow<List<SalesEntry>> = combine(
+        repository.allSales,
+        products,
+        repository.getAllPricesFlow(),
+        allCostCalculations,
+        isDynamicProfitEnabled
+    ) { rawSales, prods, prices, calcs, dynamicEnabled ->
+        android.util.Log.d("DynamicCostEngine", "Mapping Sales: Dynamic Cost Engine = ${if (dynamicEnabled) "ON" else "OFF"}")
+        rawSales.map { sale ->
+            val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
+            val priceObj = product?.let { p ->
+                prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+            }
+            
+            if (dynamicEnabled) {
+                if (priceObj != null) {
+                    val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
+                    val applicableCalc = calcs
+                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                    
+                    if (applicableCalc != null) {
+                        android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: Source = Cost History (v${applicableCalc.version}), Production Cost = ₹${applicableCalc.totalProductionCost}, Profit = ₹${applicableCalc.profitSnapshot}, Selling Price = ₹${applicableCalc.sellingPriceSnapshot}")
+                        val newTotalProfit = sale.packetsSold * applicableCalc.profitSnapshot
+                        val newTotalAmount = sale.packetsSold * applicableCalc.sellingPriceSnapshot
+                        sale.copy(
+                            ratePerPacket = applicableCalc.sellingPriceSnapshot,
+                            totalAmount = newTotalAmount,
+                            profitPerPacket = applicableCalc.profitSnapshot,
+                            totalProfit = newTotalProfit
+                        )
+                    } else {
+                        android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: No matching calculation found. Fallback to Product Master. Profit = ₹${priceObj.profitPerPacket}, Selling Price = ₹${priceObj.sellingPrice}")
+                        val newTotalProfit = sale.packetsSold * priceObj.profitPerPacket
+                        val newTotalAmount = sale.packetsSold * priceObj.sellingPrice
+                        sale.copy(
+                            ratePerPacket = priceObj.sellingPrice,
+                            totalAmount = newTotalAmount,
+                            profitPerPacket = priceObj.profitPerPacket,
+                            totalProfit = newTotalProfit
+                        )
+                    }
+                } else {
+                    android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: No ProductPrice object found. Keeping original values. Profit = ₹${sale.profitPerPacket}, Selling Price = ₹${sale.ratePerPacket}")
+                    sale
+                }
+            } else {
+                if (priceObj != null) {
+                    android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: Source = Product Master, Profit = ₹${priceObj.profitPerPacket}, Selling Price = ₹${priceObj.sellingPrice}")
+                    val newTotalProfit = sale.packetsSold * priceObj.profitPerPacket
+                    val newTotalAmount = sale.packetsSold * priceObj.sellingPrice
+                    sale.copy(
+                        ratePerPacket = priceObj.sellingPrice,
+                        totalAmount = newTotalAmount,
+                        profitPerPacket = priceObj.profitPerPacket,
+                        totalProfit = newTotalProfit
+                    )
+                } else {
+                    android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: No ProductPrice found in Product Master. Keeping original values. Profit = ₹${sale.profitPerPacket}, Selling Price = ₹${sale.ratePerPacket}")
+                    sale
+                }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val gamificationState: StateFlow<GamificationState> = combine(
+        sales,
+        repository.allShops,
+        repository.allLocations,
+        repository.unlockedBadges,
+        _bonusXp,
+        _bonusCoins,
+        _rewardedMissionIds,
+        _sessionCombo
+    ) { array ->
+        val sales = array[0] as List<SalesEntry>
+        val shops = array[1] as List<ShopMaster>
+        val locs = array[2] as List<LocationMaster>
+        val badges = array[3] as List<UserBadge>
+        val bXp = array[4] as Int
+        val bCoins = array[5] as Int
+        val rIds = array[6] as Set<String>
+        val combo = array[7] as Int
+        calculateGamificationState(sales, shops, locs, badges, bXp, bCoins, rIds, combo)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GamificationState())
+
+    val currentDailySales: StateFlow<List<SalesEntry>> = sales
+        .map { salesList ->
+            val calendar = Calendar.getInstance()
+            calendar.set(Calendar.HOUR_OF_DAY, 0)
+            calendar.set(Calendar.MINUTE, 0)
+            calendar.set(Calendar.SECOND, 0)
+            calendar.set(Calendar.MILLISECOND, 0)
+            val today = calendar.timeInMillis
+            salesList.filter { it.entryDate >= today }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val todayPackets = currentDailySales.map { it.sumOf { s -> s.packetsSold } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val todaySales = currentDailySales.map { it.sumOf { s -> s.totalAmount } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val todayProfit = currentDailySales.map { it.sumOf { s -> s.totalProfit } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val monthlyGrowth: StateFlow<MonthlyGrowthData?> = sales
         .map { salesList ->
             val calendar = Calendar.getInstance()
             val currentMonth = calendar.get(Calendar.MONTH)
@@ -905,23 +1006,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    // --- Badge Flows ---
-    val allBadges: StateFlow<List<Badge>> = repository.allBadges
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val unlockedBadges: StateFlow<List<UserBadge>> = repository.unlockedBadges
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val timetable: StateFlow<List<TimetableEntry>> = repository.allTimetableEntries
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val locations: StateFlow<List<LocationMaster>> = repository.allLocations
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val sales: StateFlow<List<SalesEntry>> = repository.allSales
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val products: StateFlow<List<ProductMaster>> = repository.allProducts
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val salesSearchQuery = MutableStateFlow("")
     val salesFilterShopNumber = MutableStateFlow<String?>(null)
@@ -1449,7 +1533,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     val shops: StateFlow<List<ShopMaster>> = combine(
         repository.allShops,
-        repository.allSales
+        sales
     ) { allShops, allSales ->
         allShops.map { shop ->
             val salesForShop = allSales.filter { it.shopNumber == shop.shopNumber }
@@ -1553,7 +1637,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         
         viewModelScope.launch(Dispatchers.IO) {
-            combine(repository.allSales, repository.allShops) { s, sh ->
+            combine(sales, repository.allShops) { s, sh ->
                 Pair(s, sh)
             }.collect { (s, sh) ->
                 checkAndUnlockBadges(s, sh)
@@ -3111,15 +3195,6 @@ User Question: $userQuestion
         }
     }
 
-    // --- Dynamic Profit Calculation Settings & Flows ---
-    private val _isDynamicProfitEnabled = MutableStateFlow(prefs.getBoolean("is_dynamic_profit_enabled", false))
-    val isDynamicProfitEnabled: StateFlow<Boolean> = _isDynamicProfitEnabled.asStateFlow()
-
-    fun setDynamicProfitEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("is_dynamic_profit_enabled", enabled).apply()
-        _isDynamicProfitEnabled.value = enabled
-    }
-
     val allIngredients: StateFlow<List<Ingredient>> = repository.allIngredients
         .stateIn(
             scope = viewModelScope,
@@ -3128,13 +3203,6 @@ User Question: $userQuestion
         )
 
     val allIngredientPurchases: StateFlow<List<IngredientPurchase>> = repository.allPurchases
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-    val allCostCalculations: StateFlow<List<CostCalculation>> = repository.allCalculations
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
