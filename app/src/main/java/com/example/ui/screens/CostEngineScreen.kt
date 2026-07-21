@@ -304,9 +304,6 @@ fun CalculateCostTabContent(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var showRecalculateDialog by remember { mutableStateOf(false) }
-    var recalculateEffectiveDate by remember { mutableStateOf("") }
-
     LaunchedEffect(selectedCategory, selectedVarietyProductId, selectedPriceId) {
         if (editingCalculation == null) {
             onIsProceededChange(false)
@@ -988,38 +985,46 @@ fun CalculateCostTabContent(
 
                                 // Unit selector dropdown (Step 3)
                                 var unitExpanded by remember { mutableStateOf(false) }
+                                val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
                                 Box(modifier = Modifier.weight(1f)) {
-                                    OutlinedTextField(
-                                        value = usageUnit,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        label = { Text("Unit") },
-                                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                                        modifier = Modifier.fillMaxWidth().testTag("dropdown_unit_${ingredient.id}")
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .matchParentSize()
-                                            .clickable { unitExpanded = true }
-                                    )
-                                    DropdownMenu(
+                                    ExposedDropdownMenuBox(
                                         expanded = unitExpanded,
-                                        onDismissRequest = { unitExpanded = false }
+                                        onExpandedChange = { 
+                                            focusManager.clearFocus()
+                                            unitExpanded = it 
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        val supportedUnits = when (UnitConverter.getUnitType(latestPurchase?.unit ?: "Piece")) {
-                                            "Weight" -> UnitConverter.WeightUnits
-                                            "Volume" -> UnitConverter.VolumeUnits
-                                            else -> listOf(latestPurchase?.unit ?: "Piece") + UnitConverter.QuantityUnits
-                                        }.distinct()
+                                        OutlinedTextField(
+                                            value = usageUnit,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text("Unit") },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = unitExpanded) },
+                                            modifier = Modifier
+                                                .menuAnchor()
+                                                .fillMaxWidth()
+                                                .testTag("dropdown_unit_${ingredient.id}")
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = unitExpanded,
+                                            onDismissRequest = { unitExpanded = false }
+                                        ) {
+                                            val supportedUnits = when (UnitConverter.getUnitType(latestPurchase?.unit ?: "Piece")) {
+                                                "Weight" -> UnitConverter.WeightUnits
+                                                "Volume" -> UnitConverter.VolumeUnits
+                                                else -> listOf(latestPurchase?.unit ?: "Piece") + UnitConverter.QuantityUnits
+                                            }.distinct()
 
-                                        supportedUnits.forEach { u ->
-                                            DropdownMenuItem(
-                                                text = { Text(u) },
-                                                onClick = {
-                                                    onIngredientUnitsChange(ingredientUnits + (ingredient.id to u))
-                                                    unitExpanded = false
-                                                }
-                                            )
+                                            supportedUnits.forEach { u ->
+                                                DropdownMenuItem(
+                                                    text = { Text(u) },
+                                                    onClick = {
+                                                        onIngredientUnitsChange(ingredientUnits + (ingredient.id to u))
+                                                        unitExpanded = false
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1207,8 +1212,9 @@ fun CalculateCostTabContent(
                                 viewModel.updateCostCalculation(updatedCalculation, itemsList)
                                 Toast.makeText(context, "Updated Cost Version v${editingCalculation!!.version}!", Toast.LENGTH_SHORT).show()
                                 onEditingCalculationChange(null)
-                                recalculateEffectiveDate = effectiveDate
-                                showRecalculateDialog = true
+                                if (isDynamicProfitEnabled) {
+                                    viewModel.recalculateHistoricalSales(effectiveDate, true)
+                                }
                             } else {
                                 val nextVersion = (activeCalculation?.version ?: 0) + 1
                                 
@@ -1255,8 +1261,9 @@ fun CalculateCostTabContent(
 
                                 viewModel.saveCostCalculation(calculation, itemsList)
                                 Toast.makeText(context, "Locked & Saved Cost Version v$nextVersion!", Toast.LENGTH_SHORT).show()
-                                recalculateEffectiveDate = effectiveDate
-                                showRecalculateDialog = true
+                                if (isDynamicProfitEnabled) {
+                                    viewModel.recalculateHistoricalSales(effectiveDate, true)
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("btn_save_calculation"),
@@ -1364,36 +1371,6 @@ fun CalculateCostTabContent(
             confirmButton = {
                 TextButton(onClick = { onShowHistoryDialogChange(false) }) {
                     Text("Close")
-                }
-            }
-        )
-    }
-
-    if (showRecalculateDialog) {
-        AlertDialog(
-            onDismissRequest = { showRecalculateDialog = false },
-            title = { Text("Retroactive Recalculation") },
-            text = {
-                Text("Do you want to recalculate and update profits for all historical sales matching this product variety and price variant?")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.recalculateHistoricalSales(recalculateEffectiveDate, true)
-                        Toast.makeText(context, "Recalculation started in background.", Toast.LENGTH_SHORT).show()
-                        showRecalculateDialog = false
-                    },
-                    modifier = Modifier.testTag("btn_confirm_recalculate")
-                ) {
-                    Text("Yes, Recalculate")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showRecalculateDialog = false },
-                    modifier = Modifier.testTag("btn_cancel_recalculate")
-                ) {
-                    Text("No, Keep Manual/Previous Values")
                 }
             }
         )

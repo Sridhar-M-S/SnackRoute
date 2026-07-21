@@ -229,6 +229,65 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setDynamicProfitEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("is_dynamic_profit_enabled", enabled).apply()
         _isDynamicProfitEnabled.value = enabled
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val salesList = repository.allSales.first()
+                val productsList = repository.allProducts.first()
+                val pricesList = repository.getAllPrices()
+                val calculationsList = repository.allCalculations.first()
+                
+                val updatedSales = salesList.mapNotNull { sale ->
+                    val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
+                    val price = if (product != null) {
+                        pricesList.find { it.productId == product.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+                    } else null
+                    
+                    val profitPerPacket = if (price != null) {
+                        if (enabled) {
+                            val saleDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(sale.entryDate))
+                            val calc = calculationsList
+                                .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
+                                .maxByOrNull { it.calculationDate }
+                            calc?.profitSnapshot ?: price.profitPerPacket
+                        } else {
+                            price.profitPerPacket
+                        }
+                    } else {
+                        sale.profitPerPacket
+                    }
+                    
+                    if (sale.profitPerPacket != profitPerPacket) {
+                        sale.copy(
+                            profitPerPacket = profitPerPacket,
+                            totalProfit = sale.packetsSold * profitPerPacket
+                        )
+                    } else {
+                        null
+                    }
+                }
+                
+                if (updatedSales.isNotEmpty()) {
+                    repository.updateSalesList(updatedSales)
+                }
+                
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    val message = if (enabled) {
+                        "Dynamic Cost Engine enabled. Historical sales recalculated successfully."
+                    } else {
+                        "Dynamic Cost Engine disabled. Manual Product Master values restored."
+                    }
+                    android.widget.Toast.makeText(getApplication(), message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                triggerError(
+                    module = "DynamicCost",
+                    operation = "setDynamicProfitEnabled",
+                    exception = e,
+                    possibleReason = "An error occurred while toggling dynamic cost calculation."
+                )
+            }
+        }
     }
 
     val allCostCalculations: StateFlow<List<CostCalculation>> = repository.allCalculations
@@ -2426,7 +2485,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     
                     val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
                     val price = if (product != null) {
-                        pricesList.find { it.productId == product.id && it.sellingPrice == sale.ratePerPacket }
+                        pricesList.find { it.productId == product.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
                     } else null
                     
                     val profitPerPacket = if (price != null) {
@@ -2451,6 +2510,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 
                 if (updatedSales.isNotEmpty()) {
                     repository.updateSalesList(updatedSales)
+                }
+                
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "Historical sales recalculated successfully.",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
                 }
             } catch (e: Exception) {
                 triggerError(
