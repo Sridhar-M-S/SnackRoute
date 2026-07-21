@@ -218,6 +218,8 @@ fun CalculateCostTabContent(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    var editingCalculation by remember { mutableStateOf<CostCalculation?>(null) }
+
     // Dynamic Selectors State (Step 1)
     var selectedCategory by remember { mutableStateOf("") }
     var selectedVarietyProductId by remember { mutableStateOf<Int?>(null) }
@@ -225,7 +227,9 @@ fun CalculateCostTabContent(
     var isProceeded by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedCategory, selectedVarietyProductId, selectedPriceId) {
-        isProceeded = false
+        if (editingCalculation == null) {
+            isProceeded = false
+        }
     }
 
     var allPricesForSelectedProduct by remember { mutableStateOf<List<ProductPrice>>(emptyList()) }
@@ -289,6 +293,41 @@ fun CalculateCostTabContent(
     var showHistoryDialog by remember { mutableStateOf(false) }
     var historicalItemsMap by remember { mutableStateOf<Map<Int, List<CostCalculationItem>>>(emptyMap()) }
 
+    val hasChanges = remember(
+        selectedPriceId,
+        checkedIngredients,
+        ingredientUsages,
+        ingredientUnits,
+        editingCalculation,
+        historicalItemsMap
+    ) {
+        if (editingCalculation == null) {
+            true
+        } else {
+            val originalItems = historicalItemsMap[editingCalculation!!.calculationId] ?: emptyList()
+            val originalPriceId = editingCalculation!!.productPriceId
+            
+            val priceChanged = selectedPriceId != originalPriceId
+            
+            val originalIngredientIds = originalItems.map { it.ingredientId }.toSet()
+            val ingredientsChanged = checkedIngredients != originalIngredientIds
+            
+            var itemsChanged = false
+            if (!ingredientsChanged) {
+                for (item in originalItems) {
+                    val currentQty = ingredientUsages[item.ingredientId] ?: 0.0
+                    val currentUnit = ingredientUnits[item.ingredientId] ?: item.usageUnit
+                    if (currentQty != item.usageQuantity || currentUnit != item.usageUnit) {
+                        itemsChanged = true
+                        break
+                    }
+                }
+            }
+            
+            priceChanged || ingredientsChanged || itemsChanged
+        }
+    }
+
     // Fetch snapshot items for historical versions when needed
     LaunchedEffect(variantCalculations) {
         variantCalculations.forEach { calc ->
@@ -300,10 +339,11 @@ fun CalculateCostTabContent(
         }
     }
 
-    // Automatically pre-load recipe usages from active calculation if it exists
-    LaunchedEffect(selectedPriceId, activeCalculation) {
-        if (activeCalculation != null) {
-            viewModel.getCalculationItems(activeCalculation.calculationId).first().let { items ->
+    // Automatically pre-load recipe usages from active calculation or editing calculation if it exists
+    LaunchedEffect(selectedPriceId, activeCalculation, editingCalculation) {
+        val targetCalc = editingCalculation ?: activeCalculation
+        if (targetCalc != null) {
+            viewModel.getCalculationItems(targetCalc.calculationId).first().let { items ->
                 val checked = mutableSetOf<Int>()
                 val usages = mutableMapOf<Int, Double>()
                 val units = mutableMapOf<Int, String>()
@@ -577,6 +617,41 @@ fun CalculateCostTabContent(
                 }
             }
             return@LazyColumn
+        }
+
+        // Edit Mode Banner
+        if (editingCalculation != null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("edit_mode_banner"),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Editing Version v${editingCalculation!!.version}",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        TextButton(
+                            onClick = { editingCalculation = null },
+                            modifier = Modifier.testTag("btn_cancel_edit")
+                        ) {
+                            Text("Cancel Edit", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         }
 
         // Active version indicator
@@ -918,59 +993,110 @@ fun CalculateCostTabContent(
 
                     Button(
                         onClick = {
-                            val nextVersion = (activeCalculation?.version ?: 0) + 1
-                            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                            
-                            val calculation = CostCalculation(
-                                productPriceId = selectedPriceObj.priceId,
-                                version = nextVersion,
-                                calculationDate = todayStr,
-                                totalProductionCost = totalProductionCost,
-                                sellingPriceSnapshot = sellingPrice,
-                                profitSnapshot = dynamicProfit,
-                                remarks = "Saved cost version v$nextVersion"
-                            )
-
-                            val itemsList = checkedIngredients.map { id ->
-                                val ing = ingredients.find { it.id == id }!!
-                                val p = purchases.find { it.ingredientId == id }
-                                val qty = ingredientUsages[id] ?: 0.0
-                                val u = ingredientUnits[id] ?: p?.unit ?: "g"
+                            if (editingCalculation != null) {
+                                if (!hasChanges) {
+                                    Toast.makeText(context, "No changes detected.", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
                                 
-                                val costPerUsageUnit = p?.let {
-                                    UnitConverter.calculateCostPerUsageUnit(
-                                        purchasePrice = p.purchasePrice,
-                                        purchaseQty = p.purchaseQuantity,
-                                        purchaseUnit = p.unit,
-                                        usageUnit = u,
-                                        sealCost = p.sealCost,
-                                        printingCost = p.printingCost,
-                                        largeCoverDistribution = p.largeCoverDistribution
-                                    )
-                                } ?: 0.0
-
-                                CostCalculationItem(
-                                    costCalculationId = 0, // Assigned inside transaction
-                                    ingredientId = id,
-                                    ingredientName = ing.name,
-                                    ingredientVariety = ing.variety,
-                                    usageQuantity = qty,
-                                    usageUnit = u,
-                                    costPerUnitSnapshot = costPerUsageUnit,
-                                    calculatedCost = costPerUsageUnit * qty,
-                                    purchaseUnitSnapshot = p?.unit ?: u
+                                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                                val updatedCalculation = editingCalculation!!.copy(
+                                    productPriceId = selectedPriceObj.priceId,
+                                    calculationDate = todayStr,
+                                    totalProductionCost = totalProductionCost,
+                                    sellingPriceSnapshot = sellingPrice,
+                                    profitSnapshot = dynamicProfit
                                 )
-                            }
 
-                            viewModel.saveCostCalculation(calculation, itemsList)
-                            Toast.makeText(context, "Locked & Saved Cost Version v$nextVersion!", Toast.LENGTH_SHORT).show()
+                                val itemsList = checkedIngredients.map { id ->
+                                    val ing = ingredients.find { it.id == id }!!
+                                    val p = purchases.find { it.ingredientId == id }
+                                    val qty = ingredientUsages[id] ?: 0.0
+                                    val u = ingredientUnits[id] ?: p?.unit ?: "g"
+                                    
+                                    val costPerUsageUnit = p?.let {
+                                        UnitConverter.calculateCostPerUsageUnit(
+                                            purchasePrice = p.purchasePrice,
+                                            purchaseQty = p.purchaseQuantity,
+                                            purchaseUnit = p.unit,
+                                            usageUnit = u,
+                                            sealCost = p.sealCost,
+                                            printingCost = p.printingCost,
+                                            largeCoverDistribution = p.largeCoverDistribution
+                                        )
+                                    } ?: 0.0
+
+                                    CostCalculationItem(
+                                        costCalculationId = editingCalculation!!.calculationId,
+                                        ingredientId = id,
+                                        ingredientName = ing.name,
+                                        ingredientVariety = ing.variety,
+                                        usageQuantity = qty,
+                                        usageUnit = u,
+                                        costPerUnitSnapshot = costPerUsageUnit,
+                                        calculatedCost = costPerUsageUnit * qty,
+                                        purchaseUnitSnapshot = p?.unit ?: u
+                                    )
+                                }
+
+                                viewModel.updateCostCalculation(updatedCalculation, itemsList)
+                                Toast.makeText(context, "Updated Cost Version v${editingCalculation!!.version}!", Toast.LENGTH_SHORT).show()
+                                editingCalculation = null
+                            } else {
+                                val nextVersion = (activeCalculation?.version ?: 0) + 1
+                                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                                
+                                val calculation = CostCalculation(
+                                    productPriceId = selectedPriceObj.priceId,
+                                    version = nextVersion,
+                                    calculationDate = todayStr,
+                                    totalProductionCost = totalProductionCost,
+                                    sellingPriceSnapshot = sellingPrice,
+                                    profitSnapshot = dynamicProfit,
+                                    remarks = "Saved cost version v$nextVersion"
+                                )
+
+                                val itemsList = checkedIngredients.map { id ->
+                                    val ing = ingredients.find { it.id == id }!!
+                                    val p = purchases.find { it.ingredientId == id }
+                                    val qty = ingredientUsages[id] ?: 0.0
+                                    val u = ingredientUnits[id] ?: p?.unit ?: "g"
+                                    
+                                    val costPerUsageUnit = p?.let {
+                                        UnitConverter.calculateCostPerUsageUnit(
+                                            purchasePrice = p.purchasePrice,
+                                            purchaseQty = p.purchaseQuantity,
+                                            purchaseUnit = p.unit,
+                                            usageUnit = u,
+                                            sealCost = p.sealCost,
+                                            printingCost = p.printingCost,
+                                            largeCoverDistribution = p.largeCoverDistribution
+                                        )
+                                    } ?: 0.0
+
+                                    CostCalculationItem(
+                                        costCalculationId = 0, // Assigned inside transaction
+                                        ingredientId = id,
+                                        ingredientName = ing.name,
+                                        ingredientVariety = ing.variety,
+                                        usageQuantity = qty,
+                                        usageUnit = u,
+                                        costPerUnitSnapshot = costPerUsageUnit,
+                                        calculatedCost = costPerUsageUnit * qty,
+                                        purchaseUnitSnapshot = p?.unit ?: u
+                                    )
+                                }
+
+                                viewModel.saveCostCalculation(calculation, itemsList)
+                                Toast.makeText(context, "Locked & Saved Cost Version v$nextVersion!", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("btn_save_calculation"),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
-                        Icon(Icons.Default.Lock, null)
+                        Icon(if (editingCalculation != null) Icons.Default.Save else Icons.Default.Lock, null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Lock & Save Cost Version")
+                        Text(if (editingCalculation != null) "Update Cost Version v${editingCalculation!!.version}" else "Lock & Save Cost Version")
                     }
                 }
             }
@@ -1024,8 +1150,32 @@ fun CalculateCostTabContent(
 
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        horizontalArrangement = Arrangement.End
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        IconButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    val allPrices = viewModel.getAllPrices()
+                                                    val priceObj = allPrices.find { it.priceId == calc.productPriceId }
+                                                    if (priceObj != null) {
+                                                        val prodObj = products.find { it.id == priceObj.productId }
+                                                        if (prodObj != null) {
+                                                            selectedCategory = prodObj.productCategory
+                                                            selectedVarietyProductId = prodObj.id
+                                                            selectedPriceId = priceObj.priceId
+                                                            editingCalculation = calc
+                                                            isProceeded = true
+                                                            showHistoryDialog = false
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.size(24.dp).testTag("btn_edit_calc_${calc.calculationId}")
+                                        ) {
+                                            Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
                                         IconButton(
                                             onClick = {
                                                 viewModel.deleteCalculation(calc)

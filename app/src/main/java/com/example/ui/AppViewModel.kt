@@ -3179,6 +3179,16 @@ User Question: $userQuestion
         }
     }
 
+    fun updateCostCalculation(calculation: CostCalculation, items: List<CostCalculationItem>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.updateCostCalculation(calculation, items)
+            } catch (e: Exception) {
+                triggerError("DynamicCost", "updateCostCalculation", "DatabaseError", e.message ?: "Failed to update calculation", "Check database connection", e)
+            }
+        }
+    }
+
     fun deleteCalculation(calculation: CostCalculation) {
         viewModelScope.launch(Dispatchers.IO) {
             try {

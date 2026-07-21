@@ -287,6 +287,15 @@ class AppRepository(
         }
     }
 
+    suspend fun updateCostCalculation(calculation: CostCalculation, items: List<CostCalculationItem>) {
+        database.withTransaction {
+            dynamicCostDao.insertCalculation(calculation)
+            dynamicCostDao.deleteCalculationItemsForCalculation(calculation.calculationId)
+            val finalItems = items.map { it.copy(costCalculationId = calculation.calculationId) }
+            dynamicCostDao.insertCalculationItems(finalItems)
+        }
+    }
+
     suspend fun deleteCalculation(calculation: CostCalculation) {
         database.withTransaction {
             dynamicCostDao.deleteCalculationItemsForCalculation(calculation.calculationId)
