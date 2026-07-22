@@ -46,6 +46,15 @@ object UnitConverter {
         }
     }
 
+    fun getDefaultUsageUnit(purchaseUnit: String?): String {
+        val pUnit = purchaseUnit ?: "g"
+        return when (getUnitType(pUnit)) {
+            "Weight" -> "g"
+            "Volume" -> "ml"
+            else -> pUnit
+        }
+    }
+
     fun convertToGramOrMl(quantity: Double, unit: String): Double {
         return when (unit.lowercase(Locale.getDefault())) {
             "mg" -> quantity / 1000.0
@@ -892,11 +901,7 @@ fun CalculateCostTabContent(
 
                 // Usage quantity & unit local controls
                 val usageQty = ingredientUsages[ingredient.id] ?: 0.0
-                val usageUnit = ingredientUnits[ingredient.id] ?: when (UnitConverter.getUnitType(latestPurchase?.unit ?: "g")) {
-                    "Weight" -> "g"
-                    "Volume" -> "ml"
-                    else -> latestPurchase?.unit ?: "Piece"
-                }
+                val usageUnit = ingredientUnits[ingredient.id] ?: UnitConverter.getDefaultUsageUnit(latestPurchase?.unit)
 
                 // Compute exact usage cost
                 val costPerUsageUnit = latestPurchase?.let { p ->
@@ -1073,7 +1078,7 @@ fun CalculateCostTabContent(
                 val ingredientObj = ingredients.find { it.id == id } ?: return@forEach
                 val purchaseObj = purchases.find { it.ingredientId == id }
                 val qty = ingredientUsages[id] ?: 0.0
-                val unit = ingredientUnits[id] ?: purchaseObj?.unit ?: "g"
+                val unit = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(purchaseObj?.unit)
                 
                 val costPerUsageUnit = purchaseObj?.let { p ->
                     UnitConverter.calculateCostPerUsageUnit(
@@ -1182,7 +1187,7 @@ fun CalculateCostTabContent(
                                     val ing = ingredients.find { it.id == id }!!
                                     val p = purchases.find { it.ingredientId == id }
                                     val qty = ingredientUsages[id] ?: 0.0
-                                    val u = ingredientUnits[id] ?: p?.unit ?: "g"
+                                    val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
                                     
                                     val costPerUsageUnit = p?.let {
                                         UnitConverter.calculateCostPerUsageUnit(
@@ -1232,7 +1237,7 @@ fun CalculateCostTabContent(
                                     val ing = ingredients.find { it.id == id }!!
                                     val p = purchases.find { it.ingredientId == id }
                                     val qty = ingredientUsages[id] ?: 0.0
-                                    val u = ingredientUnits[id] ?: p?.unit ?: "g"
+                                    val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
                                     
                                     val costPerUsageUnit = p?.let {
                                         UnitConverter.calculateCostPerUsageUnit(

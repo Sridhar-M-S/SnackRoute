@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,11 +59,13 @@ fun DashboardScreen(
     onOpenTimetable: () -> Unit,
     onOpenDailyTasks: () -> Unit
 ) {
+    val context = LocalContext.current
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val shops by viewModel.shops.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val sales by viewModel.sales.collectAsStateWithLifecycle()
     val suggestions by viewModel.businessInsights.collectAsStateWithLifecycle(emptyList())
+    val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
 
     val gameProgress by viewModel.gamificationState.collectAsStateWithLifecycle()
     val dailyTarget by viewModel.dailyTarget.collectAsStateWithLifecycle()
@@ -130,6 +133,20 @@ fun DashboardScreen(
             "N/A"
         }
 
+        // New Profit Analytics (All-Time and Breakdowns)
+        val totalProfitVal = sales.sumOf { it.totalProfit }
+        val totalPacketsVal = sales.sumOf { it.packetsSold }
+        val averageProfitVal = if (totalPacketsVal > 0) totalProfitVal / totalPacketsVal else 0.0
+
+        val productProfitsVal = sales.groupBy { it.productName }
+            .mapValues { (_, entries) -> entries.sumOf { it.totalProfit } }
+
+        val shopProfitsVal = sales.groupBy { it.shopNumber }
+            .mapValues { (shopNum, entries) ->
+                val shopName = shops.find { it.shopNumber == shopNum }?.storeName ?: "Shop $shopNum"
+                entries.sumOf { it.totalProfit }
+            }
+
         DashboardStats(
             totalLocations = totalLocationsVal,
             totalShops = totalShopsVal,
@@ -142,7 +159,11 @@ fun DashboardScreen(
             productSales = productSalesVal,
             topSellingProduct = topSellingProductVal,
             bestPerformingShop = bestPerformingShopVal,
-            worstPerformingShop = worstPerformingShopVal
+            worstPerformingShop = worstPerformingShopVal,
+            totalProfit = totalProfitVal,
+            averageProfit = averageProfitVal,
+            productProfits = productProfitsVal,
+            shopProfits = shopProfitsVal
         )
     }
 
@@ -158,6 +179,10 @@ fun DashboardScreen(
     val topSellingProduct = stats.topSellingProduct
     val bestPerformingShop = stats.bestPerformingShop
     val worstPerformingShop = stats.worstPerformingShop
+    val totalProfit = stats.totalProfit
+    val averageProfit = stats.averageProfit
+    val productProfits = stats.productProfits
+    val shopProfits = stats.shopProfits
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -395,6 +420,21 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
+
+            // --- Profit Engine Analytics Section ---
+            item {
+                ProfitEngineAnalyticsCard(
+                    isDynamicProfitEnabled = isDynamicProfitEnabled,
+                    totalProfit = totalProfit,
+                    averageProfit = averageProfit,
+                    productProfits = productProfits,
+                    shopProfits = shopProfits,
+                    onToggleDynamic = { enabled ->
+                        viewModel.setDynamicProfitEnabled(enabled)
+                        viewModel.recalculateHistoricalSales("", true)
+                    }
+                )
             }
 
             // --- Leaders & Stats Summary Card (Bento Style) ---
@@ -1957,6 +1997,309 @@ fun DailyTargetDialog(
     )
 }
 
+@Composable
+fun ProfitEngineAnalyticsCard(
+    isDynamicProfitEnabled: Boolean,
+    totalProfit: Double,
+    averageProfit: Double,
+    productProfits: Map<String, Double>,
+    shopProfits: Map<String, Double>,
+    onToggleDynamic: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder()
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header Row with Toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Assessment,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Profit Engine Analytics",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "All-time profits & metrics",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Mode status badge + Switch
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val badgeColor = if (isDynamicProfitEnabled) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    }
+                    val badgeTextColor = if (isDynamicProfitEnabled) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    val modeLabel = if (isDynamicProfitEnabled) "Dynamic ON" else "Manual OFF"
+                    
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = badgeColor,
+                        modifier = Modifier.testTag("profit_engine_mode_badge")
+                    ) {
+                        Text(
+                            text = modeLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeTextColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    Switch(
+                        checked = isDynamicProfitEnabled,
+                        onCheckedChange = onToggleDynamic,
+                        modifier = Modifier.testTag("profit_engine_dashboard_toggle")
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+            // KPI Grid (Total Profit & Average Profit)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Total Profit Box
+                Card(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "TOTAL PROFIT",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "₹${"%,.2f".format(totalProfit)}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("dashboard_total_profit")
+                        )
+                        Text(
+                            text = if (isDynamicProfitEnabled) "Dynamic calculations" else "Manual product rates",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+
+                // Average Profit Box
+                Card(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.05f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "AVG PROFIT / PKT",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            text = "₹${"%,.2f".format(averageProfit)}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.testTag("dashboard_avg_profit")
+                        )
+                        Text(
+                            text = "Per packet sold",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+
+            // Product Profit Breakdown Section
+            Text(
+                text = "Product Profit Breakdown",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (productProfits.isEmpty()) {
+                Text(
+                    text = "No product sales logged yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val maxProductProfit = productProfits.values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    productProfits.entries.sortedByDescending { it.value }.take(5).forEach { entry ->
+                        val ratio = (entry.value / maxProductProfit).toFloat().coerceIn(0f, 1f)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Category,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = entry.key,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text(
+                                    text = "₹${"%,.2f".format(entry.value)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.testTag("dashboard_product_profit_${entry.key}")
+                                )
+                            }
+                            // Visual horizontal progress bar
+                            LinearProgressIndicator(
+                                progress = ratio,
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Shop Profit Breakdown Section
+            Text(
+                text = "Shop Profit Breakdown",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (shopProfits.isEmpty()) {
+                Text(
+                    text = "No shop sales logged yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val maxShopProfit = shopProfits.values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    shopProfits.entries.sortedByDescending { it.value }.take(5).forEach { entry ->
+                        val ratio = (entry.value / maxShopProfit).toFloat().coerceIn(0f, 1f)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Storefront,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = entry.key,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text(
+                                    text = "₹${"%,.2f".format(entry.value)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.testTag("dashboard_shop_profit_${entry.key}")
+                                )
+                            }
+                            // Visual horizontal progress bar
+                            LinearProgressIndicator(
+                                progress = ratio,
+                                color = MaterialTheme.colorScheme.secondary,
+                                trackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 data class DashboardStats(
     val totalLocations: Int,
     val totalShops: Int,
@@ -1969,5 +2312,9 @@ data class DashboardStats(
     val productSales: Map<String, Int>,
     val topSellingProduct: String,
     val bestPerformingShop: String,
-    val worstPerformingShop: String
+    val worstPerformingShop: String,
+    val totalProfit: Double,
+    val averageProfit: Double,
+    val productProfits: Map<String, Double>,
+    val shopProfits: Map<String, Double>
 )
