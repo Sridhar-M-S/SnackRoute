@@ -30,6 +30,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 import android.app.DatePickerDialog
 import java.util.Calendar
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 
 // --- Unit System Helpers (Step 3) ---
 object UnitConverter {
@@ -126,6 +129,17 @@ fun CostEngineScreen(
     // Preferences & Settings Toggle (Step 17)
     val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsState()
 
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importSummary by viewModel.importSummary.collectAsState()
+
+    val excelImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importDynamicCostEngineFromExcel(context, uri)
+        }
+    }
+
     // Master flows from ViewModel
     val products by viewModel.products.collectAsState()
     val ingredients by viewModel.allIngredients.collectAsState()
@@ -186,6 +200,24 @@ fun CostEngineScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
+                        IconButton(
+                            onClick = {
+                                excelImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                            },
+                            modifier = Modifier.testTag("import_cost_engine_button")
+                        ) {
+                            Icon(Icons.Default.Upload, contentDescription = "Import Excel")
+                        }
+                        
+                        IconButton(
+                            onClick = { viewModel.exportDynamicCostEngineToExcel(context) },
+                            modifier = Modifier.testTag("export_cost_engine_button")
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = "Export Excel")
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
                         Text(
                             text = if (isDynamicProfitEnabled) "Dynamic ON" else "Dynamic OFF",
                             style = MaterialTheme.typography.labelSmall,
@@ -270,6 +302,117 @@ fun CostEngineScreen(
                 }
             }
         }
+    }
+
+    // --- Excel Import Progress Dialog ---
+    if (isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing Cost Engine Data") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Reading spreadsheet and validating database tables...")
+                }
+            }
+        )
+    }
+
+    // --- Excel Import Summary Dialog ---
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.DYNAMIC_COST_ENGINE) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.failedRowsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The Dynamic Cost Engine import has completed.")
+                    
+                    HorizontalDivider()
+                    
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(text = "Total Records Parsed:", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Text(text = "${summary.totalRows}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(text = "Successfully Imported/Updated:", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Text(text = "${summary.successfullyImported}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(text = "Failed Rows/Sections:", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Text(text = "${summary.failedRowsCount}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    }
+                    
+                    if (summary.failedRowsCount > 0 && summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Some sheets or rows could not be parsed successfully. Download the Error Report to review details.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                com.example.utils.Exporter.shareFile(context, summary.errorReportFile, "Cost Engine Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
     }
 }
 

@@ -31,7 +31,7 @@ object Exporter {
     )
 
     enum class ImportType {
-        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS
+        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE
     }
 
     data class ImportSummary(
@@ -57,7 +57,12 @@ object Exporter {
         val imagesImportedSuccessfully: Int = 0,
         val imagesFailed: Int = 0,
         val imageImportReasons: List<String> = emptyList(),
-        val invalidCoordinatesCount: Int = 0
+        val invalidCoordinatesCount: Int = 0,
+        val parsedIngredients: List<com.example.data.Ingredient> = emptyList(),
+        val parsedPurchases: List<com.example.data.IngredientPurchase> = emptyList(),
+        val parsedCalculations: List<com.example.data.CostCalculation> = emptyList(),
+        val parsedCalculationItems: List<com.example.data.CostCalculationItem> = emptyList(),
+        val isDynamicProfitEnabledSetting: Boolean? = null
     )
 
     fun shareFile(context: Context, file: File, title: String) {
@@ -1853,6 +1858,483 @@ object Exporter {
                 skippedRows = 0,
                 failedRowsCount = 1,
                 imageImportReasons = listOf("Fatal Excel error: ${e.message}")
+            )
+        }
+    }
+
+    fun exportDynamicCostEngine(
+        context: Context,
+        ingredients: List<com.example.data.Ingredient>,
+        purchases: List<com.example.data.IngredientPurchase>,
+        calculations: List<com.example.data.CostCalculation>,
+        calculationItems: List<com.example.data.CostCalculationItem>,
+        isDynamicProfitEnabled: Boolean
+    ) {
+        val fileName = "Cost_Engine_Export_${System.currentTimeMillis()}.xlsx"
+        val file = File(context.cacheDir, fileName)
+
+        try {
+            val workbook = XSSFWorkbook()
+            
+            // Header font and style
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.getIndex()
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                fillForegroundColor = IndexedColors.DARK_BLUE.getIndex()
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.CENTER
+            }
+
+            // 1. Ingredients Sheet
+            val ingredientsSheet = workbook.createSheet("Ingredients")
+            val ingredientsHeaders = listOf("ID", "Name", "Variety", "Category", "Status")
+            val ingredientsHeaderRow = ingredientsSheet.createRow(0)
+            for (i in ingredientsHeaders.indices) {
+                val cell = ingredientsHeaderRow.createCell(i)
+                cell.setCellValue(ingredientsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            var rowIdx = 1
+            for (item in ingredients) {
+                val row = ingredientsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.id.toDouble())
+                row.createCell(1).setCellValue(item.name)
+                row.createCell(2).setCellValue(item.variety)
+                row.createCell(3).setCellValue(item.category)
+                row.createCell(4).setCellValue(item.status)
+            }
+            for (i in ingredientsHeaders.indices) {
+                ingredientsSheet.setColumnWidth(i, 5000)
+            }
+
+            // 2. Ingredient Purchases Sheet
+            val purchasesSheet = workbook.createSheet("Ingredient Purchases")
+            val purchasesHeaders = listOf(
+                "Purchase ID", "Ingredient ID", "Purchase Quantity", "Unit", 
+                "Purchase Price", "Purchase Date", "Supplier", "Remarks", 
+                "Seal Cost", "Printing Cost", "Large Cover Distribution"
+            )
+            val purchasesHeaderRow = purchasesSheet.createRow(0)
+            for (i in purchasesHeaders.indices) {
+                val cell = purchasesHeaderRow.createCell(i)
+                cell.setCellValue(purchasesHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in purchases) {
+                val row = purchasesSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.purchaseId.toDouble())
+                row.createCell(1).setCellValue(item.ingredientId.toDouble())
+                row.createCell(2).setCellValue(item.purchaseQuantity)
+                row.createCell(3).setCellValue(item.unit)
+                row.createCell(4).setCellValue(item.purchasePrice)
+                row.createCell(5).setCellValue(item.purchaseDate)
+                row.createCell(6).setCellValue(item.supplier ?: "")
+                row.createCell(7).setCellValue(item.remarks ?: "")
+                row.createCell(8).setCellValue(item.sealCost)
+                row.createCell(9).setCellValue(item.printingCost)
+                row.createCell(10).setCellValue(item.largeCoverDistribution.toDouble())
+            }
+            for (i in purchasesHeaders.indices) {
+                purchasesSheet.setColumnWidth(i, 5000)
+            }
+
+            // 3. Cost Calculations Sheet
+            val calcsSheet = workbook.createSheet("Cost Calculations")
+            val calcsHeaders = listOf(
+                "Calculation ID", "Product Price ID", "Version", "Calculation Date", 
+                "Total Production Cost", "Selling Price Snapshot", "Profit Snapshot", "Remarks"
+            )
+            val calcsHeaderRow = calcsSheet.createRow(0)
+            for (i in calcsHeaders.indices) {
+                val cell = calcsHeaderRow.createCell(i)
+                cell.setCellValue(calcsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in calculations) {
+                val row = calcsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.calculationId.toDouble())
+                row.createCell(1).setCellValue(item.productPriceId.toDouble())
+                row.createCell(2).setCellValue(item.version.toDouble())
+                row.createCell(3).setCellValue(item.calculationDate)
+                row.createCell(4).setCellValue(item.totalProductionCost)
+                row.createCell(5).setCellValue(item.sellingPriceSnapshot)
+                row.createCell(6).setCellValue(item.profitSnapshot)
+                row.createCell(7).setCellValue(item.remarks ?: "")
+            }
+            for (i in calcsHeaders.indices) {
+                calcsSheet.setColumnWidth(i, 5000)
+            }
+
+            // 4. Cost Calculation Items Sheet
+            val itemsSheet = workbook.createSheet("Cost Calculation Items")
+            val itemsHeaders = listOf(
+                "Item ID", "Cost Calculation ID", "Ingredient ID", "Ingredient Name", 
+                "Ingredient Variety", "Usage Quantity", "Usage Unit", 
+                "Cost Per Unit Snapshot", "Calculated Cost", "Purchase Unit Snapshot"
+            )
+            val itemsHeaderRow = itemsSheet.createRow(0)
+            for (i in itemsHeaders.indices) {
+                val cell = itemsHeaderRow.createCell(i)
+                cell.setCellValue(itemsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in calculationItems) {
+                val row = itemsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.itemId.toDouble())
+                row.createCell(1).setCellValue(item.costCalculationId.toDouble())
+                row.createCell(2).setCellValue(item.ingredientId.toDouble())
+                row.createCell(3).setCellValue(item.ingredientName)
+                row.createCell(4).setCellValue(item.ingredientVariety)
+                row.createCell(5).setCellValue(item.usageQuantity)
+                row.createCell(6).setCellValue(item.usageUnit)
+                row.createCell(7).setCellValue(item.costPerUnitSnapshot)
+                row.createCell(8).setCellValue(item.calculatedCost)
+                row.createCell(9).setCellValue(item.purchaseUnitSnapshot)
+            }
+            for (i in itemsHeaders.indices) {
+                itemsSheet.setColumnWidth(i, 5000)
+            }
+
+            // 5. Settings Sheet
+            val settingsSheet = workbook.createSheet("Settings")
+            val settingsHeaders = listOf("Setting Key", "Setting Value")
+            val settingsHeaderRow = settingsSheet.createRow(0)
+            for (i in settingsHeaders.indices) {
+                val cell = settingsHeaderRow.createCell(i)
+                cell.setCellValue(settingsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            val row1 = settingsSheet.createRow(1)
+            row1.createCell(0).setCellValue("is_dynamic_profit_enabled")
+            row1.createCell(1).setCellValue(isDynamicProfitEnabled.toString())
+            for (i in settingsHeaders.indices) {
+                settingsSheet.setColumnWidth(i, 8000)
+            }
+
+            FileOutputStream(file).use { out ->
+                workbook.write(out)
+            }
+            workbook.close()
+
+            shareFile(context, file, "Cost Engine Backup")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun importDynamicCostEngine(
+        context: Context,
+        uri: Uri
+    ): ImportSummary {
+        val errorRows = mutableListOf<List<String>>()
+        var totalRows = 0
+        var successfullyImported = 0
+        val skippedRows = 0
+        var failedRowsCount = 0
+
+        val parsedIngredients = mutableListOf<com.example.data.Ingredient>()
+        val parsedPurchases = mutableListOf<com.example.data.IngredientPurchase>()
+        val parsedCalculations = mutableListOf<com.example.data.CostCalculation>()
+        val parsedCalculationItems = mutableListOf<com.example.data.CostCalculationItem>()
+        var parsedSettingsDynamicProfitEnabled: Boolean? = null
+
+        try {
+            context.contentResolver.openInputStream(uri).use { inputStream ->
+                val workbook = XSSFWorkbook(inputStream)
+
+                // 1. Verify existence of sheets
+                val ingredientsSheet = workbook.getSheet("Ingredients")
+                    ?: throw Exception("Required sheet 'Ingredients' is missing.")
+                val purchasesSheet = workbook.getSheet("Ingredient Purchases")
+                    ?: throw Exception("Required sheet 'Ingredient Purchases' is missing.")
+                val calcsSheet = workbook.getSheet("Cost Calculations")
+                    ?: throw Exception("Required sheet 'Cost Calculations' is missing.")
+                val itemsSheet = workbook.getSheet("Cost Calculation Items")
+                    ?: throw Exception("Required sheet 'Cost Calculation Items' is missing.")
+                val settingsSheet = workbook.getSheet("Settings") // optional
+
+                // Helper to map headers to column indices and check required columns
+                fun getHeaderIndices(sheet: org.apache.poi.ss.usermodel.Sheet, required: List<String>, optional: List<String>): Map<String, Int> {
+                    val headerRow = sheet.getRow(0) ?: throw Exception("Header row in sheet '${sheet.sheetName}' is missing.")
+                    val map = mutableMapOf<String, Int>()
+                    val missing = mutableListOf<String>()
+                    
+                    // Populate header map
+                    for (i in 0 until headerRow.lastCellNum) {
+                        val cellValue = headerRow.getCell(i)?.stringCellValue?.trim()
+                        if (cellValue != null) {
+                            map[cellValue.lowercase()] = i
+                        }
+                    }
+
+                    // Check required
+                    for (req in required) {
+                        if (!map.containsKey(req.lowercase())) {
+                            missing.add(req)
+                        }
+                    }
+
+                    if (missing.isNotEmpty()) {
+                        throw Exception("Sheet '${sheet.sheetName}' is missing required column(s): ${missing.joinToString(", ")}")
+                    }
+
+                    val result = mutableMapOf<String, Int>()
+                    for (req in required) {
+                        result[req] = map[req.lowercase()]!!
+                    }
+                    for (opt in optional) {
+                        val colIndex = map[opt.lowercase()]
+                        if (colIndex != null) {
+                            result[opt] = colIndex
+                        }
+                    }
+                    return result
+                }
+
+                // Helper parsers
+                fun parseDouble(str: String?): Double {
+                    if (str.isNullOrBlank()) return 0.0
+                    return str.toDoubleOrNull() ?: 0.0
+                }
+
+                fun parseInt(str: String?): Int {
+                    if (str.isNullOrBlank()) return 0
+                    return str.toDoubleOrNull()?.toInt() ?: str.toIntOrNull() ?: 0
+                }
+
+                // --- Parsing Sheet 1: Ingredients ---
+                val ingRequired = listOf("ID", "Name")
+                val ingOptional = listOf("Variety", "Category", "Status")
+                val ingIndices = getHeaderIndices(ingredientsSheet, ingRequired, ingOptional)
+
+                for (rowIdx in 1..ingredientsSheet.lastRowNum) {
+                    val row = ingredientsSheet.getRow(rowIdx) ?: continue
+                    totalRows++
+                    try {
+                        val idStr = getCellValueAsString(row, ingIndices["ID"])
+                        val name = getCellValueAsString(row, ingIndices["Name"])
+                        if (name.isNullOrBlank()) {
+                            throw Exception("Ingredient Name is empty.")
+                        }
+                        val variety = ingOptional.find { it == "Variety" }?.let { ingIndices[it]?.let { getCellValueAsString(row, it) } } ?: ""
+                        val category = ingOptional.find { it == "Category" }?.let { ingIndices[it]?.let { getCellValueAsString(row, it) } } ?: "Other"
+                        val status = ingOptional.find { it == "Status" }?.let { ingIndices[it]?.let { getCellValueAsString(row, it) } } ?: "Active"
+
+                        val id = parseInt(idStr)
+                        parsedIngredients.add(
+                            com.example.data.Ingredient(
+                                id = id,
+                                name = name.trim(),
+                                variety = variety.trim(),
+                                category = category.trim(),
+                                status = status.trim()
+                            )
+                        )
+                        successfullyImported++
+                    } catch (e: Exception) {
+                        failedRowsCount++
+                        errorRows.add(listOf("Row $rowIdx (Ingredients)", "", "", e.message ?: "Invalid formatting"))
+                    }
+                }
+
+                // --- Parsing Sheet 2: Ingredient Purchases ---
+                val purRequired = listOf("Purchase ID", "Ingredient ID", "Purchase Quantity", "Unit", "Purchase Price", "Purchase Date")
+                val purOptional = listOf("Supplier", "Remarks", "Seal Cost", "Printing Cost", "Large Cover Distribution")
+                val purIndices = getHeaderIndices(purchasesSheet, purRequired, purOptional)
+
+                for (rowIdx in 1..purchasesSheet.lastRowNum) {
+                    val row = purchasesSheet.getRow(rowIdx) ?: continue
+                    totalRows++
+                    try {
+                        val purchaseIdStr = getCellValueAsString(row, purIndices["Purchase ID"])
+                        val ingredientIdStr = getCellValueAsString(row, purIndices["Ingredient ID"])
+                        val qtyStr = getCellValueAsString(row, purIndices["Purchase Quantity"])
+                        val unit = getCellValueAsString(row, purIndices["Unit"])
+                        val priceStr = getCellValueAsString(row, purIndices["Purchase Price"])
+                        val date = getCellValueAsString(row, purIndices["Purchase Date"])
+
+                        if (ingredientIdStr.isNullOrBlank() || qtyStr.isNullOrBlank() || priceStr.isNullOrBlank() || date.isNullOrBlank()) {
+                            throw Exception("Missing required purchase fields.")
+                        }
+
+                        val supplier = purOptional.find { it == "Supplier" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } } ?: ""
+                        val remarks = purOptional.find { it == "Remarks" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } } ?: ""
+                        val sealCostStr = purOptional.find { it == "Seal Cost" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
+                        val printingCostStr = purOptional.find { it == "Printing Cost" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
+                        val largeCoverStr = purOptional.find { it == "Large Cover Distribution" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
+
+                        parsedPurchases.add(
+                            com.example.data.IngredientPurchase(
+                                purchaseId = parseInt(purchaseIdStr),
+                                ingredientId = parseInt(ingredientIdStr),
+                                purchaseQuantity = parseDouble(qtyStr),
+                                unit = unit?.trim() ?: "kg",
+                                purchasePrice = parseDouble(priceStr),
+                                purchaseDate = date.trim(),
+                                supplier = supplier.trim(),
+                                remarks = remarks.trim(),
+                                sealCost = parseDouble(sealCostStr),
+                                printingCost = parseDouble(printingCostStr),
+                                largeCoverDistribution = parseInt(largeCoverStr).coerceAtLeast(1)
+                            )
+                        )
+                        successfullyImported++
+                    } catch (e: Exception) {
+                        failedRowsCount++
+                        errorRows.add(listOf("Row $rowIdx (Purchases)", "", "", e.message ?: "Invalid formatting"))
+                    }
+                }
+
+                // --- Parsing Sheet 3: Cost Calculations ---
+                val calcRequired = listOf("Calculation ID", "Product Price ID", "Version", "Calculation Date", "Total Production Cost", "Selling Price Snapshot", "Profit Snapshot")
+                val calcOptional = listOf("Remarks")
+                val calcIndices = getHeaderIndices(calcsSheet, calcRequired, calcOptional)
+
+                for (rowIdx in 1..calcsSheet.lastRowNum) {
+                    val row = calcsSheet.getRow(rowIdx) ?: continue
+                    totalRows++
+                    try {
+                        val calcIdStr = getCellValueAsString(row, calcIndices["Calculation ID"])
+                        val prodPriceIdStr = getCellValueAsString(row, calcIndices["Product Price ID"])
+                        val versionStr = getCellValueAsString(row, calcIndices["Version"])
+                        val date = getCellValueAsString(row, calcIndices["Calculation Date"])
+                        val costStr = getCellValueAsString(row, calcIndices["Total Production Cost"])
+                        val sellingStr = getCellValueAsString(row, calcIndices["Selling Price Snapshot"])
+                        val profitStr = getCellValueAsString(row, calcIndices["Profit Snapshot"])
+
+                        if (prodPriceIdStr.isNullOrBlank() || versionStr.isNullOrBlank() || date.isNullOrBlank() || costStr.isNullOrBlank() || sellingStr.isNullOrBlank() || profitStr.isNullOrBlank()) {
+                            throw Exception("Missing required calculation fields.")
+                        }
+
+                        val remarks = calcOptional.find { it == "Remarks" }?.let { calcIndices[it]?.let { getCellValueAsString(row, it) } } ?: ""
+
+                        parsedCalculations.add(
+                            com.example.data.CostCalculation(
+                                calculationId = parseInt(calcIdStr),
+                                productPriceId = parseInt(prodPriceIdStr),
+                                version = parseInt(versionStr),
+                                calculationDate = date.trim(),
+                                totalProductionCost = parseDouble(costStr),
+                                sellingPriceSnapshot = parseDouble(sellingStr),
+                                profitSnapshot = parseDouble(profitStr),
+                                remarks = remarks.trim()
+                            )
+                        )
+                        successfullyImported++
+                    } catch (e: Exception) {
+                        failedRowsCount++
+                        errorRows.add(listOf("Row $rowIdx (Calculations)", "", "", e.message ?: "Invalid formatting"))
+                    }
+                }
+
+                // --- Parsing Sheet 4: Cost Calculation Items ---
+                val itemRequired = listOf("Item ID", "Cost Calculation ID", "Ingredient ID", "Ingredient Name", "Usage Quantity", "Usage Unit", "Calculated Cost")
+                val itemOptional = listOf("Ingredient Variety", "Cost Per Unit Snapshot", "Purchase Unit Snapshot")
+                val itemIndices = getHeaderIndices(itemsSheet, itemRequired, itemOptional)
+
+                for (rowIdx in 1..itemsSheet.lastRowNum) {
+                    val row = itemsSheet.getRow(rowIdx) ?: continue
+                    totalRows++
+                    try {
+                        val itemIdStr = getCellValueAsString(row, itemIndices["Item ID"])
+                        val calcIdStr = getCellValueAsString(row, itemIndices["Cost Calculation ID"])
+                        val ingredientIdStr = getCellValueAsString(row, itemIndices["Ingredient ID"])
+                        val name = getCellValueAsString(row, itemIndices["Ingredient Name"])
+                        val qtyStr = getCellValueAsString(row, itemIndices["Usage Quantity"])
+                        val unit = getCellValueAsString(row, itemIndices["Usage Unit"])
+                        val costStr = getCellValueAsString(row, itemIndices["Calculated Cost"])
+
+                        if (calcIdStr.isNullOrBlank() || ingredientIdStr.isNullOrBlank() || name.isNullOrBlank() || qtyStr.isNullOrBlank() || unit.isNullOrBlank() || costStr.isNullOrBlank()) {
+                            throw Exception("Missing required calculation item fields.")
+                        }
+
+                        val variety = itemOptional.find { it == "Ingredient Variety" }?.let { itemIndices[it]?.let { getCellValueAsString(row, it) } } ?: ""
+                        val costPerUnitStr = itemOptional.find { it == "Cost Per Unit Snapshot" }?.let { itemIndices[it]?.let { getCellValueAsString(row, it) } }
+                        val purchaseUnit = itemOptional.find { it == "Purchase Unit Snapshot" }?.let { itemIndices[it]?.let { getCellValueAsString(row, it) } } ?: "kg"
+
+                        parsedCalculationItems.add(
+                            com.example.data.CostCalculationItem(
+                                itemId = parseInt(itemIdStr),
+                                costCalculationId = parseInt(calcIdStr),
+                                ingredientId = parseInt(ingredientIdStr),
+                                ingredientName = name.trim(),
+                                ingredientVariety = variety.trim(),
+                                usageQuantity = parseDouble(qtyStr),
+                                usageUnit = unit.trim(),
+                                costPerUnitSnapshot = parseDouble(costPerUnitStr),
+                                calculatedCost = parseDouble(costStr),
+                                purchaseUnitSnapshot = purchaseUnit.trim()
+                            )
+                        )
+                        successfullyImported++
+                    } catch (e: Exception) {
+                        failedRowsCount++
+                        errorRows.add(listOf("Row $rowIdx (Calculation Items)", "", "", e.message ?: "Invalid formatting"))
+                    }
+                }
+
+                // --- Parsing Sheet 5: Settings ---
+                if (settingsSheet != null) {
+                    val setRequired = listOf("Setting Key", "Setting Value")
+                    val setIndices = getHeaderIndices(settingsSheet, setRequired, emptyList())
+                    for (rowIdx in 1..settingsSheet.lastRowNum) {
+                        val row = settingsSheet.getRow(rowIdx) ?: continue
+                        val key = getCellValueAsString(row, setIndices["Setting Key"])
+                        val value = getCellValueAsString(row, setIndices["Setting Value"])
+                        if (key?.lowercase()?.trim() == "is_dynamic_profit_enabled") {
+                            parsedSettingsDynamicProfitEnabled = value?.lowercase()?.trim() == "true"
+                        }
+                    }
+                }
+
+                workbook.close()
+            }
+
+            var errorFile: File? = null
+            if (errorRows.isNotEmpty()) {
+                errorFile = generateErrorReportGeneric(
+                    context = context,
+                    reportNamePrefix = "Cost_Engine_Import",
+                    headers = listOf("Row Number / Section", "", "", "Reason"),
+                    rows = errorRows
+                )
+            }
+
+            return ImportSummary(
+                type = ImportType.DYNAMIC_COST_ENGINE,
+                totalRows = totalRows,
+                successfullyImported = successfullyImported,
+                skippedRows = skippedRows,
+                failedRowsCount = failedRowsCount,
+                errorReportFile = errorFile,
+                parsedIngredients = parsedIngredients,
+                parsedPurchases = parsedPurchases,
+                parsedCalculations = parsedCalculations,
+                parsedCalculationItems = parsedCalculationItems,
+                isDynamicProfitEnabledSetting = parsedSettingsDynamicProfitEnabled
+            )
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return ImportSummary(
+                type = ImportType.DYNAMIC_COST_ENGINE,
+                totalRows = 0,
+                successfullyImported = 0,
+                skippedRows = 0,
+                failedRowsCount = 1,
+                errorReportFile = generateErrorReportGeneric(
+                    context = context,
+                    reportNamePrefix = "Cost_Engine_Import",
+                    headers = listOf("Row Number / Section", "", "", "Reason"),
+                    rows = listOf(listOf("Fatal Header Check/File Load", "", "", e.message ?: "Invalid file or structure"))
+                )
             )
         }
     }

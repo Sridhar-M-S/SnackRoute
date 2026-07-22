@@ -3223,6 +3223,85 @@ User Question: $userQuestion
         }
     }
 
+    fun exportDynamicCostEngineToExcel(context: Context) {
+        viewModelScope.launch {
+            try {
+                val ingredients = repository.getAllIngredientsDirect()
+                val purchases = repository.getAllPurchasesDirect()
+                val calculations = repository.getAllCalculationsDirect()
+                val calculationItems = repository.getAllCalculationItemsDirect()
+                val isEnabled = isDynamicProfitEnabled.value
+                
+                com.example.utils.Exporter.exportDynamicCostEngine(
+                    context = context,
+                    ingredients = ingredients,
+                    purchases = purchases,
+                    calculations = calculations,
+                    calculationItems = calculationItems,
+                    isDynamicProfitEnabled = isEnabled
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "DynamicCostEngine",
+                    operation = "exportDynamicCostEngineToExcel",
+                    errorMessage = e.message ?: "Failed to export cost engine data",
+                    stackTrace = e.stackTraceToString(),
+                    possibleReason = "Excel export failure."
+                )
+            }
+        }
+    }
+
+    fun importDynamicCostEngineFromExcel(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _isImporting.value = true
+            _importSummary.value = null
+            try {
+                val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.utils.Exporter.importDynamicCostEngine(context, uri)
+                }
+
+                if (summary.parsedIngredients.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        repository.insertIngredients(summary.parsedIngredients)
+                    }
+                }
+                if (summary.parsedPurchases.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        repository.insertPurchases(summary.parsedPurchases)
+                    }
+                }
+                if (summary.parsedCalculations.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        repository.insertCalculations(summary.parsedCalculations)
+                    }
+                }
+                if (summary.parsedCalculationItems.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        repository.insertCalculationItems(summary.parsedCalculationItems)
+                    }
+                }
+                if (summary.isDynamicProfitEnabledSetting != null) {
+                    setDynamicProfitEnabled(summary.isDynamicProfitEnabledSetting)
+                }
+
+                _importSummary.value = summary
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "DynamicCostEngine",
+                    operation = "importDynamicCostEngineFromExcel",
+                    errorMessage = e.message ?: "Failed to import cost engine data",
+                    stackTrace = e.stackTraceToString(),
+                    possibleReason = "Corrupt file or parsing error."
+                )
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
     fun copyUnfinishedTasksFromPreviousDay(currentDate: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {

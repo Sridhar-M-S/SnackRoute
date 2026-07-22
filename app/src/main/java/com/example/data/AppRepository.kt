@@ -306,4 +306,16 @@ class AppRepository(
     }
 
     fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>> = dynamicCostDao.getCalculationItems(calculationId)
+
+    // --- Direct Getters for Import/Export ---
+    suspend fun getAllIngredientsDirect(): List<Ingredient> = dynamicCostDao.getAllIngredientsDirect()
+    suspend fun getAllPurchasesDirect(): List<IngredientPurchase> = dynamicCostDao.getAllPurchasesDirect()
+    suspend fun getAllCalculationsDirect(): List<CostCalculation> = dynamicCostDao.getAllCalculationsDirect()
+    suspend fun getAllCalculationItemsDirect(): List<CostCalculationItem> = dynamicCostDao.getAllCalculationItemsDirect()
+
+    // --- Bulk Inserts for Import/Export ---
+    suspend fun insertIngredients(ingredients: List<Ingredient>) = dynamicCostDao.insertIngredients(ingredients)
+    suspend fun insertPurchases(purchases: List<IngredientPurchase>) = dynamicCostDao.insertPurchases(purchases)
+    suspend fun insertCalculations(calculations: List<CostCalculation>) = dynamicCostDao.insertCalculations(calculations)
+    suspend fun insertCalculationItems(items: List<CostCalculationItem>) = dynamicCostDao.insertCalculationItems(items)
 }

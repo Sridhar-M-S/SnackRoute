@@ -281,6 +281,29 @@ interface DynamicCostDao {
 
     @Query("DELETE FROM cost_calculation_items WHERE costCalculationId = :calculationId")
     suspend fun deleteCalculationItemsForCalculation(calculationId: Int)
+
+    // --- Direct Getters for Import/Export ---
+    @Query("SELECT * FROM ingredients")
+    suspend fun getAllIngredientsDirect(): List<Ingredient>
+
+    @Query("SELECT * FROM ingredient_purchases")
+    suspend fun getAllPurchasesDirect(): List<IngredientPurchase>
+
+    @Query("SELECT * FROM cost_calculations")
+    suspend fun getAllCalculationsDirect(): List<CostCalculation>
+
+    @Query("SELECT * FROM cost_calculation_items")
+    suspend fun getAllCalculationItemsDirect(): List<CostCalculationItem>
+
+    // --- Bulk Inserts for Import/Export ---
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIngredients(ingredients: List<Ingredient>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPurchases(purchases: List<IngredientPurchase>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCalculations(calculations: List<CostCalculation>)
 }
 
 
