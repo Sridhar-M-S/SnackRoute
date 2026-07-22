@@ -241,13 +241,115 @@ fun ShopsScreen(
         }
     }
 
+    var googleMapLink by remember { mutableStateOf("") }
+    var formLatitude by remember { mutableStateOf<Double?>(null) }
+    var formLongitude by remember { mutableStateOf<Double?>(null) }
+    var isFetchingLocationForForm by remember { mutableStateOf(false) }
+    var locationTargetForForm by remember { mutableStateOf(false) }
+
+    fun fetchCurrentLocationForForm() {
+        val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val isGpsEnabled = try {
+            locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+            locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception) {
+            false
+        }
+
+        if (!isGpsEnabled) {
+            Toast.makeText(context, "GPS is disabled. Please enable Location Services.", Toast.LENGTH_LONG).show()
+            try {
+                context.startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            } catch (e: Exception) {
+                // fallback
+            }
+            return
+        }
+
+        val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val isNetworkEnabled = if (connectivityManager != null) {
+            val activeNetwork = connectivityManager.activeNetwork
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+            capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        } else {
+            true
+        }
+
+        if (!isNetworkEnabled) {
+            Toast.makeText(context, "Network unavailable.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        isFetchingLocationForForm = true
+        try {
+            fusedLocationClient.getCurrentLocation(
+                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+                com.google.android.gms.tasks.CancellationTokenSource().token
+            ).addOnSuccessListener { location ->
+                if (location != null) {
+                    isFetchingLocationForForm = false
+                    val lat = location.latitude
+                    val lng = location.longitude
+                    formLatitude = lat
+                    formLongitude = lng
+                    googleMapLink = "https://www.google.com/maps?q=$lat,$lng"
+                    Toast.makeText(context, "Current location captured successfully.", Toast.LENGTH_SHORT).show()
+                } else {
+                    fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                        isFetchingLocationForForm = false
+                        if (lastLoc != null) {
+                            val lat = lastLoc.latitude
+                            val lng = lastLoc.longitude
+                            formLatitude = lat
+                            formLongitude = lng
+                            googleMapLink = "https://www.google.com/maps?q=$lat,$lng"
+                            Toast.makeText(context, "Current location captured successfully.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Unable to get current location.", Toast.LENGTH_SHORT).show()
+                        }
+                    }.addOnFailureListener { e ->
+                        isFetchingLocationForForm = false
+                        Toast.makeText(context, "Unable to get current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }.addOnFailureListener { e ->
+                fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                    isFetchingLocationForForm = false
+                    if (lastLoc != null) {
+                        val lat = lastLoc.latitude
+                        val lng = lastLoc.longitude
+                        formLatitude = lat
+                        formLongitude = lng
+                        googleMapLink = "https://www.google.com/maps?q=$lat,$lng"
+                        Toast.makeText(context, "Current location captured successfully.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Unable to get current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }.addOnFailureListener {
+                    isFetchingLocationForForm = false
+                    Toast.makeText(context, "Unable to get current location.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: SecurityException) {
+            isFetchingLocationForForm = false
+            Toast.makeText(context, "Location permission denied.", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            isFetchingLocationForForm = false
+            Toast.makeText(context, "Unable to get current location: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
         onResult = { permissions ->
             val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
             val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
             if (fineGranted || coarseGranted) {
-                fetchCurrentLocation()
+                if (locationTargetForForm) {
+                    fetchCurrentLocationForForm()
+                } else {
+                    fetchCurrentLocation()
+                }
             } else {
                 Toast.makeText(context, "Location permission denied. Please allow location permissions in system settings.", Toast.LENGTH_LONG).show()
             }
@@ -255,6 +357,7 @@ fun ShopsScreen(
     )
 
     fun checkAndRequestLocation() {
+        locationTargetForForm = false
         val hasFinePermission = androidx.core.content.ContextCompat.checkSelfPermission(
             context,
             android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -267,6 +370,30 @@ fun ShopsScreen(
 
         if (hasFinePermission || hasCoarsePermission) {
             fetchCurrentLocation()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    fun checkAndRequestLocationForForm() {
+        locationTargetForForm = true
+        val hasFinePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        val hasCoarsePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (hasFinePermission || hasCoarsePermission) {
+            fetchCurrentLocationForForm()
         } else {
             permissionLauncher.launch(
                 arrayOf(
@@ -292,7 +419,6 @@ fun ShopsScreen(
     var storeImageUri by remember { mutableStateOf<String?>(null) }
     var rating by remember { mutableStateOf(5f) }
     var startingDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
-    var googleMapLink by remember { mutableStateOf("") }
     var mobileNumber by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
 
@@ -458,6 +584,8 @@ fun ShopsScreen(
                             googleMapLink = ""
                             mobileNumber = ""
                             notes = ""
+                            formLatitude = null
+                            formLongitude = null
                             shopNumberError = null
                             storeNameError = null
                             locationError = null
@@ -695,6 +823,8 @@ fun ShopsScreen(
                                         rating = shop.rating
                                         startingDateMillis = shop.startingDate
                                         googleMapLink = shop.googleMapLink ?: ""
+                                        formLatitude = shop.latitude
+                                        formLongitude = shop.longitude
                                         mobileNumber = shop.mobileNumber ?: ""
                                         notes = shop.notes ?: ""
                                         shopNumberError = null
@@ -1328,14 +1458,50 @@ fun ShopsScreen(
                     item {
                         // Google Map link
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            OutlinedTextField(
-                                value = googleMapLink,
-                                onValueChange = { googleMapLink = it },
-                                label = { Text("Google Map Link (Optional)") },
-                                placeholder = { Text("e.g. https://maps.app.goo.gl/...") },
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = googleMapLink,
+                                    onValueChange = { 
+                                        googleMapLink = it 
+                                        val coords = extractCoordinates(it)
+                                        if (coords != null) {
+                                            formLatitude = coords.first
+                                            formLongitude = coords.second
+                                        } else {
+                                            formLatitude = null
+                                            formLongitude = null
+                                        }
+                                    },
+                                    label = { Text("Google Map Link (Optional)") },
+                                    placeholder = { Text("e.g. https://maps.app.goo.gl/...") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                                IconButton(
+                                    onClick = { checkAndRequestLocationForForm() },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("use_current_location_button")
+                                ) {
+                                    if (isFetchingLocationForForm) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.MyLocation,
+                                            contentDescription = "Use Current Location",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
                             val coordsWarning = remember(googleMapLink) {
                                 if (googleMapLink.isBlank()) {
                                     "⚠️ Warning: No Google Map link or coordinates provided. This store will not appear in coordinate-based Nearest Shop searches."
@@ -1429,7 +1595,11 @@ fun ShopsScreen(
                                 startingDate = startingDateMillis,
                                 googleMapLink = googleMapLink.trim().ifEmpty { null },
                                 mobileNumber = mobileNumber.trim().ifEmpty { null },
-                                notes = notes.trim().ifEmpty { null }
+                                notes = notes.trim().ifEmpty { null },
+                                latitude = formLatitude,
+                                longitude = formLongitude,
+                                coordinateStatus = if (formLatitude != null && formLongitude != null) "Valid" else null,
+                                lastCoordinateUpdate = if (formLatitude != null && formLongitude != null) System.currentTimeMillis() else null
                             )
 
                             if (isEdit) {
