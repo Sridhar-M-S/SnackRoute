@@ -42,6 +42,15 @@ data class AppError(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+data class ReminderItem(
+    val shop: com.example.data.ShopMaster,
+    val lastSaleDate: Long,
+    val daysSince: Int,
+    val recommendedProducts: Map<String, Int>,
+    val interval: Int
+)
+
+
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -57,7 +66,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.badgeDao(),
         db.errorLogDao(),
         db.dailyTaskDao(),
-        db.dynamicCostDao()
+        db.dynamicCostDao(),
+        db.shopRemarkDao()
     )
 
     // --- Centralized Error States ---
@@ -221,6 +231,133 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isOfflineQueueActive = MutableStateFlow<Boolean>(false)
     val isOfflineQueueActive: StateFlow<Boolean> = _isOfflineQueueActive.asStateFlow()
+
+    // --- Sales Reminder States & Flows ---
+    private val _isReminderEnabled = MutableStateFlow(prefs.getBoolean("sales_reminder_enabled", true))
+    val isReminderEnabled: StateFlow<Boolean> = _isReminderEnabled.asStateFlow()
+
+    private val _defaultReminderInterval = MutableStateFlow(prefs.getInt("sales_reminder_interval", 7))
+    val defaultReminderInterval: StateFlow<Int> = _defaultReminderInterval.asStateFlow()
+
+    private val _reminderTime = MutableStateFlow(prefs.getString("sales_reminder_time", "20:00") ?: "20:00")
+    val reminderTime: StateFlow<String> = _reminderTime.asStateFlow()
+
+    fun updateReminderEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("sales_reminder_enabled", enabled).apply()
+        _isReminderEnabled.value = enabled
+    }
+
+    fun updateDefaultReminderInterval(interval: Int) {
+        prefs.edit().putInt("sales_reminder_interval", interval).apply()
+        _defaultReminderInterval.value = interval
+    }
+
+    fun updateReminderTime(time: String) {
+        prefs.edit().putString("sales_reminder_time", time).apply()
+        _reminderTime.value = time
+    }
+
+    val dueReminders: StateFlow<List<ReminderItem>> = combine(
+        repository.allShops,
+        repository.allSales,
+        _isReminderEnabled,
+        _defaultReminderInterval
+    ) { shops, sales, enabled, defaultInterval ->
+        if (!enabled) return@combine emptyList<ReminderItem>()
+
+        val now = System.currentTimeMillis()
+        val oneDayMs = 24 * 60 * 60 * 1000L
+
+        shops.mapNotNull { shop ->
+            val shopSales = sales.filter { it.shopNumber == shop.shopNumber }
+            val lastSaleDate = shopSales.maxOfOrNull { it.entryDate } ?: shop.startingDate
+            
+            val lastCompletedTime = prefs.getLong("completed_reminder_shop_${shop.shopNumber}", 0L)
+            val effectiveLastDate = maxOf(lastSaleDate, lastCompletedTime)
+
+            val daysSince = ((now - effectiveLastDate) / oneDayMs).toInt()
+            val interval = shop.customReminderInterval ?: defaultInterval
+
+            if (daysSince >= interval) {
+                // Determine recommended products
+                val productAverages = shopSales.groupBy { it.productName }
+                    .mapValues { (_, entries) ->
+                        val avg = entries.map { it.packetsSold }.average()
+                        if (avg.isNaN()) 0 else kotlin.math.ceil(avg).toInt()
+                    }
+
+                ReminderItem(
+                    shop = shop,
+                    lastSaleDate = lastSaleDate,
+                    daysSince = daysSince,
+                    recommendedProducts = productAverages,
+                    interval = interval
+                )
+            } else {
+                null
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun markReminderCompleted(shopNumber: String) {
+        prefs.edit().putLong("completed_reminder_shop_$shopNumber", System.currentTimeMillis()).apply()
+        // Toggle state briefly to force emission of dueReminders and update badge
+        val currentEnabled = _isReminderEnabled.value
+        _isReminderEnabled.value = !currentEnabled
+        _isReminderEnabled.value = currentEnabled
+    }
+
+    // --- Shop Remarks State & Flows ---
+    val allRemarks: StateFlow<List<ShopRemark>> = repository.allRemarks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allPrices: StateFlow<List<ProductPrice>> = repository.getAllPricesFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addRemark(shopNumber: String, shopName: String, locationNumber: String, remarkText: String, salesEntryId: Int? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val remark = ShopRemark(
+                shopNumber = shopNumber,
+                shopName = shopName,
+                locationNumber = locationNumber,
+                remark = remarkText,
+                salesEntryId = salesEntryId
+            )
+            repository.insertRemark(remark)
+        }
+    }
+
+    fun updateRemarkStatus(remark: ShopRemark, newStatus: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateRemark(remark.copy(status = newStatus))
+        }
+    }
+
+    fun addRemarkReply(remark: ShopRemark, replyText: String, type: String = "Reply") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val newItem = RemarkHistoryItem(
+                id = java.util.UUID.randomUUID().toString(),
+                date = System.currentTimeMillis(),
+                note = replyText,
+                type = type
+            )
+            val updatedHistory = remark.history.toMutableList().apply { add(newItem) }
+            repository.updateRemark(remark.copy(history = updatedHistory))
+        }
+    }
+
+    fun editRemarkText(remark: ShopRemark, newText: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateRemark(remark.copy(remark = newText))
+        }
+    }
+
+    fun deleteRemark(remark: ShopRemark) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteRemark(remark)
+        }
+    }
+
 
     // --- Dynamic Profit Calculation Settings & Flows ---
     private val _isDynamicProfitEnabled = MutableStateFlow(prefs.getBoolean("is_dynamic_profit_enabled", false))
@@ -2416,6 +2553,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.insertSales(salesEntry)
+            if (!salesEntry.remarks.isNullOrBlank()) {
+                val insertedSale = repository.allSales.first().firstOrNull { 
+                    it.shopNumber == salesEntry.shopNumber && it.entryDate == salesEntry.entryDate 
+                }
+                repository.insertRemark(
+                    ShopRemark(
+                        shopNumber = salesEntry.shopNumber,
+                        shopName = salesEntry.shopName,
+                        locationNumber = salesEntry.locationNumber,
+                        remark = salesEntry.remarks,
+                        salesEntryId = insertedSale?.id
+                    )
+                )
+            }
             incrementSessionCombo()
 
             val salesAfter = repository.allSales.first()
@@ -2446,6 +2597,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.updateSales(salesEntry)
+            val existingRemark = repository.getRemarkBySalesId(salesEntry.id)
+            if (existingRemark != null) {
+                if (salesEntry.remarks.isNullOrBlank()) {
+                    repository.deleteRemark(existingRemark)
+                } else {
+                    repository.updateRemark(existingRemark.copy(remark = salesEntry.remarks))
+                }
+            } else if (!salesEntry.remarks.isNullOrBlank()) {
+                repository.insertRemark(
+                    ShopRemark(
+                        shopNumber = salesEntry.shopNumber,
+                        shopName = salesEntry.shopName,
+                        locationNumber = salesEntry.locationNumber,
+                        remark = salesEntry.remarks,
+                        salesEntryId = salesEntry.id
+                    )
+                )
+            }
 
             val salesAfter = repository.allSales.first()
             val shopsAfter = repository.allShops.first()
@@ -2538,6 +2707,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.deleteSales(salesEntry)
+            val linkedRemark = repository.getRemarkBySalesId(salesEntry.id)
+            if (linkedRemark != null) {
+                repository.deleteRemark(linkedRemark)
+            }
 
             val salesAfter = repository.allSales.first()
             val shopsAfter = repository.allShops.first()

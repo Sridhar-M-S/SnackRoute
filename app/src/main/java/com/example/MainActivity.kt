@@ -226,7 +226,8 @@ class MainActivity : ComponentActivity() {
                                             onOpenChat = { isAiChatOpen = true },
                                             onOpenTimetable = { isTimetableOpen = true },
                                             onOpenDebug = { isDebugOpen = true },
-                                            onOpenCostEngine = { navigateToChildTab("CostEngine") }
+                                            onOpenCostEngine = { navigateToChildTab("CostEngine") },
+                                            onOpenRemarks = { navigateToChildTab("Remarks") }
                                         )
                                     }
                                 }
@@ -241,6 +242,22 @@ class MainActivity : ComponentActivity() {
                                 if (navigationHistory.contains("CostEngine")) {
                                     Box(modifier = if (currentTab == "CostEngine") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         CostEngineScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("SalesPlanning")) {
+                                    Box(modifier = if (currentTab == "SalesPlanning") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        SalesPlanningScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("Remarks")) {
+                                    Box(modifier = if (currentTab == "Remarks") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        RemarksScreen(
                                             viewModel = viewModel,
                                             onBack = { navigateBack() }
                                         )

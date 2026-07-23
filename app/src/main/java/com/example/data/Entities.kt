@@ -28,7 +28,8 @@ data class ShopMaster(
     val longitude: Double? = null,
     val coordinateStatus: String? = null, // "Valid", "Invalid", "Pending"
     val lastCoordinateUpdate: Long? = null,
-    val coordinateError: String? = null
+    val coordinateError: String? = null,
+    val customReminderInterval: Int? = null
 ) {
     val startingDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(startingDate))
@@ -181,6 +182,30 @@ data class CostCalculationItem(
     val calculatedCost: Double, // The final computed cost contribution
     val purchaseUnitSnapshot: String // The unit in which it was purchased
 )
+
+data class RemarkHistoryItem(
+    val id: String,
+    val date: Long = System.currentTimeMillis(),
+    val note: String,
+    val type: String // "Reply", "Follow-up", "StatusChange"
+)
+
+@Entity(tableName = "shop_remarks")
+data class ShopRemark(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val date: Long = System.currentTimeMillis(),
+    val shopNumber: String,
+    val shopName: String,
+    val locationNumber: String,
+    val remark: String,
+    val status: String = "Pending", // "Pending" or "Done"
+    val salesEntryId: Int? = null, // Links to SalesEntry.id if created during sales entry
+    val history: List<RemarkHistoryItem> = emptyList() // Store complete reply & follow-up history
+) {
+    val dateFormatted: String
+        get() = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(date))
+}
+
 
 
 

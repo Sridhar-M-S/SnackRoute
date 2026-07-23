@@ -20,8 +20,18 @@ class AppRepository(
     private val badgeDao: BadgeDao,
     private val errorLogDao: ErrorLogDao,
     private val dailyTaskDao: DailyTaskDao,
-    private val dynamicCostDao: DynamicCostDao
+    private val dynamicCostDao: DynamicCostDao,
+    private val shopRemarkDao: ShopRemarkDao
 ) {
+    // --- Shop Remark Queries ---
+    val allRemarks: Flow<List<ShopRemark>> = shopRemarkDao.getAllRemarks()
+    suspend fun insertRemark(remark: ShopRemark): Long = shopRemarkDao.insertRemark(remark)
+    suspend fun updateRemark(remark: ShopRemark) = shopRemarkDao.updateRemark(remark)
+    suspend fun deleteRemark(remark: ShopRemark) = shopRemarkDao.deleteRemark(remark)
+    suspend fun deleteRemarkById(id: Int) = shopRemarkDao.deleteRemarkById(id)
+    suspend fun getRemarkBySalesId(salesId: Int): ShopRemark? = shopRemarkDao.getRemarkBySalesId(salesId)
+    suspend fun deleteRemarkBySalesId(salesId: Int) = shopRemarkDao.deleteRemarkBySalesId(salesId)
+
     // --- Error Log Queries ---
     val allErrorLogs: Flow<List<ErrorLog>> = errorLogDao.getAllErrorLogs()
     suspend fun insertErrorLog(errorLog: ErrorLog) = errorLogDao.insertErrorLog(errorLog)

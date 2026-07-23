@@ -33,6 +33,8 @@ import com.google.android.gms.common.api.ApiException
 import androidx.compose.foundation.text.selection.SelectionContainer
 import android.content.Context
 import android.content.pm.PackageManager
+import androidx.compose.animation.*
+import androidx.compose.ui.text.style.TextAlign
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -138,7 +140,8 @@ fun SettingsScreen(
     onOpenChat: () -> Unit,
     onOpenTimetable: () -> Unit,
     onOpenDebug: () -> Unit,
-    onOpenCostEngine: () -> Unit
+    onOpenCostEngine: () -> Unit,
+    onOpenRemarks: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
@@ -325,6 +328,176 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Configure", fontSize = 12.sp)
                         }
+                    }
+                }
+            }
+
+            // --- Sales Reminder Settings ---
+            val isReminderEnabled by viewModel.isReminderEnabled.collectAsState()
+            val defaultReminderInterval by viewModel.defaultReminderInterval.collectAsState()
+            val reminderTime by viewModel.reminderTime.collectAsState()
+            val shops by viewModel.shops.collectAsState()
+            var isShopsOverrideExpanded by remember { mutableStateOf(false) }
+
+            Text("Sales Reminder Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("sales_reminder_settings_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text("Enable Reminder Notifications", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Get notified when a shop is overdue for a visit", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                        Switch(
+                            checked = isReminderEnabled,
+                            onCheckedChange = { viewModel.updateReminderEnabled(it) },
+                            modifier = Modifier.testTag("sales_reminder_toggle")
+                        )
+                    }
+
+                    if (isReminderEnabled) {
+                        Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                        Text("Default Reminder Interval", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        val intervals = listOf(3, 5, 7, 10, 15, 30)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            intervals.forEach { days ->
+                                val selected = defaultReminderInterval == days
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { viewModel.updateDefaultReminderInterval(days) },
+                                    label = { Text("${days}d") },
+                                    modifier = Modifier.testTag("reminder_chip_${days}")
+                                )
+                            }
+                        }
+
+                        Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Notification Time", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Time to trigger daily checklist generation", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            OutlinedTextField(
+                                value = reminderTime,
+                                onValueChange = { viewModel.updateReminderTime(it) },
+                                placeholder = { Text("20:00") },
+                                singleLine = true,
+                                modifier = Modifier.width(100.dp).testTag("reminder_time_field"),
+                                textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center)
+                            )
+                        }
+
+                        Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isShopsOverrideExpanded = !isShopsOverrideExpanded }
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Custom Shop Intervals", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Set unique reminder overrides per shop", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Icon(
+                                imageVector = if (isShopsOverrideExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Expand Overrides",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        AnimatedVisibility(visible = isShopsOverrideExpanded) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (shops.isEmpty()) {
+                                    Text("No shops registered yet.", fontSize = 12.sp, color = Color.Gray)
+                                } else {
+                                    shops.forEach { shop ->
+                                        ShopOverrideRow(
+                                            shop = shop,
+                                            onUpdateInterval = { newInterval ->
+                                                viewModel.updateShop(shop.shopNumber, shop.copy(customReminderInterval = newInterval))
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- Store Remarks Card ---
+            Text("Store Observations & Remarks", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("manage_remarks_settings_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Comment,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Store Remarks & Observations", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("View, sort, filter, and reply to customer feedback, follow-up remarks, or observations from store visits.", fontSize = 11.sp, color = Color.Gray)
+                        }
+                    }
+
+                    Button(
+                        onClick = onOpenRemarks,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth().testTag("btn_settings_open_remarks"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Launch, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Open Remarks Manager")
                     }
                 }
             }
@@ -1047,6 +1220,59 @@ fun DeleteActionItem(
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text("Delete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun ShopOverrideRow(
+    shop: com.example.data.ShopMaster,
+    onUpdateInterval: (Int?) -> Unit
+) {
+    var customVal by remember(shop.customReminderInterval) { 
+        mutableStateOf(shop.customReminderInterval?.toString() ?: "") 
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(shop.storeName, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text("ID: ${shop.shopNumber} • Location: ${shop.locationNumber}", fontSize = 11.sp, color = Color.Gray)
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = customVal,
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        customVal = newValue
+                        val intVal = newValue.toIntOrNull()
+                        if (intVal != null) {
+                            onUpdateInterval(intVal)
+                        } else if (newValue.isEmpty()) {
+                            onUpdateInterval(null)
+                        }
+                    }
+                },
+                label = { Text("Days", fontSize = 10.sp) },
+                singleLine = true,
+                modifier = Modifier.width(75.dp).testTag("shop_override_${shop.shopNumber}"),
+                placeholder = { Text("Default") }
+            )
+            if (shop.customReminderInterval != null) {
+                IconButton(
+                    onClick = {
+                        customVal = ""
+                        onUpdateInterval(null)
+                    }
+                ) {
+                    Icon(Icons.Default.Clear, "Reset Override", tint = MaterialTheme.colorScheme.error)
+                }
+            }
         }
     }
 }

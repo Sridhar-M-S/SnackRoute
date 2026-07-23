@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
@@ -75,6 +76,20 @@ fun DashboardScreen(
     val allBadges by viewModel.allBadges.collectAsStateWithLifecycle()
     val unlockedBadges by viewModel.unlockedBadges.collectAsStateWithLifecycle()
     var activeCelebration by remember { mutableStateOf<GamificationEvent?>(null) }
+
+    val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
+    val reminderCount = dueReminders.size
+
+    val infiniteTransition = rememberInfiniteTransition(label = "bellPulse")
+    val bellScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = if (reminderCount > 0) 1.2f else 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "bellScale"
+    )
 
     LaunchedEffect(Unit) {
         viewModel.gamificationEvents.collect { event ->
@@ -216,6 +231,41 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { onNavigateToTab("SalesPlanning") },
+                        modifier = Modifier.testTag("notification_bell_button")
+                    ) {
+                        Box(contentAlignment = Alignment.TopEnd) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Sales Planning Reminders",
+                                tint = if (reminderCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .graphicsLayer(
+                                        scaleX = bellScale,
+                                        scaleY = bellScale
+                                    )
+                            )
+                            if (reminderCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(Color.Red, shape = CircleShape)
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 4.dp, y = (-4).dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = reminderCount.toString(),
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
                     IconButton(
                         onClick = onOpenDailyTasks,
                         modifier = Modifier.testTag("open_daily_tasks_button")

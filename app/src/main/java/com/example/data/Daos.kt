@@ -306,5 +306,30 @@ interface DynamicCostDao {
     suspend fun insertCalculations(calculations: List<CostCalculation>)
 }
 
+@Dao
+interface ShopRemarkDao {
+    @Query("SELECT * FROM shop_remarks ORDER BY date DESC")
+    fun getAllRemarks(): Flow<List<ShopRemark>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRemark(remark: ShopRemark): Long
+
+    @Update
+    suspend fun updateRemark(remark: ShopRemark)
+
+    @Delete
+    suspend fun deleteRemark(remark: ShopRemark)
+
+    @Query("DELETE FROM shop_remarks WHERE id = :id")
+    suspend fun deleteRemarkById(id: Int)
+
+    @Query("SELECT * FROM shop_remarks WHERE salesEntryId = :salesId LIMIT 1")
+    suspend fun getRemarkBySalesId(salesId: Int): ShopRemark?
+
+    @Query("DELETE FROM shop_remarks WHERE salesEntryId = :salesId")
+    suspend fun deleteRemarkBySalesId(salesId: Int)
+}
+
+
 
 
