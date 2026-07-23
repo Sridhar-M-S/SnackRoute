@@ -3,6 +3,12 @@ package com.example.ui.screens
 import android.app.DatePickerDialog
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.animateContentSize
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -557,6 +563,8 @@ fun SalesScreen(
                 }
 
                 // --- Sales Summary Section ---
+                var isSummaryExpanded by rememberSaveable { mutableStateOf(true) }
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -564,50 +572,102 @@ fun SalesScreen(
                     border = CardDefaults.outlinedCardBorder()
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.animateContentSize()
                     ) {
+                        // Header row (Clickable to toggle)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isSummaryExpanded = !isSummaryExpanded }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .testTag("summary_header_toggle"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SalesSummaryCard(
-                                label = "Total Sales",
-                                value = "₹${"%.2f".format(summaryTotalSales)}",
-                                icon = Icons.Default.TrendingUp,
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.weight(1f).testTag("summary_total_sales")
-                            )
-                            SalesSummaryCard(
-                                label = "Total Profit",
-                                value = "₹${"%.2f".format(summaryTotalProfit)}",
-                                icon = Icons.Default.Payments,
-                                containerColor = Color(0xFFE8F5E9),
-                                contentColor = Color(0xFF2E7D32),
-                                modifier = Modifier.weight(1f).testTag("summary_total_profit")
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TrendingUp,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Sales Summary",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            IconButton(
+                                onClick = { isSummaryExpanded = !isSummaryExpanded },
+                                modifier = Modifier.size(24.dp).testTag("summary_arrow_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isSummaryExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isSummaryExpanded) "Collapse summary" else "Expand summary",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+
+                        // Collapsible Content
+                        AnimatedVisibility(
+                            visible = isSummaryExpanded,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
                         ) {
-                            SalesSummaryCard(
-                                label = "Packets Sold",
-                                value = "$summaryTotalPackets pkts",
-                                icon = Icons.Default.ShoppingBag,
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.weight(1f).testTag("summary_total_packets")
-                            )
-                            SalesSummaryCard(
-                                label = "Total Records",
-                                value = "$summaryTotalRecords",
-                                icon = Icons.Default.ListAlt,
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.weight(1f).testTag("summary_total_records")
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SalesSummaryCard(
+                                        label = "Total Sales",
+                                        value = "₹${"%.2f".format(summaryTotalSales)}",
+                                        icon = Icons.Default.TrendingUp,
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.weight(1f).testTag("summary_total_sales")
+                                    )
+                                    SalesSummaryCard(
+                                        label = "Total Profit",
+                                        value = "₹${"%.2f".format(summaryTotalProfit)}",
+                                        icon = Icons.Default.Payments,
+                                        containerColor = Color(0xFFE8F5E9),
+                                        contentColor = Color(0xFF2E7D32),
+                                        modifier = Modifier.weight(1f).testTag("summary_total_profit")
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SalesSummaryCard(
+                                        label = "Packets Sold",
+                                        value = "$summaryTotalPackets pkts",
+                                        icon = Icons.Default.ShoppingBag,
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.weight(1f).testTag("summary_total_packets")
+                                    )
+                                    SalesSummaryCard(
+                                        label = "Total Records",
+                                        value = "$summaryTotalRecords",
+                                        icon = Icons.Default.ListAlt,
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.weight(1f).testTag("summary_total_records")
+                                    )
+                                }
+                            }
                         }
                     }
                 }
