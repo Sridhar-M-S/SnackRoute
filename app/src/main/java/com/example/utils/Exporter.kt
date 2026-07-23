@@ -1311,6 +1311,8 @@ object Exporter {
             val totalAmountIdx = headerMap["Total Amount (₹)"] ?: headerMap["Total Amount"] ?: headerMap["Amount"]
             val statusIdx = headerMap["Status"]
             val remarksIdx = headerMap["Remarks"] ?: headerMap["Notes"]
+            val profitPerPacketIdx = headerMap["Profit Per Packet"] ?: headerMap["ProfitPerPacket"] ?: headerMap["Profit Per Unit"] ?: headerMap["ProfitPerUnit"]
+            val totalProfitIdx = headerMap["Total Profit"] ?: headerMap["TotalProfit"] ?: headerMap["Profit"]
             
             if (shopNoIdx == null || productTypeIdx == null || packetsGivenIdx == null || rateIdx == null) {
                 throw Exception("Missing required column headers: Shop No, Product Type, Packets Given, and Rate per Packet are required.")
@@ -1333,9 +1335,11 @@ object Exporter {
                 val totalAmountStr = if (totalAmountIdx != null) getCellValueAsString(row, totalAmountIdx)?.trim() ?: "" else ""
                 val statusStr = if (statusIdx != null) getCellValueAsString(row, statusIdx)?.trim() ?: "" else ""
                 val remarksStr = if (remarksIdx != null) getCellValueAsString(row, remarksIdx)?.trim() ?: "" else ""
+                val profitPerPacketStr = if (profitPerPacketIdx != null) getCellValueAsString(row, profitPerPacketIdx)?.trim() ?: "" else ""
+                val totalProfitStr = if (totalProfitIdx != null) getCellValueAsString(row, totalProfitIdx)?.trim() ?: "" else ""
                 
                 val originalRowData = listOf(
-                    shopNo, entryDateStr, prodType, packetsGivenStr, packetsReturnStr, rateStr, totalAmountStr, statusStr, remarksStr
+                    shopNo, entryDateStr, prodType, packetsGivenStr, packetsReturnStr, rateStr, totalAmountStr, statusStr, remarksStr, profitPerPacketStr, totalProfitStr
                 )
                 
                 // 1. Check basic empty required fields
@@ -1418,12 +1422,30 @@ object Exporter {
                 
                 val packetsSold = packetsGiven - packetsReturned
                 
-                // Find matching price
-                val productPrices = productPricesMap[product.id] ?: emptyList()
-                val priceConfig = productPrices.find { it.sellingPrice == ratePerPacket }
-                val profitPerPacket = priceConfig?.profitPerPacket ?: 0.0
+                // Determine profit per packet and total profit
+                val excelProfitPerPacket = profitPerPacketStr.toDoubleOrNull()
+                val excelTotalProfit = totalProfitStr.toDoubleOrNull()
                 
-                val totalProfit = packetsSold * profitPerPacket
+                var profitPerPacket = excelProfitPerPacket
+                var totalProfit = excelTotalProfit
+                
+                if (profitPerPacket == null || totalProfit == null) {
+                    val productPrices = productPricesMap[product.id] ?: emptyList()
+                    val priceConfig = productPrices.find { it.sellingPrice == ratePerPacket }
+                    val defaultProfitPerPacket = priceConfig?.profitPerPacket ?: 0.0
+                    
+                    if (profitPerPacket == null) {
+                        profitPerPacket = defaultProfitPerPacket
+                    }
+                    if (totalProfit == null) {
+                        totalProfit = packetsSold * profitPerPacket
+                    }
+                }
+                
+                // Add logging during import to verify:
+                // - Profit value read from Excel.
+                // - Profit value stored in the database.
+                android.util.Log.d("SalesImport", "Row ${r + 1}: Read excelProfitPerPacket=$excelProfitPerPacket, excelTotalProfit=$excelTotalProfit from Excel. Storing profitPerPacket=$profitPerPacket, totalProfit=$totalProfit in database.")
                 
                 val totalAmount = totalAmountStr.toDoubleOrNull() ?: (packetsSold * ratePerPacket)
                 val status = "Paid" // Always Paid

@@ -749,6 +749,7 @@ fun SalesScreen(
                                     }
 
                                     saleItems = sessionSales.map { s ->
+                                        android.util.Log.d("SalesEdit", "Profit value loaded into the Edit Sales screen: id=${s.id}, productName=${s.productName}, profitPerPacket=${s.profitPerPacket}")
                                         SaleItemState(
                                             id = java.util.UUID.randomUUID().toString(),
                                             dbId = s.id,
@@ -757,7 +758,8 @@ fun SalesScreen(
                                             packetsGivenStr = s.packetsGiven.toString(),
                                             packetsReturnedStr = s.packetsReturned.toString(),
                                             customProfitStr = s.profitPerPacket.toString(),
-                                            isCustomRate = false
+                                            isCustomRate = false,
+                                            isProfitOverridden = true
                                         )
                                     }
                                     showAddEditScreen = true
@@ -1536,6 +1538,7 @@ data class SaleItemState(
     val packetsReturnedStr: String = "",
     val customProfitStr: String = "",
     val isCustomRate: Boolean = false,
+    val isProfitOverridden: Boolean = false,
     val productError: String? = null,
     val rateError: String? = null,
     val packetsError: String? = null
@@ -1561,40 +1564,67 @@ fun SaleItemRow(
     
     var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
     
-    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations) {
-        if (!item.isCustomRate && item.ratePerPacketStr.isNotEmpty() && item.productName.isNotEmpty() && availablePrices.isNotEmpty()) {
-            val matchingPrice = availablePrices.find { it.sellingPrice.toString() == item.ratePerPacketStr }
-            if (matchingPrice != null) {
-                val profitToUse = if (isDynamicProfitEnabled) {
-                    val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
-                    calculations
-                        .filter { it.productPriceId == matchingPrice.priceId && it.calculationDate <= saleDateStr }
-                        .maxByOrNull { it.calculationDate }
-                        ?.profitSnapshot
-                        ?: matchingPrice.profitPerPacket
-                } else {
-                    matchingPrice.profitPerPacket
-                }
-                
-                val formattedProfit = String.format(java.util.Locale.US, "%.2f", profitToUse)
-                if (item.customProfitStr != formattedProfit) {
-                    onItemChange(item.copy(customProfitStr = formattedProfit))
-                }
+    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations, item.isProfitOverridden) {
+        if (item.productName.isNotEmpty() && availablePrices.isNotEmpty() && !item.isProfitOverridden) {
+            val sellingPrice = item.ratePerPacketStr.toDoubleOrNull() ?: 0.0
+            
+            // 1. Get the production cost
+            val priceIds = availablePrices.map { it.priceId }
+            val latestCalc = if (isDynamicProfitEnabled && priceIds.isNotEmpty()) {
+                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                calculations
+                    .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
+                    .maxByOrNull { it.calculationDate }
+            } else null
+
+            val productionCost = if (latestCalc != null) {
+                latestCalc.totalProductionCost
+            } else {
+                // Find matching price if any, otherwise first available
+                val refPrice = availablePrices.find { it.sellingPrice.toString() == item.ratePerPacketStr }
+                    ?: availablePrices.firstOrNull()
+                refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+            }
+
+            // 2. Profit = Actual Selling Price - Production Cost
+            val calculatedProfit = if (item.ratePerPacketStr.isEmpty()) 0.0 else (sellingPrice - productionCost)
+            val formattedProfit = String.format(java.util.Locale.US, "%.2f", calculatedProfit)
+            
+            if (item.customProfitStr != formattedProfit && item.ratePerPacketStr.isNotEmpty()) {
+                onItemChange(item.copy(customProfitStr = formattedProfit))
             }
         }
     }
     
-    LaunchedEffect(currentProductObj) {
+    LaunchedEffect(currentProductObj, isDynamicProfitEnabled, calculations) {
         if (currentProductObj != null) {
             viewModel.getPricesForProduct(currentProductObj.id).collect { prices ->
                 availablePrices = prices
                 
-                // If this is an existing DB row, check if its rate matches one of the prices.
+                // If this is an existing DB row, check if its rate matches one of the prices and profit matches too.
                 // If not, set isCustomRate to true so the custom price/profit fields are visible.
                 if (item.ratePerPacketStr.isNotEmpty() && item.dbId != 0 && !item.isCustomRate) {
-                    val matchingPrice = prices.any { it.sellingPrice.toString() == item.ratePerPacketStr }
-                    if (!matchingPrice) {
+                    val matchingPrice = prices.find { it.sellingPrice.toString() == item.ratePerPacketStr }
+                    if (matchingPrice == null) {
                         onItemChange(item.copy(isCustomRate = true))
+                    } else {
+                        val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                        val latestCalc = if (isDynamicProfitEnabled) {
+                            calculations
+                                .filter { it.productPriceId == matchingPrice.priceId && it.calculationDate <= saleDateStr }
+                                .maxByOrNull { it.calculationDate }
+                        } else null
+                        
+                        val productionCost = latestCalc?.totalProductionCost ?: (matchingPrice.sellingPrice - matchingPrice.profitPerPacket)
+                        val expectedProfit = matchingPrice.sellingPrice - productionCost
+                        
+                        val loadedProfit = item.customProfitStr.toDoubleOrNull() ?: 0.0
+                        val expectedProfitFormatted = String.format(java.util.Locale.US, "%.2f", expectedProfit).toDoubleOrNull() ?: expectedProfit
+                        val loadedProfitFormatted = String.format(java.util.Locale.US, "%.2f", loadedProfit).toDoubleOrNull() ?: loadedProfit
+                        
+                        if (expectedProfitFormatted != loadedProfitFormatted) {
+                            onItemChange(item.copy(isCustomRate = true))
+                        }
                     }
                 }
             }
@@ -1816,7 +1846,8 @@ fun SaleItemRow(
                             onValueChange = {
                                 onItemChange(item.copy(
                                     ratePerPacketStr = it,
-                                    rateError = null
+                                    rateError = null,
+                                    isProfitOverridden = false // Reset override to trigger automatic recalculation
                                 ))
                             },
                             label = { Text("Selling Price*") },
@@ -1827,7 +1858,10 @@ fun SaleItemRow(
                         OutlinedTextField(
                             value = item.customProfitStr,
                             onValueChange = {
-                                onItemChange(item.copy(customProfitStr = it))
+                                onItemChange(item.copy(
+                                    customProfitStr = it,
+                                    isProfitOverridden = true // Set override to preserve manual input
+                                ))
                             },
                             label = { Text("Profit*") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),

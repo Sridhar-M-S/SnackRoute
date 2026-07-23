@@ -1071,54 +1071,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
             }
             
-            if (dynamicEnabled) {
+            val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
+            val priceIds = productPrices.map { it.priceId }
+            val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
+            
+            val applicableCalc = if (dynamicEnabled && priceIds.isNotEmpty()) {
                 if (priceObj != null) {
-                    val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
-                    val applicableCalc = calcs
+                    calcs
                         .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
                         .maxByOrNull { it.calculationDate }
-                    
-                    if (applicableCalc != null) {
-                        android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: Source = Cost History (v${applicableCalc.version}), Production Cost = ₹${applicableCalc.totalProductionCost}, Profit = ₹${applicableCalc.profitSnapshot}, Selling Price = ₹${applicableCalc.sellingPriceSnapshot}")
-                        val newTotalProfit = sale.packetsSold * applicableCalc.profitSnapshot
-                        val newTotalAmount = sale.packetsSold * applicableCalc.sellingPriceSnapshot
-                        sale.copy(
-                            ratePerPacket = applicableCalc.sellingPriceSnapshot,
-                            totalAmount = newTotalAmount,
-                            profitPerPacket = applicableCalc.profitSnapshot,
-                            totalProfit = newTotalProfit
-                        )
-                    } else {
-                        android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: No matching calculation found. Fallback to Product Master. Profit = ₹${priceObj.profitPerPacket}, Selling Price = ₹${priceObj.sellingPrice}")
-                        val newTotalProfit = sale.packetsSold * priceObj.profitPerPacket
-                        val newTotalAmount = sale.packetsSold * priceObj.sellingPrice
-                        sale.copy(
-                            ratePerPacket = priceObj.sellingPrice,
-                            totalAmount = newTotalAmount,
-                            profitPerPacket = priceObj.profitPerPacket,
-                            totalProfit = newTotalProfit
-                        )
-                    }
                 } else {
-                    android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: No ProductPrice object found. Keeping original values. Profit = ₹${sale.profitPerPacket}, Selling Price = ₹${sale.ratePerPacket}")
-                    sale
+                    calcs
+                        .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
                 }
+            } else null
+            
+            val productionCost = if (applicableCalc != null) {
+                applicableCalc.totalProductionCost
             } else {
-                if (priceObj != null) {
-                    android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: Source = Product Master, Profit = ₹${priceObj.profitPerPacket}, Selling Price = ₹${priceObj.sellingPrice}")
-                    val newTotalProfit = sale.packetsSold * priceObj.profitPerPacket
-                    val newTotalAmount = sale.packetsSold * priceObj.sellingPrice
-                    sale.copy(
-                        ratePerPacket = priceObj.sellingPrice,
-                        totalAmount = newTotalAmount,
-                        profitPerPacket = priceObj.profitPerPacket,
-                        totalProfit = newTotalProfit
-                    )
-                } else {
-                    android.util.Log.d("DynamicCostEngine", "Sale for ${sale.productName}: No ProductPrice found in Product Master. Keeping original values. Profit = ₹${sale.profitPerPacket}, Selling Price = ₹${sale.ratePerPacket}")
-                    sale
-                }
+                val refPrice = priceObj ?: productPrices.firstOrNull()
+                refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
             }
+            
+            val calculatedProfitPerPacket = sale.ratePerPacket - productionCost
+            
+            // Check if the saved profit is a manual override.
+            // A manual override is when the saved profit does NOT match the calculated profit (based on standard or dynamic cost).
+            val standardProdCost = (priceObj ?: productPrices.firstOrNull())?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+            val standardExpectedProfit = sale.ratePerPacket - standardProdCost
+            
+            val isManualOverride = if (applicableCalc != null) {
+                Math.abs(sale.profitPerPacket - calculatedProfitPerPacket) > 0.01 && 
+                Math.abs(sale.profitPerPacket - standardExpectedProfit) > 0.01
+            } else {
+                Math.abs(sale.profitPerPacket - standardExpectedProfit) > 0.01
+            }
+            
+            val finalProfitPerPacket = if (isManualOverride) {
+                sale.profitPerPacket
+            } else {
+                calculatedProfitPerPacket
+            }
+            
+            val newTotalProfit = sale.packetsSold * finalProfitPerPacket
+            val newTotalAmount = sale.packetsSold * sale.ratePerPacket
+            
+            sale.copy(
+                ratePerPacket = sale.ratePerPacket,
+                totalAmount = newTotalAmount,
+                profitPerPacket = finalProfitPerPacket,
+                totalProfit = newTotalProfit
+            )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
