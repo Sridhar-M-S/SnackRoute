@@ -338,6 +338,7 @@ fun SettingsScreen(
             val reminderTime by viewModel.reminderTime.collectAsState()
             val shops by viewModel.shops.collectAsState()
             var isShopsOverrideExpanded by remember { mutableStateOf(false) }
+            var showTimePickerDialog by remember { mutableStateOf(false) }
 
             Text("Sales Reminder Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
             Card(
@@ -381,21 +382,26 @@ fun SettingsScreen(
                         Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
 
                         Text("Default Reminder Interval", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        val intervals = listOf(3, 5, 7, 10, 15, 30)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            intervals.forEach { days ->
-                                val selected = defaultReminderInterval == days
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { viewModel.updateDefaultReminderInterval(days) },
-                                    label = { Text("${days}d") },
-                                    modifier = Modifier.testTag("reminder_chip_${days}")
-                                )
-                            }
+                        var intervalInput by remember(defaultReminderInterval) {
+                            mutableStateOf(defaultReminderInterval.toString())
                         }
+                        OutlinedTextField(
+                            value = intervalInput,
+                            onValueChange = { newValue ->
+                                if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                                    intervalInput = newValue
+                                    newValue.toIntOrNull()?.let {
+                                        viewModel.updateDefaultReminderInterval(it)
+                                    }
+                                }
+                            },
+                            placeholder = { Text("7") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("default_reminder_interval_input"),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                            )
+                        )
 
                         Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
 
@@ -408,13 +414,68 @@ fun SettingsScreen(
                                 Text("Notification Time", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 Text("Time to trigger daily checklist generation", fontSize = 11.sp, color = Color.Gray)
                             }
-                            OutlinedTextField(
-                                value = reminderTime,
-                                onValueChange = { viewModel.updateReminderTime(it) },
-                                placeholder = { Text("20:00") },
-                                singleLine = true,
-                                modifier = Modifier.width(100.dp).testTag("reminder_time_field"),
-                                textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center)
+                            Box(
+                                modifier = Modifier
+                                    .width(120.dp)
+                                    .clickable { showTimePickerDialog = true }
+                            ) {
+                                OutlinedTextField(
+                                    value = reminderTime,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    enabled = false,
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("reminder_time_field"),
+                                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
+                                )
+                            }
+                        }
+
+                        if (showTimePickerDialog) {
+                            val initialHour = reminderTime.substringBefore(":", "20").toIntOrNull() ?: 20
+                            val initialMinute = reminderTime.substringAfter(":", "00").toIntOrNull() ?: 0
+                            val timePickerState = rememberTimePickerState(
+                                initialHour = initialHour,
+                                initialMinute = initialMinute,
+                                is24Hour = true
+                            )
+                            
+                            AlertDialog(
+                                onDismissRequest = { showTimePickerDialog = false },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = {
+                                            val formattedTime = String.format(java.util.Locale.US, "%02d:%02d", timePickerState.hour, timePickerState.minute)
+                                            viewModel.updateReminderTime(formattedTime)
+                                            showTimePickerDialog = false
+                                        },
+                                        modifier = Modifier.testTag("time_picker_confirm")
+                                    ) {
+                                        Text("OK")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(
+                                        onClick = { showTimePickerDialog = false },
+                                        modifier = Modifier.testTag("time_picker_dismiss")
+                                    ) {
+                                        Text("Cancel")
+                                    }
+                                },
+                                title = { Text("Select Notification Time") },
+                                text = {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        TimePicker(state = timePickerState)
+                                    }
+                                },
+                                modifier = Modifier.testTag("time_picker_dialog")
                             )
                         }
 
@@ -444,16 +505,107 @@ fun SettingsScreen(
                                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                if (shops.isEmpty()) {
-                                    Text("No shops registered yet.", fontSize = 12.sp, color = Color.Gray)
-                                } else {
-                                    shops.forEach { shop ->
-                                        ShopOverrideRow(
-                                            shop = shop,
-                                            onUpdateInterval = { newInterval ->
-                                                viewModel.updateShop(shop.shopNumber, shop.copy(customReminderInterval = newInterval))
+                                var shopSearchQuery by remember { mutableStateOf("") }
+                                var selectedShopForOverride by remember { mutableStateOf<com.example.data.ShopMaster?>(null) }
+
+                                // Update selectedShopForOverride if database updates
+                                LaunchedEffect(shops, selectedShopForOverride) {
+                                    selectedShopForOverride?.let { selected ->
+                                        val updated = shops.find { it.shopNumber == selected.shopNumber }
+                                        if (updated != selected) {
+                                            selectedShopForOverride = updated
+                                        }
+                                    }
+                                }
+
+                                OutlinedTextField(
+                                    value = shopSearchQuery,
+                                    onValueChange = { shopSearchQuery = it },
+                                    label = { Text("Search Shops...") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    trailingIcon = {
+                                        if (shopSearchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { shopSearchQuery = "" }) {
+                                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
                                             }
-                                        )
+                                        }
+                                    },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("shop_override_search_bar")
+                                )
+
+                                if (shopSearchQuery.isNotEmpty()) {
+                                    val matchingShops = remember(shopSearchQuery, shops) {
+                                        shops.filter {
+                                            it.storeName.contains(shopSearchQuery, ignoreCase = true) ||
+                                            it.shopNumber.contains(shopSearchQuery, ignoreCase = true)
+                                        }.take(10) // Limit to top 10 for performance
+                                    }
+
+                                    if (matchingShops.isEmpty()) {
+                                        Text("No matching shops found", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp))
+                                    } else {
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Text("Search Results (Tap to edit):", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                matchingShops.forEach { shop ->
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clickable { 
+                                                                selectedShopForOverride = shop 
+                                                                shopSearchQuery = ""
+                                                            }
+                                                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Column {
+                                                            Text(shop.storeName, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                                            val intervalText = shop.customReminderInterval?.let { "${it}d" } ?: "Default interval"
+                                                            Text("ID: ${shop.shopNumber} • Interval: $intervalText", fontSize = 11.sp, color = Color.Gray)
+                                                        }
+                                                        Icon(Icons.Default.Edit, contentDescription = "Edit override", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Display custom interval editor for selected shop
+                                selectedShopForOverride?.let { shop ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth().testTag("custom_interval_editor_card"),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Shop Interval Editor", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                                IconButton(
+                                                    onClick = { selectedShopForOverride = null },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Close editor", modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                            
+                                            ShopOverrideRow(
+                                                shop = shop,
+                                                onUpdateInterval = { newInterval ->
+                                                    viewModel.updateShop(shop.shopNumber, shop.copy(customReminderInterval = newInterval))
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }

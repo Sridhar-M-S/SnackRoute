@@ -150,6 +150,56 @@ fun SalesPlanningScreen(
                     }
                 }
 
+                // Master Checkbox: Mark all as completed
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier.fillMaxWidth().testTag("mark_all_completed_card")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.markAllRemindersCompleted() }
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Mark all completed",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Column {
+                                    Text(
+                                        "Mark All as Completed",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        "Click to dismiss all today's due reminders",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
+                            Checkbox(
+                                checked = false,
+                                onCheckedChange = { viewModel.markAllRemindersCompleted() },
+                                modifier = Modifier.testTag("master_completed_checkbox"),
+                                colors = CheckboxDefaults.colors(
+                                    uncheckedColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
+                }
+
                 // Locations list
                 items(groupedReminders.keys.toList()) { locNo ->
                     val locName = locationMap[locNo] ?: "Location $locNo"
@@ -285,9 +335,6 @@ fun SalesPlanningScreen(
                                     remindersInLoc.forEach { reminder ->
                                         val shop = reminder.shop
                                         val isShopExpanded = expandedShops.contains(shop.shopNumber)
-                                        val shopSalesRemark = allRemarks.firstOrNull { 
-                                            it.shopNumber == shop.shopNumber && it.status == "Pending" 
-                                        }?.remark ?: shop.notes
 
                                         Card(
                                             modifier = Modifier
@@ -298,152 +345,192 @@ fun SalesPlanningScreen(
                                             ),
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
-                                            Column {
-                                                // Shop item row
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                // Row 1: Shop Name, ID & Completed Button
                                                 Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            expandedShops = if (isShopExpanded) {
-                                                                expandedShops - shop.shopNumber
-                                                            } else {
-                                                                expandedShops + shop.shopNumber
-                                                            }
-                                                        }
-                                                        .padding(12.dp),
+                                                    modifier = Modifier.fillMaxWidth(),
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
+                                                    Column(modifier = Modifier.weight(1f).clickable {
+                                                        expandedShops = if (isShopExpanded) {
+                                                            expandedShops - shop.shopNumber
+                                                        } else {
+                                                            expandedShops + shop.shopNumber
+                                                        }
+                                                    }) {
                                                         Text(
                                                             text = shop.storeName,
                                                             fontWeight = FontWeight.Bold,
-                                                            fontSize = 14.sp
+                                                            fontSize = 15.sp,
+                                                            color = MaterialTheme.colorScheme.onSurface
                                                         )
                                                         Text(
-                                                            text = "Last sale: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(reminder.lastSaleDate))} (${reminder.daysSince} days ago)",
+                                                            text = "ID: ${shop.shopNumber}",
                                                             fontSize = 11.sp,
                                                             color = Color.Gray
                                                         )
                                                     }
                                                     Row(
-                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                     ) {
+                                                        IconButton(
+                                                            onClick = { viewModel.markReminderCompleted(shop.shopNumber) },
+                                                            modifier = Modifier.size(32.dp).testTag("dismiss_reminder_${shop.shopNumber}")
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.CheckCircle,
+                                                                contentDescription = "Mark Visited",
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                        }
+                                                        IconButton(
+                                                            onClick = {
+                                                                expandedShops = if (isShopExpanded) {
+                                                                    expandedShops - shop.shopNumber
+                                                                } else {
+                                                                    expandedShops + shop.shopNumber
+                                                                }
+                                                            },
+                                                            modifier = Modifier.size(32.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = if (isShopExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                                contentDescription = "Toggle Details",
+                                                                tint = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                // Row 2: Last Sale Date & Overdue Days
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = "Last Sale: ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(reminder.lastSaleDate))}",
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Text(
+                                                        text = "${reminder.daysSince} days ago",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+
+                                                AnimatedVisibility(visible = isShopExpanded) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(top = 8.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                                                        // Section Title: Last Sale Details
                                                         Text(
-                                                            text = "${reminder.recommendedProducts.values.sum()} pkts",
+                                                            text = "Last Sale Details:",
                                                             fontWeight = FontWeight.Bold,
                                                             fontSize = 12.sp,
                                                             color = MaterialTheme.colorScheme.primary
                                                         )
-                                                        Icon(
-                                                            imageVector = if (isShopExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                                            contentDescription = "Toggle Shop",
-                                                            tint = MaterialTheme.colorScheme.primary,
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                    }
-                                                }
 
-                                                if (isShopExpanded) {
-                                                    Column(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(horizontal = 12.dp)
-                                                            .padding(bottom = 12.dp),
-                                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                                    ) {
+                                                        if (reminder.lastSaleProducts.isEmpty()) {
+                                                            Text(
+                                                                text = "No prior sale items details available.",
+                                                                fontSize = 11.sp,
+                                                                color = Color.Gray
+                                                            )
+                                                        } else {
+                                                            reminder.lastSaleProducts.forEach { item ->
+                                                                Column(
+                                                                    modifier = Modifier
+                                                                        .fillMaxWidth()
+                                                                        .background(
+                                                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                                                            shape = RoundedCornerShape(4.dp)
+                                                                        )
+                                                                        .padding(8.dp),
+                                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                                ) {
+                                                                    Row(
+                                                                        modifier = Modifier.fillMaxWidth(),
+                                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                                    ) {
+                                                                        Text(
+                                                                            text = item.productName,
+                                                                            fontWeight = FontWeight.Bold,
+                                                                            fontSize = 12.sp
+                                                                        )
+                                                                        Text(
+                                                                            text = "${item.packetsSupplied} pkts",
+                                                                            fontWeight = FontWeight.Bold,
+                                                                            fontSize = 12.sp,
+                                                                            color = MaterialTheme.colorScheme.onSurface
+                                                                        )
+                                                                    }
+                                                                    Row(
+                                                                        modifier = Modifier.fillMaxWidth(),
+                                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                                    ) {
+                                                                        Text(
+                                                                            text = "Variety: ${item.productVariety}",
+                                                                            fontSize = 11.sp,
+                                                                            color = Color.Gray
+                                                                        )
+                                                                        Text(
+                                                                            text = "Price: ₹${item.sellingPrice}",
+                                                                            fontSize = 11.sp,
+                                                                            color = Color.Gray
+                                                                        )
+                                                                    }
+                                                                    if (!item.remarks.isNullOrBlank()) {
+                                                                        Text(
+                                                                            text = "Item Remark: ${item.remarks}",
+                                                                            fontSize = 11.sp,
+                                                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                                                            color = MaterialTheme.colorScheme.secondary
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // Remarks section
+                                                        val shopSalesRemark = allRemarks.firstOrNull { 
+                                                            it.shopNumber == shop.shopNumber && it.status == "Pending" 
+                                                        }?.remark ?: shop.notes
+
                                                         if (!shopSalesRemark.isNullOrBlank()) {
+                                                            Spacer(modifier = Modifier.height(4.dp))
                                                             Row(
                                                                 modifier = Modifier
                                                                     .fillMaxWidth()
                                                                     .clip(RoundedCornerShape(4.dp))
                                                                     .background(Color.Yellow.copy(alpha = 0.15f))
                                                                     .padding(8.dp),
-                                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
                                                             ) {
                                                                 Icon(
-                                                                    Icons.Default.Feedback,
+                                                                    imageVector = Icons.Default.Feedback,
                                                                     contentDescription = null,
                                                                     tint = Color(0xFFE5A93C),
                                                                     modifier = Modifier.size(16.dp)
                                                                 )
                                                                 Text(
-                                                                    text = "Remark: $shopSalesRemark",
+                                                                    text = "Shop Remark: $shopSalesRemark",
                                                                     fontSize = 11.sp,
                                                                     fontWeight = FontWeight.Medium
                                                                 )
                                                             }
-                                                        }
-
-                                                        // Recommended products list details
-                                                        Text(
-                                                            "Recommended Stock Options:",
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 11.sp,
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
-
-                                                        if (reminder.recommendedProducts.isEmpty()) {
-                                                            Text(
-                                                                "No previous sales data available to calculate recommendations.",
-                                                                fontSize = 11.sp,
-                                                                color = Color.Gray
-                                                            )
-                                                        } else {
-                                                            reminder.recommendedProducts.forEach { (prodName, recommendedQty) ->
-                                                                // Find matching product master and product price
-                                                                val matchingProduct = products.find { it.productName == prodName }
-                                                                val matchingPrice = matchingProduct?.let { p ->
-                                                                    productPrices.find { it.productId == p.id }
-                                                                }
-
-                                                                val priceString = matchingPrice?.let { "₹${it.sellingPrice}" } ?: "N/A"
-                                                                val category = matchingProduct?.productCategory ?: "Standard"
-
-                                                                Row(
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                                    verticalAlignment = Alignment.CenterVertically
-                                                                ) {
-                                                                    Column {
-                                                                        Text(
-                                                                            prodName,
-                                                                            fontWeight = FontWeight.SemiBold,
-                                                                            fontSize = 12.sp
-                                                                        )
-                                                                        Text(
-                                                                            "Variety: $category • Price: $priceString",
-                                                                            fontSize = 10.sp,
-                                                                            color = Color.Gray
-                                                                        )
-                                                                    }
-                                                                    Text(
-                                                                        text = "$recommendedQty packets",
-                                                                        fontWeight = FontWeight.Bold,
-                                                                        fontSize = 12.sp,
-                                                                        color = MaterialTheme.colorScheme.onSurface
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-
-                                                        Spacer(modifier = Modifier.height(4.dp))
-
-                                                        // Dismiss button
-                                                        Button(
-                                                            onClick = { viewModel.markReminderCompleted(shop.shopNumber) },
-                                                            colors = ButtonDefaults.buttonColors(
-                                                                containerColor = MaterialTheme.colorScheme.primary
-                                                            ),
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .testTag("dismiss_reminder_${shop.shopNumber}"),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        ) {
-                                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                            Spacer(modifier = Modifier.width(6.dp))
-                                                            Text("Mark as Visited / Completed", fontSize = 12.sp)
                                                         }
                                                     }
                                                 }

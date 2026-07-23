@@ -42,12 +42,21 @@ data class AppError(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+data class LastSaleProduct(
+    val productName: String,
+    val productVariety: String,
+    val sellingPrice: Double,
+    val packetsSupplied: Int,
+    val remarks: String?
+)
+
 data class ReminderItem(
     val shop: com.example.data.ShopMaster,
     val lastSaleDate: Long,
     val daysSince: Int,
     val recommendedProducts: Map<String, Int>,
-    val interval: Int
+    val interval: Int,
+    val lastSaleProducts: List<LastSaleProduct>
 )
 
 
@@ -260,22 +269,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val dueReminders: StateFlow<List<ReminderItem>> = combine(
         repository.allShops,
         repository.allSales,
+        repository.allProducts,
         _isReminderEnabled,
         _defaultReminderInterval
-    ) { shops, sales, enabled, defaultInterval ->
+    ) { shops, sales, products, enabled, defaultInterval ->
         if (!enabled) return@combine emptyList<ReminderItem>()
 
         val now = System.currentTimeMillis()
         val oneDayMs = 24 * 60 * 60 * 1000L
 
-        shops.mapNotNull { shop ->
-            val shopSales = sales.filter { it.shopNumber == shop.shopNumber }
-            val lastSaleDate = shopSales.maxOfOrNull { it.entryDate } ?: shop.startingDate
-            
-            val lastCompletedTime = prefs.getLong("completed_reminder_shop_${shop.shopNumber}", 0L)
-            val effectiveLastDate = maxOf(lastSaleDate, lastCompletedTime)
+        val installTime = prefs.getLong("reminder_feature_install_time", 0L).let {
+            if (it == 0L) {
+                val currentTime = System.currentTimeMillis()
+                prefs.edit().putLong("reminder_feature_install_time", currentTime).apply()
+                currentTime
+            } else {
+                it
+            }
+        }
 
-            val daysSince = ((now - effectiveLastDate) / oneDayMs).toInt()
+        // Group sales by shopNumber for O(1) performance lookup on 1000+ shops
+        val salesByShop = sales.groupBy { it.shopNumber }
+
+        shops.mapNotNull { shop ->
+            val allShopSales = salesByShop[shop.shopNumber] ?: emptyList()
+            // Option A (Preferred): Only consider sales created after this feature is installed
+            val shopSales = allShopSales.filter { it.entryDate >= installTime }
+
+            if (shopSales.isEmpty()) return@mapNotNull null
+
+            val lastSaleDate = shopSales.maxOfOrNull { it.entryDate } ?: shop.startingDate
+            val lastCompletedTime = prefs.getLong("completed_reminder_shop_${shop.shopNumber}", 0L)
+
+            // Critical check for Requirement 6 & 8: 
+            // If we already marked a reminder as completed on or after the last sale date, 
+            // do NOT repeatedly notify for that sale. Wait until a new sale is created.
+            if (lastCompletedTime >= lastSaleDate) {
+                return@mapNotNull null
+            }
+
+            val daysSince = ((now - lastSaleDate) / oneDayMs).toInt()
             val interval = shop.customReminderInterval ?: defaultInterval
 
             if (daysSince >= interval) {
@@ -286,12 +319,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         if (avg.isNaN()) 0 else kotlin.math.ceil(avg).toInt()
                     }
 
+                // Get details of the latest sale
+                val latestSales = shopSales.filter { it.entryDate == lastSaleDate }
+                val lastSaleProducts = latestSales.map { sale ->
+                    val matchingProduct = products.find { it.productName == sale.productName }
+                    val variety = matchingProduct?.productCategory ?: "Standard"
+                    LastSaleProduct(
+                        productName = sale.productName,
+                        productVariety = variety,
+                        sellingPrice = sale.ratePerPacket,
+                        packetsSupplied = sale.packetsGiven,
+                        remarks = sale.remarks
+                    )
+                }
+
                 ReminderItem(
                     shop = shop,
                     lastSaleDate = lastSaleDate,
                     daysSince = daysSince,
                     recommendedProducts = productAverages,
-                    interval = interval
+                    interval = interval,
+                    lastSaleProducts = lastSaleProducts
                 )
             } else {
                 null
@@ -305,6 +353,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val currentEnabled = _isReminderEnabled.value
         _isReminderEnabled.value = !currentEnabled
         _isReminderEnabled.value = currentEnabled
+    }
+
+    fun markAllRemindersCompleted() {
+        val currentReminders = dueReminders.value
+        if (currentReminders.isNotEmpty()) {
+            val editor = prefs.edit()
+            val now = System.currentTimeMillis()
+            currentReminders.forEach { item ->
+                editor.putLong("completed_reminder_shop_${item.shop.shopNumber}", now)
+            }
+            editor.apply()
+            
+            // Toggle state briefly to force emission
+            val currentEnabled = _isReminderEnabled.value
+            _isReminderEnabled.value = !currentEnabled
+            _isReminderEnabled.value = currentEnabled
+        }
     }
 
     // --- Shop Remarks State & Flows ---
