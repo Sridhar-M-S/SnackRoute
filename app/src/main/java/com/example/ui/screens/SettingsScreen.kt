@@ -381,23 +381,50 @@ fun SettingsScreen(
                     if (isReminderEnabled) {
                         Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
 
-                        Text("Default Reminder Interval", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        var intervalInput by remember(defaultReminderInterval) {
-                            mutableStateOf(defaultReminderInterval.toString())
+                        val notifyAfterDays by viewModel.notifyAfterDays.collectAsState()
+                        val keepVisibleDays by viewModel.keepVisibleDays.collectAsState()
+
+                        Text("Notify After Sale (Days)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        var notifyAfterInput by remember(notifyAfterDays) {
+                            mutableStateOf(notifyAfterDays.toString())
                         }
                         OutlinedTextField(
-                            value = intervalInput,
+                            value = notifyAfterInput,
                             onValueChange = { newValue ->
                                 if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
-                                    intervalInput = newValue
+                                    notifyAfterInput = newValue
                                     newValue.toIntOrNull()?.let {
-                                        viewModel.updateDefaultReminderInterval(it)
+                                        viewModel.updateNotifyAfterDays(it)
                                     }
                                 }
                             },
                             placeholder = { Text("7") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth().testTag("default_reminder_interval_input"),
+                            modifier = Modifier.fillMaxWidth().testTag("notify_after_sale_days_input"),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text("Keep Reminder Visible (Days)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        var keepVisibleInput by remember(keepVisibleDays) {
+                            mutableStateOf(keepVisibleDays.toString())
+                        }
+                        OutlinedTextField(
+                            value = keepVisibleInput,
+                            onValueChange = { newValue ->
+                                if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                                    keepVisibleInput = newValue
+                                    newValue.toIntOrNull()?.let {
+                                        viewModel.updateKeepVisibleDays(it)
+                                    }
+                                }
+                            },
+                            placeholder = { Text("30") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("keep_reminder_visible_days_input"),
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
                             )
@@ -477,6 +504,24 @@ fun SettingsScreen(
                                 },
                                 modifier = Modifier.testTag("time_picker_dialog")
                             )
+                        }
+
+                        Button(
+                            onClick = { viewModel.sendTestNotification() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("send_test_notification_button"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Send Test Notification", fontWeight = FontWeight.Bold)
                         }
 
                         Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))

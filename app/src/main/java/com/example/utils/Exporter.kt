@@ -402,7 +402,8 @@ object Exporter {
             val headers = listOf(
                 "Date", "Shop Number", "Shop Name", "Location Number", "Product Name",
                 "Packets Given", "Packets Returned", "Packets Sold", "Rate", "Total Amount",
-                "Profit Per Packet", "Total Profit", "Status", "Remarks"
+                "Profit Per Packet", "Total Profit", "Status", "Remarks",
+                "Original Packet Rate", "Custom Selling Price", "Production Cost Used"
             )
             val headerRow = sheet.createRow(0)
             for (i in headers.indices) {
@@ -430,6 +431,16 @@ object Exporter {
                 row.createCell(11).setCellValue(sales.totalProfit)
                 row.createCell(12).setCellValue(sales.status)
                 row.createCell(13).setCellValue(sales.remarks ?: "")
+                
+                if (sales.originalPacketRate != null) {
+                    row.createCell(14).setCellValue(sales.originalPacketRate)
+                }
+                if (sales.customSellingPrice != null) {
+                    row.createCell(15).setCellValue(sales.customSellingPrice)
+                }
+                if (sales.productionCostUsed != null) {
+                    row.createCell(16).setCellValue(sales.productionCostUsed)
+                }
             }
             
             // Set fixed column widths
@@ -447,6 +458,9 @@ object Exporter {
             sheet.setColumnWidth(11, 4500) // Total Profit
             sheet.setColumnWidth(12, 4000) // Status
             sheet.setColumnWidth(13, 8000) // Remarks
+            sheet.setColumnWidth(14, 5000) // Original Packet Rate
+            sheet.setColumnWidth(15, 5000) // Custom Selling Price
+            sheet.setColumnWidth(16, 5000) // Production Cost Used
             
             FileOutputStream(file).use { out ->
                 workbook.write(out)
@@ -1297,22 +1311,25 @@ object Exporter {
                 val cell = headerRow.getCell(c)
                 val headerVal = cell?.stringCellValue?.trim()
                 if (!headerVal.isNullOrEmpty()) {
-                    headerMap[headerVal] = c
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
                 }
             }
             
-            val shopNoIdx = headerMap["Shop No"] ?: headerMap["Shop Number"] ?: headerMap["ShopNo"]
-            val entryDateIdx = headerMap["Entry Date (Today)"] ?: headerMap["Entry Date"] ?: headerMap["Date"]
-            val shopNameIdx = headerMap["Shop Name"] ?: headerMap["Store Name"]
-            val productTypeIdx = headerMap["Product Type"] ?: headerMap["Product Name"] ?: headerMap["Product"]
-            val packetsGivenIdx = headerMap["Packets Given"] ?: headerMap["Given"]
-            val packetsReturnIdx = headerMap["Packets Return"] ?: headerMap["Packets Returned"] ?: headerMap["Return"]
-            val rateIdx = headerMap["Rate per Packet (₹)"] ?: headerMap["Rate per Packet"] ?: headerMap["Rate"]
-            val totalAmountIdx = headerMap["Total Amount (₹)"] ?: headerMap["Total Amount"] ?: headerMap["Amount"]
-            val statusIdx = headerMap["Status"]
-            val remarksIdx = headerMap["Remarks"] ?: headerMap["Notes"]
-            val profitPerPacketIdx = headerMap["Profit Per Packet"] ?: headerMap["ProfitPerPacket"] ?: headerMap["Profit Per Unit"] ?: headerMap["ProfitPerUnit"]
-            val totalProfitIdx = headerMap["Total Profit"] ?: headerMap["TotalProfit"] ?: headerMap["Profit"]
+            val shopNoIdx = headerMap["shop no"] ?: headerMap["shop number"] ?: headerMap["shopno"]
+            val entryDateIdx = headerMap["entry date (today)"] ?: headerMap["entry date"] ?: headerMap["date"]
+            val shopNameIdx = headerMap["shop name"] ?: headerMap["store name"]
+            val productTypeIdx = headerMap["product type"] ?: headerMap["product name"] ?: headerMap["product"]
+            val packetsGivenIdx = headerMap["packets given"] ?: headerMap["given"]
+            val packetsReturnIdx = headerMap["packets return"] ?: headerMap["packets returned"] ?: headerMap["return"]
+            val rateIdx = headerMap["rate per packet (₹)"] ?: headerMap["rate per packet"] ?: headerMap["rate"]
+            val totalAmountIdx = headerMap["total amount (₹)"] ?: headerMap["total amount"] ?: headerMap["amount"]
+            val statusIdx = headerMap["status"]
+            val remarksIdx = headerMap["remarks"] ?: headerMap["notes"]
+            val profitPerPacketIdx = headerMap["profit per packet"] ?: headerMap["profitperpacket"] ?: headerMap["profit per unit"] ?: headerMap["profitperunit"]
+            val totalProfitIdx = headerMap["total profit"] ?: headerMap["totalprofit"] ?: headerMap["profit"]
+            val originalPacketRateIdx = headerMap["original packet rate"] ?: headerMap["originalpacketrate"]
+            val customSellingPriceIdx = headerMap["custom selling price"] ?: headerMap["customsellingprice"]
+            val productionCostUsedIdx = headerMap["production cost used"] ?: headerMap["productioncostused"]
             
             if (shopNoIdx == null || productTypeIdx == null || packetsGivenIdx == null || rateIdx == null) {
                 throw Exception("Missing required column headers: Shop No, Product Type, Packets Given, and Rate per Packet are required.")
@@ -1337,6 +1354,13 @@ object Exporter {
                 val remarksStr = if (remarksIdx != null) getCellValueAsString(row, remarksIdx)?.trim() ?: "" else ""
                 val profitPerPacketStr = if (profitPerPacketIdx != null) getCellValueAsString(row, profitPerPacketIdx)?.trim() ?: "" else ""
                 val totalProfitStr = if (totalProfitIdx != null) getCellValueAsString(row, totalProfitIdx)?.trim() ?: "" else ""
+                val originalPacketRateStr = if (originalPacketRateIdx != null) getCellValueAsString(row, originalPacketRateIdx)?.trim() ?: "" else ""
+                val customSellingPriceStr = if (customSellingPriceIdx != null) getCellValueAsString(row, customSellingPriceIdx)?.trim() ?: "" else ""
+                val productionCostUsedStr = if (productionCostUsedIdx != null) getCellValueAsString(row, productionCostUsedIdx)?.trim() ?: "" else ""
+                
+                val originalPacketRate = originalPacketRateStr.toDoubleOrNull()
+                val customSellingPrice = customSellingPriceStr.toDoubleOrNull()
+                val productionCostUsed = productionCostUsedStr.toDoubleOrNull()
                 
                 val originalRowData = listOf(
                     shopNo, entryDateStr, prodType, packetsGivenStr, packetsReturnStr, rateStr, totalAmountStr, statusStr, remarksStr, profitPerPacketStr, totalProfitStr
@@ -1429,15 +1453,19 @@ object Exporter {
                 var profitPerPacket = excelProfitPerPacket
                 var totalProfit = excelTotalProfit
                 
-                if (profitPerPacket == null || totalProfit == null) {
+                // If both are null/empty, we calculate it from product prices
+                if (profitPerPacket == null && totalProfit == null) {
                     val productPrices = productPricesMap[product.id] ?: emptyList()
                     val priceConfig = productPrices.find { it.sellingPrice == ratePerPacket }
                     val defaultProfitPerPacket = priceConfig?.profitPerPacket ?: 0.0
                     
-                    if (profitPerPacket == null) {
-                        profitPerPacket = defaultProfitPerPacket
-                    }
-                    if (totalProfit == null) {
+                    profitPerPacket = defaultProfitPerPacket
+                    totalProfit = packetsSold * defaultProfitPerPacket
+                } else {
+                    // At least one is present in Excel!
+                    if (totalProfit != null && profitPerPacket == null) {
+                        profitPerPacket = if (packetsSold > 0) totalProfit / packetsSold else 0.0
+                    } else if (profitPerPacket != null && totalProfit == null) {
                         totalProfit = packetsSold * profitPerPacket
                     }
                 }
@@ -1461,10 +1489,13 @@ object Exporter {
                     packetsSold = packetsSold,
                     ratePerPacket = ratePerPacket,
                     totalAmount = totalAmount,
-                    profitPerPacket = profitPerPacket,
-                    totalProfit = totalProfit,
+                    profitPerPacket = profitPerPacket ?: 0.0,
+                    totalProfit = totalProfit ?: 0.0,
                     status = status,
-                    remarks = remarksStr.ifEmpty { null }
+                    remarks = remarksStr.ifEmpty { null },
+                    originalPacketRate = originalPacketRate,
+                    customSellingPrice = customSellingPrice,
+                    productionCostUsed = productionCostUsed
                 )
                 
                 successSales.add(salesEntry)

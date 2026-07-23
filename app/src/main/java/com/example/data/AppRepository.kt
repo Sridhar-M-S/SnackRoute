@@ -77,6 +77,7 @@ class AppRepository(
 
     // --- Shop Master Queries ---
     val allShops: Flow<List<ShopMaster>> = shopDao.getAllShops()
+    fun getShopsWithLastSale(): Flow<List<ShopWithLastSale>> = shopDao.getShopsWithLastSale()
     suspend fun insertShop(shop: ShopMaster) {
         database.withTransaction {
             shopDao.insertShop(shop)
@@ -177,6 +178,7 @@ class AppRepository(
 
     // --- Sales Entry Queries ---
     val allSales: Flow<List<SalesEntry>> = salesDao.getAllSales()
+    suspend fun getSalesForShopsDirect(shopNumbers: List<String>): List<SalesEntry> = salesDao.getSalesForShopsDirect(shopNumbers)
     suspend fun insertSales(sales: SalesEntry) = salesDao.insertSales(sales)
     suspend fun insertSalesList(salesList: List<SalesEntry>) = salesDao.insertSalesList(salesList)
     suspend fun updateSales(sales: SalesEntry) = salesDao.updateSales(sales)

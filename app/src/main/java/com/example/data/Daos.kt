@@ -55,7 +55,23 @@ interface ShopDao {
 
     @Query("DELETE FROM shops")
     suspend fun deleteAllShops()
+
+    @Query("""
+        SELECT s.*, m.lastSaleDate 
+        FROM shops s 
+        INNER JOIN (
+            SELECT shopNumber, MAX(entryDate) as lastSaleDate 
+            FROM sales 
+            GROUP BY shopNumber
+        ) m ON s.shopNumber = m.shopNumber
+    """)
+    fun getShopsWithLastSale(): Flow<List<ShopWithLastSale>>
 }
+
+data class ShopWithLastSale(
+    @Embedded val shop: ShopMaster,
+    val lastSaleDate: Long
+)
 
 @Dao
 interface ProductDao {
@@ -139,6 +155,9 @@ interface SalesDao {
 
     @Query("UPDATE sales SET shopNumber = :newShopNumber WHERE shopNumber = :oldShopNumber")
     suspend fun updateSalesShopNumber(oldShopNumber: String, newShopNumber: String)
+
+    @Query("SELECT * FROM sales WHERE shopNumber IN (:shopNumbers) ORDER BY entryDate DESC")
+    suspend fun getSalesForShopsDirect(shopNumbers: List<String>): List<SalesEntry>
 }
 
 @Dao

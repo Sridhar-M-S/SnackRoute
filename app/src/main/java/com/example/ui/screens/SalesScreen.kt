@@ -750,6 +750,7 @@ fun SalesScreen(
 
                                     saleItems = sessionSales.map { s ->
                                         android.util.Log.d("SalesEdit", "Profit value loaded into the Edit Sales screen: id=${s.id}, productName=${s.productName}, profitPerPacket=${s.profitPerPacket}")
+                                        val isCustom = s.originalPacketRate != null
                                         SaleItemState(
                                             id = java.util.UUID.randomUUID().toString(),
                                             dbId = s.id,
@@ -757,9 +758,12 @@ fun SalesScreen(
                                             ratePerPacketStr = s.ratePerPacket.toString(),
                                             packetsGivenStr = s.packetsGiven.toString(),
                                             packetsReturnedStr = s.packetsReturned.toString(),
-                                            customProfitStr = s.profitPerPacket.toString(),
-                                            isCustomRate = false,
-                                            isProfitOverridden = true
+                                            customProfitStr = String.format(java.util.Locale.US, "%.2f", s.profitPerPacket),
+                                            isCustomRate = isCustom,
+                                            isProfitOverridden = isCustom,
+                                            originalPacketRate = s.originalPacketRate,
+                                            customSellingPrice = s.customSellingPrice,
+                                            productionCostUsed = s.productionCostUsed
                                         )
                                     }
                                     showAddEditScreen = true
@@ -1214,7 +1218,10 @@ fun SalesScreen(
                                     totalProfit = finalProfitTotal,
                                     status = payStatus,
                                     remarks = remarks.trim().ifEmpty { null },
-                                    sessionId = sessionId
+                                    sessionId = sessionId,
+                                    originalPacketRate = itm.originalPacketRate,
+                                    customSellingPrice = itm.customSellingPrice,
+                                    productionCostUsed = itm.productionCostUsed
                                 )
                             }
 
@@ -1541,7 +1548,10 @@ data class SaleItemState(
     val isProfitOverridden: Boolean = false,
     val productError: String? = null,
     val rateError: String? = null,
-    val packetsError: String? = null
+    val packetsError: String? = null,
+    val originalPacketRate: Double? = null,
+    val customSellingPrice: Double? = null,
+    val productionCostUsed: Double? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1772,6 +1782,202 @@ fun SaleItemRow(
             // Rate per packet selection (dropdown + custom inputs)
             var rateMenuExpanded by remember { mutableStateOf(false) }
             val isCustomRate = item.isCustomRate
+            var showCustomPriceDialog by remember { mutableStateOf(false) }
+
+            if (showCustomPriceDialog) {
+                var selectedVariant by remember { mutableStateOf<com.example.data.ProductPrice?>(
+                    item.originalPacketRate?.let { rate -> availablePrices.find { it.sellingPrice == rate } } ?: availablePrices.firstOrNull()
+                ) }
+                var customPriceInput by remember { mutableStateOf(item.customSellingPrice?.toString() ?: item.ratePerPacketStr) }
+                var errorText by remember { mutableStateOf<String?>(null) }
+
+                AlertDialog(
+                    onDismissRequest = { showCustomPriceDialog = false },
+                    title = { Text("Configure Custom Price", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                "Step 1: Choose Packet Rate Variant",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            
+                            if (availablePrices.isEmpty()) {
+                                Text(
+                                    "No price variants configured for this product. Please add them first.",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    availablePrices.forEach { price ->
+                                        val rateInt = price.sellingPrice.toInt()
+                                        val rateFormatted = if (price.sellingPrice % 1.0 == 0.0) "$rateInt" else "${price.sellingPrice}"
+                                        val isSelected = selectedVariant?.priceId == price.priceId
+                                        
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { selectedVariant = price },
+                                            shape = MaterialTheme.shapes.small,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                RadioButton(
+                                                    selected = isSelected,
+                                                    onClick = { selectedVariant = price }
+                                                )
+                                                Text(
+                                                    "₹$rateFormatted Packet",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (selectedVariant != null) {
+                                val variant = selectedVariant!!
+                                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                                val latestCalcForVariant = if (isDynamicProfitEnabled) {
+                                    calculations
+                                        .filter { it.productPriceId == variant.priceId && it.calculationDate <= saleDateStr }
+                                        .maxByOrNull { it.calculationDate }
+                                } else null
+                                
+                                val variantProductionCost = if (latestCalcForVariant != null) {
+                                    latestCalcForVariant.totalProductionCost
+                                } else {
+                                    variant.sellingPrice - variant.profitPerPacket
+                                }
+
+                                Text(
+                                    "Step 2: Enter Custom Selling Price",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+
+                                OutlinedTextField(
+                                    value = customPriceInput,
+                                    onValueChange = {
+                                        customPriceInput = it
+                                        errorText = null
+                                    },
+                                    label = { Text("Custom Selling Price (₹)") },
+                                    placeholder = { Text("e.g. 3.50") },
+                                    isError = errorText != null,
+                                    supportingText = errorText?.let { { Text(it) } },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                // Real-time computations
+                                val enteredPrice = customPriceInput.toDoubleOrNull() ?: 0.0
+                                val computedProfit = enteredPrice - variantProductionCost
+                                
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("Production Cost:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("₹${String.format(Locale.US, "%.2f", variantProductionCost)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("Calculated Profit:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            val profitColor = if (computedProfit >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                            Text("₹${String.format(Locale.US, "%.2f", computedProfit)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = profitColor)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val variant = selectedVariant
+                                if (variant == null) {
+                                    errorText = "Please select a packet rate variant first."
+                                    return@TextButton
+                                }
+                                val priceDouble = customPriceInput.toDoubleOrNull()
+                                if (priceDouble == null || priceDouble <= 0.0) {
+                                    errorText = "Please enter a valid selling price greater than 0."
+                                    return@TextButton
+                                }
+
+                                // Calculate production cost
+                                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                                val latestCalcForVariant = if (isDynamicProfitEnabled) {
+                                    calculations
+                                        .filter { it.productPriceId == variant.priceId && it.calculationDate <= saleDateStr }
+                                        .maxByOrNull { it.calculationDate }
+                                } else null
+                                
+                                val variantProductionCost = if (latestCalcForVariant != null) {
+                                    latestCalcForVariant.totalProductionCost
+                                } else {
+                                    variant.sellingPrice - variant.profitPerPacket
+                                }
+
+                                val calculatedProfit = priceDouble - variantProductionCost
+
+                                onItemChange(item.copy(
+                                    ratePerPacketStr = customPriceInput,
+                                    customProfitStr = String.format(Locale.US, "%.2f", calculatedProfit),
+                                    isCustomRate = true,
+                                    isProfitOverridden = true,
+                                    originalPacketRate = variant.sellingPrice,
+                                    customSellingPrice = priceDouble,
+                                    productionCostUsed = variantProductionCost,
+                                    rateError = null
+                                ))
+                                showCustomPriceDialog = false
+                            }
+                        ) {
+                            Text("OK")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCustomPriceDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExposedDropdownMenuBox(
@@ -1779,7 +1985,13 @@ fun SaleItemRow(
                     onExpandedChange = { rateMenuExpanded = !rateMenuExpanded }
                 ) {
                     val selectedRateText = if (isCustomRate) {
-                        "Custom Price"
+                        if (item.originalPacketRate != null) {
+                            val rateInt = item.originalPacketRate.toInt()
+                            val rateFormatted = if (item.originalPacketRate % 1.0 == 0.0) "$rateInt" else "${item.originalPacketRate}"
+                            "Custom Price (₹$rateFormatted Packet)"
+                        } else {
+                            "Custom Price"
+                        }
                     } else {
                         availablePrices.find { it.sellingPrice.toString() == item.ratePerPacketStr }?.let { "₹${it.sellingPrice}" } ?: "Select Rate"
                     }
@@ -1815,6 +2027,9 @@ fun SaleItemRow(
                                         ratePerPacketStr = price.sellingPrice.toString(),
                                         customProfitStr = String.format(Locale.US, "%.2f", profitToUse),
                                         isCustomRate = false,
+                                        originalPacketRate = null,
+                                        customSellingPrice = null,
+                                        productionCostUsed = null,
                                         rateError = null
                                     ))
                                     rateMenuExpanded = false
@@ -1824,12 +2039,7 @@ fun SaleItemRow(
                         DropdownMenuItem(
                             text = { Text("Custom Price") },
                             onClick = {
-                                onItemChange(item.copy(
-                                    ratePerPacketStr = "",
-                                    customProfitStr = "",
-                                    isCustomRate = true,
-                                    rateError = null
-                                ))
+                                showCustomPriceDialog = true
                                 rateMenuExpanded = false
                             }
                         )
@@ -1844,11 +2054,24 @@ fun SaleItemRow(
                         OutlinedTextField(
                             value = item.ratePerPacketStr,
                             onValueChange = {
-                                onItemChange(item.copy(
-                                    ratePerPacketStr = it,
-                                    rateError = null,
-                                    isProfitOverridden = false // Reset override to trigger automatic recalculation
-                                ))
+                                if (item.originalPacketRate != null) {
+                                    val newPrice = it.toDoubleOrNull() ?: 0.0
+                                    val prodCost = item.productionCostUsed ?: 0.0
+                                    val calculatedProfit = newPrice - prodCost
+                                    onItemChange(item.copy(
+                                        ratePerPacketStr = it,
+                                        customSellingPrice = it.toDoubleOrNull(),
+                                        customProfitStr = String.format(Locale.US, "%.2f", calculatedProfit),
+                                        rateError = null,
+                                        isProfitOverridden = true
+                                    ))
+                                } else {
+                                    onItemChange(item.copy(
+                                        ratePerPacketStr = it,
+                                        rateError = null,
+                                        isProfitOverridden = false // Reset override to trigger automatic recalculation
+                                    ))
+                                }
                             },
                             label = { Text("Selling Price*") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1864,6 +2087,7 @@ fun SaleItemRow(
                                 ))
                             },
                             label = { Text("Profit*") },
+                            readOnly = item.originalPacketRate != null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f),
                             singleLine = true

@@ -72,7 +72,10 @@ data class SalesEntry(
     val totalProfit: Double, // Packets Sold * Profit Per Packet
     val status: String, // Paid, Pending, Partially Paid
     val remarks: String? = null,
-    val sessionId: String? = null
+    val sessionId: String? = null,
+    val originalPacketRate: Double? = null,
+    val customSellingPrice: Double? = null,
+    val productionCostUsed: Double? = null
 ) {
     val entryDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(entryDate))
