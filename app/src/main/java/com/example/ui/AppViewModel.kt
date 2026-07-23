@@ -60,6 +60,32 @@ data class ReminderItem(
     val daysDifference: Int = 0
 )
 
+data class InAppNotification(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false
+) {
+    fun toSerializedString(): String {
+        return "$id||$title||$message||$timestamp||$isRead"
+    }
+
+    companion object {
+        fun fromSerializedString(serialized: String): InAppNotification? {
+            val parts = serialized.split("||")
+            if (parts.size < 5) return null
+            return InAppNotification(
+                id = parts[0],
+                title = parts[1],
+                message = parts[2],
+                timestamp = parts[3].toLongOrNull() ?: System.currentTimeMillis(),
+                isRead = parts[4].toBoolean()
+            )
+        }
+    }
+}
+
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -242,6 +268,45 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _isOfflineQueueActive = MutableStateFlow<Boolean>(false)
     val isOfflineQueueActive: StateFlow<Boolean> = _isOfflineQueueActive.asStateFlow()
 
+    private val _inAppNotifications = MutableStateFlow<List<InAppNotification>>(emptyList())
+    val inAppNotifications: StateFlow<List<InAppNotification>> = _inAppNotifications.asStateFlow()
+
+    private fun loadInAppNotifications() {
+        val serializedSet = prefs.getStringSet("in_app_notifications_set", emptySet()) ?: emptySet()
+        val list = serializedSet.mapNotNull { InAppNotification.fromSerializedString(it) }
+            .sortedByDescending { it.timestamp }
+        _inAppNotifications.value = list
+    }
+
+    private fun saveInAppNotifications(list: List<InAppNotification>) {
+        val serializedSet = list.map { it.toSerializedString() }.toSet()
+        prefs.edit().putStringSet("in_app_notifications_set", serializedSet).apply()
+        _inAppNotifications.value = list.sortedByDescending { it.timestamp }
+    }
+
+    fun addInAppNotification(title: String, message: String) {
+        val newNotification = InAppNotification(title = title, message = message)
+        val current = _inAppNotifications.value.toMutableList()
+        current.add(0, newNotification)
+        saveInAppNotifications(current)
+    }
+
+    fun markInAppNotificationRead(id: String) {
+        val updated = _inAppNotifications.value.map {
+            if (it.id == id) it.copy(isRead = true) else it
+        }
+        saveInAppNotifications(updated)
+    }
+
+    fun deleteInAppNotification(id: String) {
+        val updated = _inAppNotifications.value.filter { it.id != id }
+        saveInAppNotifications(updated)
+    }
+
+    fun clearAllInAppNotifications() {
+        saveInAppNotifications(emptyList())
+    }
+
     // --- Sales Reminder States & Flows ---
     private val _isReminderEnabled = MutableStateFlow(prefs.getBoolean("sales_reminder_enabled", true))
     val isReminderEnabled: StateFlow<Boolean> = _isReminderEnabled.asStateFlow()
@@ -298,8 +363,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val context = getApplication<Application>().applicationContext
         com.example.utils.NotificationHelper.showNotification(
             context,
-            "Test Reminder",
-            "Sales reminder notifications are working successfully."
+            "Test Sales Reminder",
+            "This is a test reminder notification."
+        )
+        addInAppNotification(
+            "Test Sales Reminder",
+            "This is a test reminder notification."
         )
     }
 
@@ -324,12 +393,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (lastCompletedTime >= lastSaleDate) return@mapNotNull null
 
             val interval = shop.customReminderInterval ?: notifyAfter
-            val targetMidnight = getMidnight(lastSaleDate + interval * oneDayMs)
-            val daysDifference = ((targetMidnight - nowMidnight) / oneDayMs).toInt()
+            val lastSaleMidnight = getMidnight(lastSaleDate)
+            val daysSince = ((nowMidnight - lastSaleMidnight) / oneDayMs).toInt()
 
-            if (daysDifference < -keepVisible) return@mapNotNull null
+            if (daysSince < interval) return@mapNotNull null
+            if (daysSince > keepVisible) return@mapNotNull null
 
-            Triple(item, daysDifference, interval)
+            val daysDifference = interval - daysSince
+
+            Triple(item, daysSince, interval)
         }
 
         if (activeShopItems.isEmpty()) return@combine emptyList<ReminderItem>()
@@ -338,7 +410,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val salesForActiveShops = repository.getSalesForShopsDirect(activeShopNumbers)
         val salesByShop = salesForActiveShops.groupBy { it.shopNumber }
 
-        activeShopItems.map { (item, daysDifference, interval) ->
+        activeShopItems.map { (item, daysSince, interval) ->
             val shop = item.shop
             val lastSaleDate = item.lastSaleDate
             val shopSales = salesByShop[shop.shopNumber] ?: emptyList()
@@ -362,7 +434,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            val daysSince = ((now - lastSaleDate) / oneDayMs).toInt()
+            val daysDifference = interval - daysSince
 
             ReminderItem(
                 shop = shop,
@@ -397,6 +469,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun markAllRemindersCompleted() {
         val shopNumbers = dueReminders.value.map { it.shop.shopNumber }
+        if (shopNumbers.isNotEmpty()) {
+            markRemindersCompleted(shopNumbers)
+        }
+    }
+
+    fun markTodayRemindersCompleted(todayReminders: List<ReminderItem>) {
+        val shopNumbers = todayReminders.map { it.shop.shopNumber }
+        if (shopNumbers.isNotEmpty()) {
+            markRemindersCompleted(shopNumbers)
+        }
+    }
+
+    fun markMissedRemindersCompleted(missedReminders: List<ReminderItem>) {
+        val shopNumbers = missedReminders.map { it.shop.shopNumber }
         if (shopNumbers.isNotEmpty()) {
             markRemindersCompleted(shopNumbers)
         }
@@ -1870,6 +1956,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        loadInAppNotifications()
+
+        viewModelScope.launch(Dispatchers.Default) {
+            combine(dueReminders, repository.allLocations) { reminders, locations ->
+                Pair(reminders, locations)
+            }.collect { (reminders, locations) ->
+                val context = getApplication<Application>().applicationContext
+                val locationMap = locations.associate { it.locationNumber to it.locationName }
+                reminders.forEach { reminder ->
+                    if (reminder.daysSince == reminder.interval) {
+                        val shop = reminder.shop
+                        val lastSaleDate = reminder.lastSaleDate
+                        val prefKey = "notified_due_${shop.shopNumber}_$lastSaleDate"
+                        if (!prefs.getBoolean(prefKey, false)) {
+                            prefs.edit().putBoolean(prefKey, true).apply()
+                            
+                            val locName = locationMap[shop.locationNumber] ?: "Location ${shop.locationNumber}"
+                            val title = "Sales Reminder: ${shop.storeName}"
+                            val body = "A sales reminder is due today for ${shop.storeName} in $locName."
+                            
+                            com.example.utils.NotificationHelper.showNotification(context, title, body)
+                            addInAppNotification(title, body)
+                        }
+                    }
+                }
+            }
+        }
+
         // Initialize Google Sign-In account on launch
         _googleSignInAccount.value = GoogleSignIn.getLastSignedInAccount(application)
 

@@ -78,7 +78,8 @@ fun DashboardScreen(
     var activeCelebration by remember { mutableStateOf<GamificationEvent?>(null) }
 
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
-    val reminderCount = dueReminders.size
+    val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
+    val reminderCount = dueReminders.size + inAppNotifications.count { !it.isRead }
 
     val infiniteTransition = rememberInfiniteTransition(label = "bellPulse")
     val bellScale by infiniteTransition.animateFloat(
