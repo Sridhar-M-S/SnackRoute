@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -146,6 +148,11 @@ fun SalesScreen(
         }
         list
     }
+
+    val summaryTotalSales = remember(filteredSales) { filteredSales.sumOf { it.totalAmount } }
+    val summaryTotalProfit = remember(filteredSales) { filteredSales.sumOf { it.totalProfit } }
+    val summaryTotalPackets = remember(filteredSales) { filteredSales.sumOf { it.packetsSold } }
+    val summaryTotalRecords = remember(filteredSales) { filteredSales.size }
 
     // --- Excel Import Summary Dialog ---
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
@@ -545,6 +552,62 @@ fun SalesScreen(
                                     Icon(Icons.Default.Clear, contentDescription = "Clear filters", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
+                        }
+                    }
+                }
+
+                // --- Sales Summary Section ---
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = CardDefaults.outlinedCardBorder()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SalesSummaryCard(
+                                label = "Total Sales",
+                                value = "₹${"%.2f".format(summaryTotalSales)}",
+                                icon = Icons.Default.TrendingUp,
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.weight(1f).testTag("summary_total_sales")
+                            )
+                            SalesSummaryCard(
+                                label = "Total Profit",
+                                value = "₹${"%.2f".format(summaryTotalProfit)}",
+                                icon = Icons.Default.Payments,
+                                containerColor = Color(0xFFE8F5E9),
+                                contentColor = Color(0xFF2E7D32),
+                                modifier = Modifier.weight(1f).testTag("summary_total_profit")
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SalesSummaryCard(
+                                label = "Packets Sold",
+                                value = "$summaryTotalPackets pkts",
+                                icon = Icons.Default.ShoppingBag,
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.weight(1f).testTag("summary_total_packets")
+                            )
+                            SalesSummaryCard(
+                                label = "Total Records",
+                                value = "$summaryTotalRecords",
+                                icon = Icons.Default.ListAlt,
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.weight(1f).testTag("summary_total_records")
+                            )
                         }
                     }
                 }
@@ -1738,6 +1801,68 @@ fun SaleItemRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SalesSummaryCard(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    containerColor: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.height(68.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(contentColor.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Column(
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = contentColor.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = value,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
