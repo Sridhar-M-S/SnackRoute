@@ -2846,13 +2846,81 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun getUnitType(unit: String): String {
+        return when (unit.lowercase(Locale.getDefault())) {
+            "mg", "g", "kg" -> "Weight"
+            "ml", "l" -> "Volume"
+            else -> "Quantity"
+        }
+    }
+
+    private fun convertToGramOrMl(quantity: Double, unit: String): Double {
+        return when (unit.lowercase(Locale.getDefault())) {
+            "mg" -> quantity / 1000.0
+            "g" -> quantity
+            "kg" -> quantity * 1000.0
+            "ml" -> quantity
+            "l" -> quantity * 1000.0
+            else -> quantity
+        }
+    }
+
+    private fun calculateCostPerUsageUnit(
+        purchasePrice: Double,
+        purchaseQty: Double,
+        purchaseUnit: String,
+        usageUnit: String,
+        sealCost: Double = 0.0,
+        printingCost: Double = 0.0,
+        largeCoverDistribution: Int = 1
+    ): Double {
+        if (purchaseQty <= 0) return 0.0
+        
+        val basePurchasePrice = purchasePrice + sealCost + printingCost
+        val unitTypePurchase = getUnitType(purchaseUnit)
+        val unitTypeUsage = getUnitType(usageUnit)
+
+        if (unitTypePurchase != unitTypeUsage) {
+            val costPerPurchaseUnit = basePurchasePrice / purchaseQty
+            return costPerPurchaseUnit / largeCoverDistribution.coerceAtLeast(1).toDouble()
+        }
+
+        return when (unitTypePurchase) {
+            "Weight" -> {
+                val purchaseQtyInGrams = convertToGramOrMl(purchaseQty, purchaseUnit)
+                val costPerGram = basePurchasePrice / purchaseQtyInGrams
+                when (usageUnit.lowercase(Locale.getDefault())) {
+                    "mg" -> costPerGram / 1000.0
+                    "g" -> costPerGram
+                    "kg" -> costPerGram * 1000.0
+                    else -> costPerGram
+                }
+            }
+            "Volume" -> {
+                val purchaseQtyInMl = convertToGramOrMl(purchaseQty, purchaseUnit)
+                val costPerMl = basePurchasePrice / purchaseQtyInMl
+                when (usageUnit.lowercase(Locale.getDefault())) {
+                    "ml" -> costPerMl
+                    "l" -> costPerMl * 1000.0
+                    else -> costPerMl
+                }
+            }
+            else -> {
+                val costPerPurchaseUnit = basePurchasePrice / purchaseQty
+                costPerPurchaseUnit / largeCoverDistribution.coerceAtLeast(1).toDouble()
+            }
+        }
+    }
+
     fun recalculateHistoricalSales(effectiveDateStr: String, recalculateAll: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val sales = repository.allSales.first()
                 val productsList = repository.allProducts.first()
                 val pricesList = repository.getAllPrices()
-                val calculationsList = repository.allCalculations.first()
+                val calculationsList = repository.getAllCalculationsDirect()
+                val purchasesList = repository.getAllPurchasesDirect()
+                val allCalculationItemsList = repository.getAllCalculationItemsDirect()
                 
                 val effectiveTime = try {
                     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(effectiveDateStr)?.time ?: 0L
@@ -2865,28 +2933,79 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         return@mapNotNull null
                     }
                     
+                    val saleDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(sale.entryDate))
+                    
                     val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
                     val price = if (product != null) {
                         pricesList.find { it.productId == product.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+                            ?: pricesList.find { it.productId == product.id }
                     } else null
                     
-                    val profitPerPacket = if (price != null) {
-                        val saleDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(sale.entryDate))
-                        val calc = calculationsList
+                    // Step 1: Find applicable Recipe Version (Effective Date <= Sale Date)
+                    val calc = if (price != null) {
+                        calculationsList
                             .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
                             .maxByOrNull { it.calculationDate }
-                        calc?.profitSnapshot ?: price.profitPerPacket
-                    } else {
-                        sale.profitPerPacket // keep existing if no match
-                    }
+                            ?: calculationsList.filter { it.productPriceId == price.priceId }.minByOrNull { it.calculationDate }
+                    } else null
                     
-                    if (sale.profitPerPacket != profitPerPacket) {
-                        sale.copy(
-                            profitPerPacket = profitPerPacket,
-                            totalProfit = sale.packetsSold * profitPerPacket
-                        )
+                    if (calc != null) {
+                        // Step 2: For every ingredient inside that Recipe, find latest Purchase Price (Purchase Date <= Sale Date)
+                        val calcItems = allCalculationItemsList.filter { it.costCalculationId == calc.calculationId }
+                        var totalProductionCost = 0.0
+                        
+                        calcItems.forEach { item ->
+                            val purchase = purchasesList
+                                .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
+                                .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                                ?: purchasesList.filter { it.ingredientId == item.ingredientId }
+                                    .minWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                            
+                            val ingredientCost = if (purchase != null) {
+                                val costPerUsageUnit = calculateCostPerUsageUnit(
+                                    purchasePrice = purchase.purchasePrice,
+                                    purchaseQty = purchase.purchaseQuantity,
+                                    purchaseUnit = purchase.unit,
+                                    usageUnit = item.usageUnit,
+                                    sealCost = purchase.sealCost,
+                                    printingCost = purchase.printingCost,
+                                    largeCoverDistribution = purchase.largeCoverDistribution
+                                )
+                                costPerUsageUnit * item.usageQuantity
+                            } else {
+                                item.calculatedCost
+                            }
+                            totalProductionCost += ingredientCost
+                        }
+                        
+                        // Step 5: Profit = Selling Price - Production Cost
+                        val sellingPrice = sale.customSellingPrice ?: sale.ratePerPacket
+                        val newProfitPerPacket = sellingPrice - totalProductionCost
+                        
+                        if (sale.profitPerPacket != newProfitPerPacket || sale.productionCostUsed != totalProductionCost) {
+                            sale.copy(
+                                profitPerPacket = newProfitPerPacket,
+                                totalProfit = sale.packetsSold * newProfitPerPacket,
+                                productionCostUsed = totalProductionCost
+                            )
+                        } else {
+                            null
+                        }
                     } else {
-                        null
+                        // Fallback to original flow if no Recipe Version is configured
+                        val profitPerPacket = if (price != null) {
+                            price.profitPerPacket
+                        } else {
+                            sale.profitPerPacket
+                        }
+                        if (sale.profitPerPacket != profitPerPacket) {
+                            sale.copy(
+                                profitPerPacket = profitPerPacket,
+                                totalProfit = sale.packetsSold * profitPerPacket
+                            )
+                        } else {
+                            null
+                        }
                     }
                 }
                 
@@ -3673,6 +3792,7 @@ User Question: $userQuestion
                 }
 
                 _importSummary.value = summary
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 e.printStackTrace()
                 triggerError(
@@ -3801,6 +3921,7 @@ User Question: $userQuestion
                         largeCoverDistribution = largeCoverDistribution
                     )
                 )
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "addPurchase", "DatabaseError", e.message ?: "Failed to add purchase", "Check database connection", e)
             }
@@ -3811,6 +3932,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updatePurchase(purchase)
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "updatePurchase", "DatabaseError", e.message ?: "Failed to update purchase", "Check database connection", e)
             }
@@ -3821,6 +3943,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deletePurchase(purchase)
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "deletePurchase", "DatabaseError", e.message ?: "Failed to delete purchase", "Check database connection", e)
             }

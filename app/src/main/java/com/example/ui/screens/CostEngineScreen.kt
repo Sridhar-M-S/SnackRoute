@@ -455,6 +455,13 @@ fun CalculateCostTabContent(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    var typedUsages by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+
+    LaunchedEffect(ingredientUsages) {
+        if (ingredientUsages.isEmpty()) {
+            typedUsages = emptyMap()
+        }
+    }
 
     LaunchedEffect(selectedCategory, selectedVarietyProductId, selectedPriceId) {
         if (editingCalculation == null) {
@@ -551,12 +558,17 @@ fun CalculateCostTabContent(
 
     // Fetch snapshot items for historical versions when needed
     LaunchedEffect(variantCalculations) {
+        val newMap = historicalItemsMap.toMutableMap()
+        var updated = false
         variantCalculations.forEach { calc ->
-            if (!historicalItemsMap.containsKey(calc.calculationId)) {
-                viewModel.getCalculationItems(calc.calculationId).first().let { items ->
-                    onHistoricalItemsMapChange(historicalItemsMap + (calc.calculationId to items))
-                }
+            if (!newMap.containsKey(calc.calculationId)) {
+                val items = viewModel.getCalculationItems(calc.calculationId).first()
+                newMap[calc.calculationId] = items
+                updated = true
             }
+        }
+        if (updated) {
+            onHistoricalItemsMapChange(newMap)
         }
     }
 
@@ -568,20 +580,24 @@ fun CalculateCostTabContent(
                 val checked = mutableSetOf<Int>()
                 val usages = mutableMapOf<Int, Double>()
                 val units = mutableMapOf<Int, String>()
+                val typed = mutableMapOf<Int, String>()
                 items.forEach { item ->
                     checked.add(item.ingredientId)
                     usages[item.ingredientId] = item.usageQuantity
                     units[item.ingredientId] = item.usageUnit
+                    typed[item.ingredientId] = item.usageQuantity.toString()
                 }
                 onCheckedIngredientsChange(checked)
                 onIngredientUsagesChange(usages)
                 onIngredientUnitsChange(units)
+                typedUsages = typed
             }
         } else {
             // Reset
             onCheckedIngredientsChange(emptySet())
             onIngredientUsagesChange(emptyMap())
             onIngredientUnitsChange(emptyMap())
+            typedUsages = emptyMap()
         }
     }
 
@@ -1120,8 +1136,9 @@ fun CalculateCostTabContent(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedTextField(
-                                    value = if (usageQty == 0.0) "" else usageQty.toString(),
+                                    value = typedUsages[ingredient.id] ?: (if (usageQty == 0.0) "" else usageQty.toString()),
                                     onValueChange = { input ->
+                                        typedUsages = typedUsages + (ingredient.id to input)
                                         val qty = input.toDoubleOrNull() ?: 0.0
                                         onIngredientUsagesChange(ingredientUsages + (ingredient.id to qty))
                                     },
@@ -1463,11 +1480,55 @@ fun CalculateCostTabContent(
                                         Text("No ingredients snapshotted", fontSize = 11.sp, color = Color.Gray)
                                     } else {
                                         snapshotItems.forEach { snap ->
-                                            Text(
-                                                text = "• ${snap.ingredientName} (${snap.ingredientVariety.ifEmpty { "Generic" }}): ${snap.usageQuantity} ${snap.usageUnit} @ ₹${String.format("%.4f", snap.costPerUnitSnapshot)} = ₹${String.format("%.2f", snap.calculatedCost)}",
-                                                fontSize = 11.sp,
-                                                color = Color.DarkGray
-                                            )
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1.2f)) {
+                                                    Text(
+                                                        text = snap.ingredientName,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 12.sp
+                                                    )
+                                                    if (snap.ingredientVariety.isNotEmpty()) {
+                                                        Text(
+                                                            text = "Variety: ${snap.ingredientVariety}",
+                                                            fontSize = 10.sp,
+                                                            color = Color.Gray
+                                                        )
+                                                    }
+                                                }
+                                                Column(
+                                                    modifier = Modifier.weight(1f),
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Text(
+                                                        text = "${String.format("%.2f", snap.usageQuantity)} ${snap.usageUnit}",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                    Text(
+                                                        text = "@ ₹${String.format("%.4f", snap.costPerUnitSnapshot)} / ${snap.usageUnit}",
+                                                        fontSize = 9.sp,
+                                                        color = Color.Gray
+                                                    )
+                                                }
+                                                Column(
+                                                    modifier = Modifier.weight(0.8f),
+                                                    horizontalAlignment = Alignment.End
+                                                ) {
+                                                    Text(
+                                                        text = "₹${String.format("%.2f", snap.calculatedCost)}",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                            }
+                                            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                         }
                                     }
 
@@ -1545,6 +1606,7 @@ fun IngredientMasterTabContent(
 
     var showAddPurchaseDialog by remember { mutableStateOf(false) }
     var selectedIngredientForPurchase by remember { mutableStateOf<Ingredient?>(null) }
+    var editingPurchase by remember { mutableStateOf<IngredientPurchase?>(null) }
 
     // Filter ingredients list (Step 19: Search, Filter)
     val filteredIngredients = remember(ingredients, searchQuery, categoryFilter) {
@@ -1589,8 +1651,8 @@ fun IngredientMasterTabContent(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search ingredients...") },
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    placeholder = { Text("Search...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null, modifier = Modifier.size(20.dp)) },
                     trailingIcon = if (searchQuery.isNotEmpty() || categoryFilter != "All") {
                         {
                             IconButton(
@@ -1598,23 +1660,23 @@ fun IngredientMasterTabContent(
                                     searchQuery = ""
                                     categoryFilter = "All"
                                 },
-                                modifier = Modifier.testTag("btn_reset_filters")
+                                modifier = Modifier.testTag("btn_reset_filters").size(24.dp)
                             ) {
-                                Icon(Icons.Default.Clear, contentDescription = "Reset Filters")
+                                Icon(Icons.Default.Clear, contentDescription = "Reset Filters", modifier = Modifier.size(16.dp))
                             }
                         }
                     } else null,
-                    modifier = Modifier.weight(1.5f).testTag("ingredient_search_bar"),
+                    modifier = Modifier.height(48.dp).weight(1.5f).testTag("ingredient_search_bar"),
                     singleLine = true
                 )
 
                 var catFilterExpanded by remember { mutableStateOf(false) }
-                Box(modifier = Modifier.weight(1f)) {
+                Box(modifier = Modifier.height(48.dp).weight(1f)) {
                     OutlinedTextField(
                         value = categoryFilter,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Category") },
+                        placeholder = { Text("Category") },
                         trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
                         modifier = Modifier.fillMaxWidth().testTag("ingredient_filter_dropdown")
                     )
@@ -1793,36 +1855,60 @@ fun IngredientMasterTabContent(
                                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                                                 ) {
                                                     Column(modifier = Modifier.padding(8.dp)) {
+                                                        val isFillCover = ingredient.category == "Fill Cover"
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth(),
                                                             horizontalArrangement = Arrangement.SpaceBetween
                                                         ) {
-                                                            Text("Price: ₹${p.purchasePrice} for ${p.purchaseQuantity} ${p.unit}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                            Text(
+                                                                text = if (isFillCover) "Amount: ₹${p.purchasePrice} for ${p.purchaseQuantity} ${p.unit}" else "Price: ₹${p.purchasePrice} for ${p.purchaseQuantity} ${p.unit}",
+                                                                fontWeight = FontWeight.Bold,
+                                                                fontSize = 12.sp
+                                                            )
                                                             Text(p.purchaseDate, fontSize = 10.sp, color = Color.Gray)
                                                         }
-                                                        val effectiveCostPerUnit = p.purchasePrice / p.purchaseQuantity
-                                                        Text("Effective Cost: ₹${String.format("%.4f", effectiveCostPerUnit)} per ${p.unit}", fontSize = 11.sp)
                                                         
-                                                        // Show cover specific details if available
-                                                        if (p.sealCost > 0 || p.printingCost > 0 || p.largeCoverDistribution > 1) {
-                                                            var detailsStr = ""
-                                                            if (p.sealCost > 0) detailsStr += "Seal Cost: ₹${p.sealCost} | "
-                                                            if (p.printingCost > 0) detailsStr += "Print Cost: ₹${p.printingCost} | "
-                                                            if (p.largeCoverDistribution > 1) detailsStr += "Large Divisor: ${p.largeCoverDistribution}"
-                                                            Text(detailsStr.trimEnd(' ', '|'), fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
-                                                        }
+                                                        if (isFillCover) {
+                                                            val costPerPacket = p.purchasePrice / (p.purchaseQuantity * p.largeCoverDistribution.coerceAtLeast(1).toDouble())
+                                                            Text("Packets fillable per pack: ${p.largeCoverDistribution}", fontSize = 11.sp)
+                                                            Text("Cost Per Filled Packet: ₹${String.format("%.4f", costPerPacket)}", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                                        } else {
+                                                            val effectiveCostPerUnit = p.purchasePrice / p.purchaseQuantity
+                                                            Text("Effective Cost: ₹${String.format("%.4f", effectiveCostPerUnit)} per ${p.unit}", fontSize = 11.sp)
+                                                            
+                                                            // Show cover specific details if available
+                                                            if (p.sealCost > 0 || p.printingCost > 0 || p.largeCoverDistribution > 1) {
+                                                                var detailsStr = ""
+                                                                if (p.sealCost > 0) detailsStr += "Seal Cost: ₹${p.sealCost} | "
+                                                                if (p.printingCost > 0) detailsStr += "Print Cost: ₹${p.printingCost} | "
+                                                                if (p.largeCoverDistribution > 1) detailsStr += "Large Divisor: ${p.largeCoverDistribution}"
+                                                                Text(detailsStr.trimEnd(' ', '|'), fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                                                            }
 
-                                                        if (!p.supplier.isNullOrEmpty()) {
-                                                            Text("Supplier: ${p.supplier}", fontSize = 10.sp, color = Color.Gray)
-                                                        }
-                                                        if (!p.remarks.isNullOrEmpty()) {
-                                                            Text("Remarks: ${p.remarks}", fontSize = 10.sp, color = Color.Gray)
+                                                            if (!p.supplier.isNullOrEmpty()) {
+                                                                Text("Supplier: ${p.supplier}", fontSize = 10.sp, color = Color.Gray)
+                                                            }
+                                                            if (!p.remarks.isNullOrEmpty()) {
+                                                                Text("Remarks: ${p.remarks}", fontSize = 10.sp, color = Color.Gray)
+                                                            }
                                                         }
 
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.End
+                                                            horizontalArrangement = Arrangement.End,
+                                                            verticalAlignment = Alignment.CenterVertically
                                                         ) {
+                                                            IconButton(
+                                                                onClick = {
+                                                                    selectedIngredientForPurchase = ingredient
+                                                                    editingPurchase = p
+                                                                    showAddPurchaseDialog = true
+                                                                },
+                                                                modifier = Modifier.size(24.dp).testTag("btn_edit_purchase_${p.purchaseId}")
+                                                            ) {
+                                                                Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                                            }
+                                                            Spacer(modifier = Modifier.width(8.dp))
                                                             IconButton(
                                                                 onClick = {
                                                                     viewModel.deletePurchase(p)
@@ -1952,231 +2038,240 @@ fun IngredientMasterTabContent(
         )
     }
 
-    // --- ADD PURCHASE DIALOG (Step 4, 6) ---
-    if (showAddPurchaseDialog && selectedIngredientForPurchase != null) {
-        val ingredient = selectedIngredientForPurchase!!
+    // --- ADD/EDIT PURCHASE DIALOG (Step 4, 6) ---
+    if (showAddPurchaseDialog && (selectedIngredientForPurchase != null || editingPurchase != null)) {
+        val ingredient = selectedIngredientForPurchase ?: ingredients.find { it.id == editingPurchase?.ingredientId }
         
-        var qtyStr by remember { mutableStateOf("") }
-        var unit by remember { mutableStateOf(if (ingredient.category.lowercase(Locale.getDefault()) == "oil") "L" else "kg") }
-        var priceStr by remember { mutableStateOf("") }
-        var date by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())) }
-        var supplier by remember { mutableStateOf("") }
-        var remarks by remember { mutableStateOf("") }
+        if (ingredient == null) {
+            showAddPurchaseDialog = false
+            editingPurchase = null
+            selectedIngredientForPurchase = null
+        } else {
+            val isFillCover = ingredient.category == "Fill Cover"
+            val isEditing = editingPurchase != null
 
-        // Step 6 packaging variables
-        var sealCostStr by remember { mutableStateOf("") }
-        var printingCostStr by remember { mutableStateOf("") }
-        var largeCoverDistributionStr by remember { mutableStateOf("1") }
+            var qtyStr by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.purchaseQuantity?.toString() ?: "") }
+            var unit by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.unit ?: (if (ingredient.category.lowercase(Locale.getDefault()) == "oil") "L" else "kg")) }
+            var priceStr by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.purchasePrice?.toString() ?: "") }
+            var date by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.purchaseDate ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())) }
+            var supplier by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.supplier ?: "") }
+            var remarks by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.remarks ?: "") }
 
-        val isCoverCategory = ingredient.category.lowercase(Locale.getDefault()).contains("cover") || 
-                              ingredient.name.lowercase(Locale.getDefault()).contains("cover")
+            var largeCoverDistributionStr by remember(editingPurchase, selectedIngredientForPurchase) { mutableStateOf(editingPurchase?.largeCoverDistribution?.toString() ?: "1") }
 
-        AlertDialog(
-            onDismissRequest = { showAddPurchaseDialog = false },
-            title = { Text("Log Purchase for ${ingredient.name}") },
-            text = {
-                Box(modifier = Modifier.sizeIn(maxHeight = 450.dp)) {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        item {
-                            OutlinedTextField(
-                                value = qtyStr,
-                                onValueChange = { qtyStr = it },
-                                label = { Text("Purchase Quantity") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.fillMaxWidth().testTag("input_purchase_qty"),
-                                singleLine = true
-                            )
-                        }
+            val isCoverCategory = ingredient.category.lowercase(Locale.getDefault()).contains("cover") || 
+                                  ingredient.name.lowercase(Locale.getDefault()).contains("cover")
 
-                        // Unit Selector (Step 3)
-                        item {
-                            var unitDropdownExpanded by remember { mutableStateOf(false) }
-                            Box(modifier = Modifier.fillMaxWidth()) {
+            AlertDialog(
+                onDismissRequest = { 
+                    showAddPurchaseDialog = false
+                    editingPurchase = null
+                    selectedIngredientForPurchase = null
+                },
+                title = { Text(if (isEditing) "Edit Purchase for ${ingredient.name}" else "Log Purchase for ${ingredient.name}") },
+                text = {
+                    Box(modifier = Modifier.sizeIn(maxHeight = 450.dp)) {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            item {
                                 OutlinedTextField(
-                                    value = unit,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("Unit") },
-                                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                                    modifier = Modifier.fillMaxWidth().testTag("input_purchase_unit")
+                                    value = qtyStr,
+                                    onValueChange = { qtyStr = it },
+                                    label = { Text("Purchase Quantity") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.fillMaxWidth().testTag("input_purchase_qty"),
+                                    singleLine = true
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .clickable { unitDropdownExpanded = true }
-                                )
-                                DropdownMenu(
-                                    expanded = unitDropdownExpanded,
-                                    onDismissRequest = { unitDropdownExpanded = false }
-                                ) {
-                                    UnitConverter.AllUnits.forEach { u ->
-                                        DropdownMenuItem(
-                                            text = { Text(u) },
-                                            onClick = {
-                                                unit = u
-                                                unitDropdownExpanded = false
-                                            }
-                                        )
+                            }
+
+                            // Unit Selector (Step 3)
+                            item {
+                                var unitDropdownExpanded by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedTextField(
+                                        value = unit,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("Unit") },
+                                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                                        modifier = Modifier.fillMaxWidth().testTag("input_purchase_unit")
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .clickable { unitDropdownExpanded = true }
+                                    )
+                                    DropdownMenu(
+                                        expanded = unitDropdownExpanded,
+                                        onDismissRequest = { unitDropdownExpanded = false }
+                                    ) {
+                                        UnitConverter.AllUnits.forEach { u ->
+                                            DropdownMenuItem(
+                                                text = { Text(u) },
+                                                onClick = {
+                                                    unit = u
+                                                    unitDropdownExpanded = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        item {
-                            OutlinedTextField(
-                                value = priceStr,
-                                onValueChange = { priceStr = it },
-                                label = { Text("Purchase Price (₹)") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.fillMaxWidth().testTag("input_purchase_price"),
-                                singleLine = true
-                            )
-                        }
-
-                        item {
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                            item {
                                 OutlinedTextField(
-                                    value = date,
-                                    onValueChange = { },
-                                    readOnly = true,
-                                    label = { Text("Purchase Date (yyyy-MM-dd)") },
-                                    modifier = Modifier.fillMaxWidth().testTag("input_purchase_date"),
-                                    trailingIcon = {
-                                        IconButton(onClick = {
-                                            val parts = date.split("-")
-                                            val cal = Calendar.getInstance()
-                                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
-                                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
-                                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
-                                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
-                                                val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
-                                                date = formattedDate
-                                            }, y, m, d).show()
-                                        }) {
-                                            Icon(Icons.Default.DateRange, contentDescription = "Select Date")
+                                    value = priceStr,
+                                    onValueChange = { priceStr = it },
+                                    label = { Text(if (isFillCover) "Purchase Amount (₹)" else "Purchase Price (₹)") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.fillMaxWidth().testTag("input_purchase_price"),
+                                    singleLine = true
+                                )
+                            }
+
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedTextField(
+                                        value = date,
+                                        onValueChange = { },
+                                        readOnly = true,
+                                        label = { Text("Purchase Date (yyyy-MM-dd)") },
+                                        modifier = Modifier.fillMaxWidth().testTag("input_purchase_date"),
+                                        trailingIcon = {
+                                            IconButton(onClick = {
+                                                val parts = date.split("-")
+                                                val cal = Calendar.getInstance()
+                                                val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                                val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                                val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                                DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                                    val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                                    date = formattedDate
+                                                }, y, m, d).show()
+                                            }) {
+                                                Icon(Icons.Default.DateRange, contentDescription = "Select Date")
+                                            }
                                         }
-                                    }
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .clickable {
-                                            val parts = date.split("-")
-                                            val cal = Calendar.getInstance()
-                                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
-                                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
-                                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
-                                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
-                                                val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
-                                                date = formattedDate
-                                            }, y, m, d).show()
-                                        }
-                                )
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .clickable {
+                                                val parts = date.split("-")
+                                                val cal = Calendar.getInstance()
+                                                val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                                val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                                val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                                DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                                    val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                                    date = formattedDate
+                                                }, y, m, d).show()
+                                            }
+                                    )
+                                }
                             }
-                        }
 
-                        item {
-                            OutlinedTextField(
-                                value = supplier,
-                                onValueChange = { supplier = it },
-                                label = { Text("Supplier (optional)") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                        }
+                            if (!isFillCover) {
+                                item {
+                                    OutlinedTextField(
+                                        value = supplier,
+                                        onValueChange = { supplier = it },
+                                        label = { Text("Supplier (optional)") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                }
 
-                        item {
-                            OutlinedTextField(
-                                value = remarks,
-                                onValueChange = { remarks = it },
-                                label = { Text("Remarks (optional)") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                        }
+                                item {
+                                    OutlinedTextField(
+                                        value = remarks,
+                                        onValueChange = { remarks = it },
+                                        label = { Text("Remarks (optional)") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                }
+                            }
 
-                        // STEP 6: Extra Cover packaging fields (only shown for cover ingredients)
-                        if (isCoverCategory) {
-                            item {
-                                Text("Packaging Custom Cost Options:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                            }
-                            item {
-                                OutlinedTextField(
-                                    value = sealCostStr,
-                                    onValueChange = { sealCostStr = it },
-                                    label = { Text("Total Seal Cost (₹)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth().testTag("input_seal_cost"),
-                                    singleLine = true
-                                )
-                            }
-                            item {
-                                OutlinedTextField(
-                                    value = printingCostStr,
-                                    onValueChange = { printingCostStr = it },
-                                    label = { Text("Total Printing Cost (₹)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth().testTag("input_printing_cost"),
-                                    singleLine = true
-                                )
-                            }
-                            item {
-                                OutlinedTextField(
-                                    value = largeCoverDistributionStr,
-                                    onValueChange = { largeCoverDistributionStr = it },
-                                    label = { Text("Large Cover Distribution (e.g. contains 10 packets)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth().testTag("input_large_divisor"),
-                                    singleLine = true
-                                )
+                            // Show Large Cover Distribution input for either regular "Cover" (if isCoverCategory) OR "Fill Cover"
+                            if (isFillCover || isCoverCategory) {
+                                item {
+                                    OutlinedTextField(
+                                        value = largeCoverDistributionStr,
+                                        onValueChange = { largeCoverDistributionStr = it },
+                                        label = { Text(if (isFillCover) "Number of Small Packets that can be filled from 1 pack" else "Large Cover Distribution (e.g. contains 10 packets)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.fillMaxWidth().testTag("input_large_divisor"),
+                                        singleLine = true
+                                    )
+                                }
                             }
                         }
                     }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val qty = qtyStr.toDoubleOrNull() ?: 0.0
-                        val price = priceStr.toDoubleOrNull() ?: 0.0
-                        if (qty <= 0 || price <= 0) {
-                            Toast.makeText(context, "Please enter valid Quantity and Price", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        
-                        val sealCost = sealCostStr.toDoubleOrNull() ?: 0.0
-                        val printingCost = printingCostStr.toDoubleOrNull() ?: 0.0
-                        val largeDivisor = largeCoverDistributionStr.toIntOrNull() ?: 1
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val qty = qtyStr.toDoubleOrNull() ?: 0.0
+                            val price = priceStr.toDoubleOrNull() ?: 0.0
+                            if (qty <= 0 || price <= 0) {
+                                Toast.makeText(context, "Please enter valid Quantity and Price", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            
+                            val largeDivisor = largeCoverDistributionStr.toIntOrNull() ?: 1
 
-                        viewModel.addPurchase(
-                            ingredientId = ingredient.id,
-                            quantity = qty,
-                            unit = unit,
-                            price = price,
-                            date = date.trim(),
-                            supplier = supplier.trim().ifEmpty { null },
-                            remarks = remarks.trim().ifEmpty { null },
-                            sealCost = sealCost,
-                            printingCost = printingCost,
-                            largeCoverDistribution = largeDivisor
-                        )
+                            if (isEditing) {
+                                val updated = editingPurchase!!.copy(
+                                    purchaseQuantity = qty,
+                                    unit = unit,
+                                    purchasePrice = price,
+                                    purchaseDate = date.trim(),
+                                    supplier = if (isFillCover) null else supplier.trim().ifEmpty { null },
+                                    remarks = if (isFillCover) null else remarks.trim().ifEmpty { null },
+                                    sealCost = 0.0,
+                                    printingCost = 0.0,
+                                    largeCoverDistribution = largeDivisor
+                                )
+                                viewModel.updatePurchase(updated)
+                                Toast.makeText(context, "Purchase updated!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                viewModel.addPurchase(
+                                    ingredientId = ingredient.id,
+                                    quantity = qty,
+                                    unit = unit,
+                                    price = price,
+                                    date = date.trim(),
+                                    supplier = if (isFillCover) null else supplier.trim().ifEmpty { null },
+                                    remarks = if (isFillCover) null else remarks.trim().ifEmpty { null },
+                                    sealCost = 0.0,
+                                    printingCost = 0.0,
+                                    largeCoverDistribution = largeDivisor
+                                )
+                                Toast.makeText(context, "Purchase logged!", Toast.LENGTH_SHORT).show()
+                            }
 
-                        Toast.makeText(context, "Purchase logged!", Toast.LENGTH_SHORT).show()
+                            showAddPurchaseDialog = false
+                            editingPurchase = null
+                            selectedIngredientForPurchase = null
+                        },
+                        modifier = Modifier.testTag("btn_confirm_purchase")
+                    ) {
+                        Text(if (isEditing) "Save" else "Add")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { 
                         showAddPurchaseDialog = false
-                    },
-                    modifier = Modifier.testTag("btn_confirm_purchase")
-                ) {
-                    Text("Add")
+                        editingPurchase = null
+                        selectedIngredientForPurchase = null
+                    }) {
+                        Text("Cancel")
+                    }
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddPurchaseDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+            )
+        }
     }
 }

@@ -1968,7 +1968,8 @@ object Exporter {
             val purchasesHeaders = listOf(
                 "Purchase ID", "Ingredient ID", "Purchase Quantity", "Unit", 
                 "Purchase Price", "Purchase Date", "Supplier", "Remarks", 
-                "Seal Cost", "Printing Cost", "Large Cover Distribution"
+                "Seal Cost", "Printing Cost", "Large Cover Distribution",
+                "Number of Fillable Packets", "Calculated Cost Per Filled Packet"
             )
             val purchasesHeaderRow = purchasesSheet.createRow(0)
             for (i in purchasesHeaders.indices) {
@@ -1990,6 +1991,13 @@ object Exporter {
                 row.createCell(8).setCellValue(item.sealCost)
                 row.createCell(9).setCellValue(item.printingCost)
                 row.createCell(10).setCellValue(item.largeCoverDistribution.toDouble())
+                row.createCell(11).setCellValue(item.largeCoverDistribution.toDouble())
+                val calculatedCostPerFilled = if (item.largeCoverDistribution > 0 && item.purchaseQuantity > 0.0) {
+                    item.purchasePrice / (item.purchaseQuantity * item.largeCoverDistribution.toDouble())
+                } else {
+                    0.0
+                }
+                row.createCell(12).setCellValue(calculatedCostPerFilled)
             }
             for (i in purchasesHeaders.indices) {
                 purchasesSheet.setColumnWidth(i, 5000)
@@ -2199,7 +2207,7 @@ object Exporter {
 
                 // --- Parsing Sheet 2: Ingredient Purchases ---
                 val purRequired = listOf("Purchase ID", "Ingredient ID", "Purchase Quantity", "Unit", "Purchase Price", "Purchase Date")
-                val purOptional = listOf("Supplier", "Remarks", "Seal Cost", "Printing Cost", "Large Cover Distribution")
+                val purOptional = listOf("Supplier", "Remarks", "Seal Cost", "Printing Cost", "Large Cover Distribution", "Number of Fillable Packets")
                 val purIndices = getHeaderIndices(purchasesSheet, purRequired, purOptional)
 
                 for (rowIdx in 1..purchasesSheet.lastRowNum) {
@@ -2221,7 +2229,8 @@ object Exporter {
                         val remarks = purOptional.find { it == "Remarks" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } } ?: ""
                         val sealCostStr = purOptional.find { it == "Seal Cost" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
                         val printingCostStr = purOptional.find { it == "Printing Cost" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
-                        val largeCoverStr = purOptional.find { it == "Large Cover Distribution" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
+                        val largeCoverStr = (purOptional.find { it == "Large Cover Distribution" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } }
+                            ?: purOptional.find { it == "Number of Fillable Packets" }?.let { purIndices[it]?.let { getCellValueAsString(row, it) } })
 
                         parsedPurchases.add(
                             com.example.data.IngredientPurchase(
