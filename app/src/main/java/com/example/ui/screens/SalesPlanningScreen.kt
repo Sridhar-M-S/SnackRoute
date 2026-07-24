@@ -58,11 +58,11 @@ fun SalesPlanningScreen(
     // Collapsible sections
     var isInAppExpanded by remember { mutableStateOf(true) }
     var isTodayExpanded by remember { mutableStateOf(true) }
-    var isMissedExpanded by remember { mutableStateOf(true) }
+    var isMissedExpanded by remember { mutableStateOf(false) }
 
     // Collapsible location sub-sections
     var collapsedTodayLocations by remember { mutableStateOf(setOf<String>()) }
-    var collapsedMissedLocations by remember { mutableStateOf(setOf<String>()) }
+    var expandedMissedLocations by remember { mutableStateOf(setOf<String>()) }
 
     // Partition reminders
     val todayReminders = remember(dueReminders) {
@@ -76,8 +76,15 @@ fun SalesPlanningScreen(
     val todayRemindersByLocation = remember(todayReminders) {
         todayReminders.groupBy { it.shop.locationNumber }
     }
-    val missedRemindersByLocation = remember(missedReminders) {
-        missedReminders.groupBy { it.shop.locationNumber }
+    val missedRemindersByLocation = remember(missedReminders, locations) {
+        val grouped = missedReminders.groupBy { it.shop.locationNumber }
+        val locationNumbersOrder = locations.map { it.locationNumber }
+        grouped.mapValues { (_, list) ->
+            list.sortedByDescending { it.lastSaleDate + it.interval * 86400000L }
+        }.toList().sortedBy { (locNum, _) ->
+            val index = locationNumbersOrder.indexOf(locNum)
+            if (index != -1) index else Int.MAX_VALUE
+        }.toMap()
     }
 
     Scaffold(
@@ -454,16 +461,16 @@ fun SalesPlanningScreen(
 
                         missedRemindersByLocation.forEach { (locNum, remindersInLoc) ->
                             val locName = locationMap[locNum] ?: "Location $locNum"
-                            val isLocCollapsed = collapsedMissedLocations.contains(locNum)
+                            val isLocExpanded = expandedMissedLocations.contains(locNum)
                             item(key = "missed_loc_hdr_$locNum") {
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            collapsedMissedLocations = if (isLocCollapsed) {
-                                                collapsedMissedLocations - locNum
+                                            expandedMissedLocations = if (isLocExpanded) {
+                                                expandedMissedLocations - locNum
                                             } else {
-                                                collapsedMissedLocations + locNum
+                                                expandedMissedLocations + locNum
                                             }
                                         },
                                     colors = CardDefaults.cardColors(
@@ -475,7 +482,7 @@ fun SalesPlanningScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = if (isLocCollapsed) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowDown,
+                                            imageVector = if (isLocExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
                                             contentDescription = null,
                                             modifier = Modifier.size(20.dp)
                                         )
@@ -493,7 +500,7 @@ fun SalesPlanningScreen(
                                 }
                             }
 
-                            if (!isLocCollapsed) {
+                            if (isLocExpanded) {
                                 items(remindersInLoc, key = { "missed_rem_${it.shop.shopNumber}" }) { reminder ->
                                     ReminderCard(
                                         reminder = reminder,
