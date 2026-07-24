@@ -295,6 +295,9 @@ interface DynamicCostDao {
     @Query("SELECT * FROM cost_calculation_items WHERE costCalculationId = :calculationId")
     fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>>
 
+    @Query("SELECT * FROM cost_calculation_items")
+    fun getAllCalculationItems(): Flow<List<CostCalculationItem>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCalculationItems(items: List<CostCalculationItem>)
 

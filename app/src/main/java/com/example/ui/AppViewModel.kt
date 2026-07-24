@@ -615,6 +615,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    val allCalculationItems: StateFlow<List<CostCalculationItem>> = repository.allCalculationItems
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     fun setGoogleAccount(account: GoogleSignInAccount?) {
         _googleSignInAccount.value = account
         if (account != null) {
@@ -1312,8 +1319,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         products,
         repository.getAllPricesFlow(),
         allCostCalculations,
+        allCalculationItems,
+        repository.allPurchases,
         isDynamicProfitEnabled
-    ) { rawSales, prods, prices, calcs, dynamicEnabled ->
+    ) { args ->
+        val rawSales = args[0] as List<SalesEntry>
+        val prods = args[1] as List<ProductMaster>
+        val prices = args[2] as List<ProductPrice>
+        val calcs = args[3] as List<CostCalculation>
+        val calcItemsList = args[4] as List<CostCalculationItem>
+        val purchasesList = args[5] as List<IngredientPurchase>
+        val dynamicEnabled = args[6] as Boolean
+
         rawSales.mapNotNull { sale ->
             val problems = mutableListOf<String>()
             
@@ -1338,54 +1355,134 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } else null
             
-            val productionCost = sale.productionCostUsed ?: if (applicableCalc != null) {
+            var calculatedCost: Double? = null
+            var missingPurchaseHistory = false
+            
+            if (product == null) {
+                problems.add("Missing Product")
+            } else if (priceObj == null) {
+                problems.add("Missing Rate Variant")
+            } else if (applicableCalc == null) {
+                problems.add("Missing Recipe Version for the sale date")
+            } else {
+                // Try to calculate Production Cost using the dynamic cost engine
+                val recipeItems = calcItemsList.filter { it.costCalculationId == applicableCalc.calculationId }
+                if (recipeItems.isEmpty()) {
+                    problems.add("Corrupted or incomplete historical data: Recipe is empty")
+                } else {
+                    var totalProductionCost = 0.0
+                    for (item in recipeItems) {
+                        val purchase = purchasesList
+                            .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
+                            .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                            ?: purchasesList.filter { it.ingredientId == item.ingredientId }
+                                .minWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                                
+                        if (purchase == null) {
+                            missingPurchaseHistory = true
+                        } else {
+                            val costPerUsageUnit = calculateCostPerUsageUnit(
+                                purchasePrice = purchase.purchasePrice,
+                                purchaseQty = purchase.purchaseQuantity,
+                                purchaseUnit = purchase.unit,
+                                usageUnit = item.usageUnit,
+                                sealCost = purchase.sealCost,
+                                printingCost = purchase.printingCost,
+                                largeCoverDistribution = purchase.largeCoverDistribution
+                            )
+                            totalProductionCost += costPerUsageUnit * item.usageQuantity
+                        }
+                    }
+                    
+                    if (missingPurchaseHistory) {
+                        problems.add("Missing Ingredient Purchase History required for that sale date")
+                    } else {
+                        calculatedCost = totalProductionCost
+                    }
+                }
+            }
+            
+            // Check other genuine problems
+            val sellingPrice = sale.ratePerPacket
+            if (sellingPrice <= 0.0) {
+                if (sellingPrice == 0.0) {
+                    problems.add("Missing Selling Price")
+                } else {
+                    problems.add("Selling Price less than 0")
+                }
+            }
+            
+            if (sale.packetsGiven < 0 || sale.packetsReturned < 0 || sale.packetsSold < 0 || sale.packetsReturned > sale.packetsGiven) {
+                problems.add("Invalid Packet Count")
+            }
+            
+            // Fallback production cost for validation displaying/recalculating purposes
+            val productionCost = sale.productionCostUsed ?: calculatedCost ?: if (applicableCalc != null) {
                 applicableCalc.totalProductionCost
             } else {
                 val refPrice = priceObj ?: productPrices.firstOrNull()
                 refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
             }
             
-            val sellingPrice = sale.ratePerPacket
-            val expectedProfitPerPacket = sellingPrice - productionCost
-            val expectedTotalProfit = expectedProfitPerPacket * sale.packetsSold
-            val totalAmount = sale.packetsSold * sellingPrice
+            val correctProfitPerPacket = sellingPrice - productionCost
+            val correctTotalProfit = correctProfitPerPacket * sale.packetsSold
+            val correctTotalAmount = sale.packetsSold * sellingPrice
             
-            // Check problems:
-            // 1. Profit = 0 unexpectedly
-            if (sale.packetsSold > 0 && Math.abs(sale.totalProfit) < 0.01) {
-                problems.add("Profit = 0 unexpectedly")
-            }
-            // 2. Negative Profit
-            if (sale.totalProfit < 0.0) {
-                problems.add("Negative Profit")
-            }
-            // 3. Total Profit greater than Total Sales
-            if (sale.totalProfit > sale.totalAmount + 0.01) {
-                problems.add("Profit Greater Than Sales")
-            }
-            // 4. Production Cost missing
-            if (sale.productionCostUsed == null || sale.productionCostUsed == 0.0) {
-                problems.add("Missing Production Cost")
-            }
-            // 5. Calculation mismatch
-            if (Math.abs(sale.profitPerPacket - expectedProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - expectedTotalProfit) > 0.02) {
-                problems.add("Calculation Mismatch")
-            }
-            // 6. Dynamic Cost calculation missing
-            if (dynamicEnabled && applicableCalc == null && priceObj != null) {
-                problems.add("Dynamic Cost Missing")
-            }
-            // 7. Rate Variant missing
-            if (priceObj == null) {
-                problems.add("Invalid Rate Variant")
+            // Negative Profit (after correct calculation)
+            if (correctTotalProfit < 0.0 || correctProfitPerPacket < 0.0) {
+                problems.add("Negative Profit (after correct calculation)")
             }
             
-            // Check any invalid sales record
-            if (sale.packetsGiven < 0 || sale.packetsReturned < 0 || sale.packetsSold < 0) {
-                problems.add("Invalid Packets Count")
+            // If we successfully calculated the cost automatically, but stored value differs or is missing,
+            // we calculate/repair it silently in the background!
+            if (calculatedCost != null) {
+                val needsBackgroundRepair = sale.productionCostUsed == null ||
+                        sale.productionCostUsed == 0.0 ||
+                        Math.abs(sale.productionCostUsed - calculatedCost) > 0.01 ||
+                        Math.abs(sale.profitPerPacket - correctProfitPerPacket) > 0.01 ||
+                        Math.abs(sale.totalProfit - correctTotalProfit) > 0.01 ||
+                        Math.abs(sale.totalAmount - correctTotalAmount) > 0.01
+                
+                if (needsBackgroundRepair) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            val updated = sale.copy(
+                                productionCostUsed = calculatedCost,
+                                profitPerPacket = correctProfitPerPacket,
+                                totalProfit = correctTotalProfit,
+                                totalAmount = correctTotalAmount
+                            )
+                            repository.insertSales(updated)
+                        } catch (e: Exception) {
+                            // Silently ignore or log background calculation errors
+                        }
+                    }
+                }
+            } else {
+                // If we couldn't automatically compute it, add validation warning
+                problems.add("Any record where Production Cost cannot be calculated automatically")
             }
             
-            if (problems.isNotEmpty()) {
+            // Excel import inconsistencies or incomplete historical data
+            if (sale.packetsSold > 0 && Math.abs(sale.totalAmount) < 0.01) {
+                problems.add("Excel import inconsistencies: Sold packets > 0 but total amount is 0")
+            }
+            if (sale.packetsSold > 0 && calculatedCost == null) {
+                problems.add("Corrupted or incomplete historical data: Cannot calculate Production Cost for this sale date")
+            }
+            
+            // Calculation mismatch (when not repaired automatically due to errors)
+            if (calculatedCost == null) {
+                val expectedProfitPerPacket = sellingPrice - productionCost
+                val expectedTotalProfit = expectedProfitPerPacket * sale.packetsSold
+                if (Math.abs(sale.profitPerPacket - expectedProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - expectedTotalProfit) > 0.02) {
+                    problems.add("Calculation mismatch")
+                }
+            }
+            
+            val uniqueProblems = problems.distinct()
+            
+            if (uniqueProblems.isNotEmpty()) {
                 SalesValidationError(
                     id = sale.id,
                     shopName = sale.shopName,
@@ -1395,7 +1492,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     sellingPrice = sale.ratePerPacket,
                     productionCost = productionCost,
                     profit = sale.totalProfit,
-                    problems = problems,
+                    problems = uniqueProblems,
                     saleEntry = sale
                 )
             } else {

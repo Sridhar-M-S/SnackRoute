@@ -318,6 +318,7 @@ class AppRepository(
     }
 
     fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>> = dynamicCostDao.getCalculationItems(calculationId)
+    val allCalculationItems: Flow<List<CostCalculationItem>> = dynamicCostDao.getAllCalculationItems()
 
     // --- Direct Getters for Import/Export ---
     suspend fun getAllIngredientsDirect(): List<Ingredient> = dynamicCostDao.getAllIngredientsDirect()
