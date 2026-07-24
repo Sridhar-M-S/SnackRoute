@@ -1307,6 +1307,103 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val validationErrors: StateFlow<List<SalesValidationError>> = combine(
+        repository.allSales,
+        products,
+        repository.getAllPricesFlow(),
+        allCostCalculations,
+        isDynamicProfitEnabled
+    ) { rawSales, prods, prices, calcs, dynamicEnabled ->
+        rawSales.mapNotNull { sale ->
+            val problems = mutableListOf<String>()
+            
+            val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
+            val priceObj = product?.let { p ->
+                prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+            }
+            
+            val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
+            val priceIds = productPrices.map { it.priceId }
+            val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
+            
+            val applicableCalc = if (priceIds.isNotEmpty()) {
+                if (priceObj != null) {
+                    calcs
+                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                } else {
+                    calcs
+                        .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                }
+            } else null
+            
+            val productionCost = sale.productionCostUsed ?: if (applicableCalc != null) {
+                applicableCalc.totalProductionCost
+            } else {
+                val refPrice = priceObj ?: productPrices.firstOrNull()
+                refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+            }
+            
+            val sellingPrice = sale.ratePerPacket
+            val expectedProfitPerPacket = sellingPrice - productionCost
+            val expectedTotalProfit = expectedProfitPerPacket * sale.packetsSold
+            val totalAmount = sale.packetsSold * sellingPrice
+            
+            // Check problems:
+            // 1. Profit = 0 unexpectedly
+            if (sale.packetsSold > 0 && Math.abs(sale.totalProfit) < 0.01) {
+                problems.add("Profit = 0 unexpectedly")
+            }
+            // 2. Negative Profit
+            if (sale.totalProfit < 0.0) {
+                problems.add("Negative Profit")
+            }
+            // 3. Total Profit greater than Total Sales
+            if (sale.totalProfit > sale.totalAmount + 0.01) {
+                problems.add("Profit Greater Than Sales")
+            }
+            // 4. Production Cost missing
+            if (sale.productionCostUsed == null || sale.productionCostUsed == 0.0) {
+                problems.add("Missing Production Cost")
+            }
+            // 5. Calculation mismatch
+            if (Math.abs(sale.profitPerPacket - expectedProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - expectedTotalProfit) > 0.02) {
+                problems.add("Calculation Mismatch")
+            }
+            // 6. Dynamic Cost calculation missing
+            if (dynamicEnabled && applicableCalc == null && priceObj != null) {
+                problems.add("Dynamic Cost Missing")
+            }
+            // 7. Rate Variant missing
+            if (priceObj == null) {
+                problems.add("Invalid Rate Variant")
+            }
+            
+            // Check any invalid sales record
+            if (sale.packetsGiven < 0 || sale.packetsReturned < 0 || sale.packetsSold < 0) {
+                problems.add("Invalid Packets Count")
+            }
+            
+            if (problems.isNotEmpty()) {
+                SalesValidationError(
+                    id = sale.id,
+                    shopName = sale.shopName,
+                    entryDate = sale.entryDate,
+                    productName = sale.productName,
+                    ratePerPacket = sale.originalPacketRate ?: sale.ratePerPacket,
+                    sellingPrice = sale.ratePerPacket,
+                    productionCost = productionCost,
+                    profit = sale.totalProfit,
+                    problems = problems,
+                    saleEntry = sale
+                )
+            } else {
+                null
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val gamificationState: StateFlow<GamificationState> = combine(
         sales,
         repository.allShops,
@@ -3983,7 +4080,84 @@ User Question: $userQuestion
     fun getCalculationItems(calculationId: Int): Flow<List<CostCalculationItem>> {
         return repository.getCalculationItems(calculationId)
     }
+
+    fun recalculateSalesRecord(saleId: Int, customGiven: Int? = null, customReturned: Int? = null, customSellingPrice: Double? = null) = viewModelScope.launch(Dispatchers.IO) {
+        try {
+            val sale = repository.allSales.first().find { it.id == saleId } ?: return@launch
+            val prods = repository.allProducts.first()
+            val prices = repository.getAllPrices()
+            val calcs = repository.allCalculations.first()
+            val dynamicEnabled = isDynamicProfitEnabled.value
+            
+            val productName = sale.productName
+            val product = prods.find { it.productName.equals(productName, ignoreCase = true) }
+            
+            val finalGiven = customGiven ?: sale.packetsGiven
+            val finalReturned = customReturned ?: sale.packetsReturned
+            val finalSold = maxOf(0, finalGiven - finalReturned)
+            
+            val sellingPrice = customSellingPrice ?: sale.ratePerPacket
+            
+            val priceObj = product?.let { p ->
+                prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sellingPrice) < 0.01 }
+            }
+            
+            val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
+            val priceIds = productPrices.map { it.priceId }
+            val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
+            
+            val applicableCalc = if (priceIds.isNotEmpty()) {
+                if (priceObj != null) {
+                    calcs
+                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                } else {
+                    calcs
+                        .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                }
+            } else null
+            
+            val productionCost = if (applicableCalc != null) {
+                applicableCalc.totalProductionCost
+            } else {
+                val refPrice = priceObj ?: productPrices.firstOrNull()
+                refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+            }
+            
+            val profitPerPacket = sellingPrice - productionCost
+            val totalProfit = profitPerPacket * finalSold
+            val totalAmount = finalSold * sellingPrice
+            
+            val updated = sale.copy(
+                packetsGiven = finalGiven,
+                packetsReturned = finalReturned,
+                packetsSold = finalSold,
+                ratePerPacket = sellingPrice,
+                productionCostUsed = productionCost,
+                profitPerPacket = profitPerPacket,
+                totalProfit = totalProfit,
+                totalAmount = totalAmount
+            )
+            repository.insertSales(updated)
+        } catch (e: Exception) {
+            triggerError("Validation", "recalculateSalesRecord", "RecalculationError", e.message ?: "", "", e)
+        }
+    }
 }
+
+data class SalesValidationError(
+    val id: Int,
+    val shopName: String,
+    val entryDate: Long,
+    val productName: String,
+    val ratePerPacket: Double,
+    val sellingPrice: Double,
+    val productionCost: Double,
+    val profit: Double,
+    val problems: List<String>,
+    val saleEntry: SalesEntry
+)
 
 data class ChatMessage(
     val sender: String,

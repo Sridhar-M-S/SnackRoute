@@ -39,8 +39,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.SalesEntry
+import com.example.data.ProductMaster
+import com.example.data.ProductPrice
+import com.example.data.CostCalculation
+import com.example.ui.SalesValidationError
 import com.example.ui.AppViewModel
 import com.example.utils.Exporter
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -80,6 +86,10 @@ fun SalesScreen(
     val searchQuery by viewModel.salesSearchQuery.collectAsStateWithLifecycle()
     var showAddEditScreen by remember { mutableStateOf(false) }
     var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
+    
+    val validationErrors by viewModel.validationErrors.collectAsStateWithLifecycle()
+    var showValidationReportDialog by remember { mutableStateOf(false) }
+    var selectedTabForComparison by remember { mutableStateOf<String?>(null) }
     
     BackHandler(enabled = showAddEditScreen) {
         showAddEditScreen = false
@@ -301,6 +311,18 @@ fun SalesScreen(
                         }
                     },
                     actions = {
+                        if (validationErrors.isNotEmpty()) {
+                            IconButton(
+                                onClick = { showValidationReportDialog = true },
+                                modifier = Modifier.testTag("sales_warning_icon")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = "Validation Report",
+                                    tint = Color(0xFFD84315)
+                                )
+                            }
+                        }
                         IconButton(
                             onClick = onOpenChat,
                             modifier = Modifier.testTag("open_ai_chat_button")
@@ -635,7 +657,8 @@ fun SalesScreen(
                                         icon = Icons.Default.TrendingUp,
                                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.weight(1f).testTag("summary_total_sales")
+                                        modifier = Modifier.weight(1f).testTag("summary_total_sales"),
+                                        onClick = { selectedTabForComparison = "Sales" }
                                     )
                                     SalesSummaryCard(
                                         label = "Total Profit",
@@ -643,7 +666,8 @@ fun SalesScreen(
                                         icon = Icons.Default.Payments,
                                         containerColor = Color(0xFFE8F5E9),
                                         contentColor = Color(0xFF2E7D32),
-                                        modifier = Modifier.weight(1f).testTag("summary_total_profit")
+                                        modifier = Modifier.weight(1f).testTag("summary_total_profit"),
+                                        onClick = { selectedTabForComparison = "Profit" }
                                     )
                                 }
                                 Row(
@@ -1038,6 +1062,7 @@ fun SalesScreen(
                         var totalPacketsGiven = 0
                         var totalPacketsReturned = 0
                         var totalPacketsSold = 0
+                        var totalProductionCost = 0.0
                         var totalEstimatedProfit = 0.0
                         var grandTotalAmount = 0.0
                         
@@ -1047,10 +1072,12 @@ fun SalesScreen(
                             val sold = maxOf(0, given - returned)
                             val rate = itm.ratePerPacketStr.toDoubleOrNull() ?: 0.0
                             val profitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
+                            val prodCost = itm.productionCostUsed ?: 0.0
                             
                             totalPacketsGiven += given
                             totalPacketsReturned += returned
                             totalPacketsSold += sold
+                            totalProductionCost += (sold * prodCost)
                             totalEstimatedProfit += (sold * profitPerUnit)
                             grandTotalAmount += (sold * rate)
                         }
@@ -1086,6 +1113,10 @@ fun SalesScreen(
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                     Text("Total Packets Sold:", fontSize = 12.sp, color = Color.Gray)
                                     Text("$totalPacketsSold", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Total Production Cost:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("₹${"%.2f".format(totalProductionCost)}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFC62828))
                                 }
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                     Text("Total Estimated Profit:", fontSize = 12.sp, color = Color.Gray)
@@ -1199,7 +1230,29 @@ fun SalesScreen(
                                 val finalSold = givenVal - returnedVal
                                 val rateVal = itm.ratePerPacketStr.toDouble()
                                 val finalTotal = finalSold * rateVal
-                                val finalProfitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
+                                
+                                var finalProductionCost = itm.productionCostUsed
+                                if (finalProductionCost == null || finalProductionCost == 0.0) {
+                                    val isDyn = viewModel.isDynamicProfitEnabled.value
+                                    val productObj = products.find { it.productName == itm.productName }
+                                    if (productObj != null) {
+                                        val pricesForProd = viewModel.allPrices.value.filter { it.productId == productObj.id }
+                                        val variantSellingPrice = itm.originalPacketRate ?: rateVal
+                                        val variant = pricesForProd.find { it.sellingPrice == variantSellingPrice } ?: pricesForProd.firstOrNull()
+                                        if (variant != null) {
+                                            val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(entryDateMillis))
+                                            val latestCalc = if (isDyn) {
+                                                viewModel.allCostCalculations.value
+                                                    .filter { it.productPriceId == variant.priceId && it.calculationDate <= saleDateStr }
+                                                    .maxByOrNull { it.calculationDate }
+                                            } else null
+                                            
+                                            finalProductionCost = latestCalc?.totalProductionCost ?: (variant.sellingPrice - variant.profitPerPacket)
+                                        }
+                                    }
+                                }
+                                val costUsed = finalProductionCost ?: 0.0
+                                val finalProfitPerUnit = rateVal - costUsed
                                 val finalProfitTotal = finalSold * finalProfitPerUnit
 
                                 SalesEntry(
@@ -1221,7 +1274,7 @@ fun SalesScreen(
                                     sessionId = sessionId,
                                     originalPacketRate = itm.originalPacketRate,
                                     customSellingPrice = itm.customSellingPrice,
-                                    productionCostUsed = itm.productionCostUsed
+                                    productionCostUsed = costUsed
                                 )
                             }
 
@@ -1353,6 +1406,28 @@ fun SalesScreen(
                     }
                 }
             }
+        )
+    }
+
+    if (showValidationReportDialog) {
+        ValidationReportDialog(
+            validationErrors = validationErrors,
+            onDismiss = { showValidationReportDialog = false },
+            onRecalculate = { saleId -> viewModel.recalculateSalesRecord(saleId) },
+            viewModel = viewModel
+        )
+    }
+
+    if (selectedTabForComparison != null) {
+        val pricesState by viewModel.allPrices.collectAsStateWithLifecycle()
+        val calcsState by viewModel.allCostCalculations.collectAsStateWithLifecycle()
+        DetailedComparisonDialog(
+            filteredSales = filteredSales,
+            initialTab = selectedTabForComparison!!,
+            onDismiss = { selectedTabForComparison = null },
+            products = products,
+            prices = pricesState,
+            calculations = calcsState
         )
     }
 }
@@ -2020,6 +2095,15 @@ fun SaleItemRow(
                             val profitToUse = dynamicProfitOpt ?: price.profitPerPacket
                             val labelSuffix = if (dynamicProfitOpt != null) " (Dynamic Profit: ₹${String.format("%.2f", dynamicProfitOpt)})" else " (Profit: ₹${price.profitPerPacket})"
                             
+                            val standardProdCost = price.sellingPrice - price.profitPerPacket
+                            val dynamicCalc = if (isDynamicProfitEnabled) {
+                                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                                calculations
+                                    .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
+                                    .maxByOrNull { it.calculationDate }
+                            } else null
+                            val prodCostToUse = dynamicCalc?.totalProductionCost ?: standardProdCost
+
                             DropdownMenuItem(
                                 text = { Text("₹${price.sellingPrice}$labelSuffix") },
                                 onClick = {
@@ -2029,7 +2113,7 @@ fun SaleItemRow(
                                         isCustomRate = false,
                                         originalPacketRate = null,
                                         customSellingPrice = null,
-                                        productionCostUsed = null,
+                                        productionCostUsed = prodCostToUse,
                                         rateError = null
                                     ))
                                     rateMenuExpanded = false
@@ -2107,19 +2191,29 @@ fun SaleItemRow(
             val liveProfitPerPacket = item.customProfitStr.toDoubleOrNull() ?: 0.0
             val totalProfitCalculated = soldCalculated * liveProfitPerPacket
             
+            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "Sold: $soldCalculated | Amt: ₹${"%.2f".format(totalAmountCalculated)} | Profit: ₹${"%.2f".format(totalProfitCalculated)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    fontWeight = FontWeight.Medium
-                )
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text("Sold", style = MaterialTheme.typography.bodySmall, color = Color.Gray, fontSize = 10.sp)
+                    Text("$soldCalculated", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Amount", style = MaterialTheme.typography.bodySmall, color = Color.Gray, fontSize = 10.sp)
+                    Text("₹${"%.2f".format(totalAmountCalculated)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Production Cost", style = MaterialTheme.typography.bodySmall, color = Color.Gray, fontSize = 10.sp)
+                    val pCost = item.productionCostUsed ?: 0.0
+                    Text("₹${"%.2f".format(soldCalculated * pCost)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Profit", style = MaterialTheme.typography.bodySmall, color = Color.Gray, fontSize = 10.sp)
+                    val profitColor = if (totalProfitCalculated >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+                    Text("₹${"%.2f".format(totalProfitCalculated)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = profitColor)
+                }
             }
         }
     }
@@ -2132,10 +2226,13 @@ private fun SalesSummaryCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     containerColor: Color,
     contentColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier.height(68.dp),
+        modifier = modifier
+            .height(68.dp)
+            .let { if (onClick != null) it.clickable { onClick() } else it },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
@@ -2184,5 +2281,471 @@ private fun SalesSummaryCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun ValidationReportDialog(
+    validationErrors: List<SalesValidationError>,
+    onDismiss: () -> Unit,
+    onRecalculate: (Int) -> Unit,
+    viewModel: AppViewModel
+) {
+    val editingSaleForCorrection = remember { mutableStateOf<SalesValidationError?>(null) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD84315))
+                Text("Sales Data Validation Report", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "The validation engine found ${validationErrors.size} records with potential discrepancies or missing calculations. Please resolve them below.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(validationErrors) { error ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(error.shopName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    val formattedDate = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US).format(java.util.Date(error.entryDate))
+                                    Text(formattedDate, fontSize = 11.sp, color = Color.Gray)
+                                }
+                                
+                                Text(
+                                    text = "Product: ${error.productName} | Rate Variant: ₹${"%.2f".format(error.ratePerPacket)}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Selling Price: ₹${"%.2f".format(error.sellingPrice)}", fontSize = 10.sp, color = Color.Gray)
+                                    Text("Prod Cost: ₹${"%.2f".format(error.productionCost)}", fontSize = 10.sp, color = Color.Gray)
+                                    Text("Profit: ₹${"%.2f".format(error.profit)}", fontSize = 10.sp, color = Color.Gray)
+                                }
+                                
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("Issues Detected:", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                                error.problems.forEach { problem ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(start = 4.dp)
+                                    ) {
+                                        Box(modifier = Modifier.size(4.dp).background(MaterialTheme.colorScheme.error, CircleShape))
+                                        Text(problem, fontSize = 10.sp, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                                
+                                Row(
+                                    horizontalArrangement = Arrangement.End,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = { editingSaleForCorrection.value = error },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Correct / Edit", fontSize = 11.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { onRecalculate(error.id) },
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Recalculate", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close Report")
+            }
+        }
+    )
+    
+    if (editingSaleForCorrection.value != null) {
+        val errorItem = editingSaleForCorrection.value!!
+        CorrectRecordDialog(
+            sale = errorItem.saleEntry,
+            onDismiss = { editingSaleForCorrection.value = null },
+            onSave = { given, returned, rate ->
+                viewModel.recalculateSalesRecord(errorItem.id, given, returned, rate)
+                editingSaleForCorrection.value = null
+            },
+            viewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun CorrectRecordDialog(
+    sale: SalesEntry,
+    onDismiss: () -> Unit,
+    onSave: (given: Int, returned: Int, rate: Double) -> Unit,
+    viewModel: AppViewModel
+) {
+    var givenStr by remember { mutableStateOf(sale.packetsGiven.toString()) }
+    var returnedStr by remember { mutableStateOf(sale.packetsReturned.toString()) }
+    var rateStr by remember { mutableStateOf(sale.ratePerPacket.toString()) }
+    
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Correct Record: ${sale.shopName}", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Text("Correct entry details for ${sale.productName}:", fontSize = 11.sp, color = Color.Gray)
+                
+                OutlinedTextField(
+                    value = givenStr,
+                    onValueChange = { givenStr = it },
+                    label = { Text("Packets Given", fontSize = 12.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = returnedStr,
+                    onValueChange = { returnedStr = it },
+                    label = { Text("Packets Returned", fontSize = 12.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = rateStr,
+                    onValueChange = { rateStr = it },
+                    label = { Text("Selling Price (₹)", fontSize = 12.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                errorMsg?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val givenVal = givenStr.toIntOrNull()
+                val returnedVal = returnedStr.toIntOrNull() ?: 0
+                val rateVal = rateStr.toDoubleOrNull()
+                
+                if (givenVal == null || givenVal < 0) {
+                    errorMsg = "Please enter a valid non-negative number for Given Packets"
+                } else if (returnedVal < 0 || returnedVal > givenVal) {
+                    errorMsg = "Returned packets must be between 0 and Given Packets ($givenVal)"
+                } else if (rateVal == null || rateVal < 0) {
+                    errorMsg = "Please enter a valid Selling Price"
+                } else {
+                    onSave(givenVal, returnedVal, rateVal)
+                }
+            }) {
+                Text("Save & Recalculate")
+            }
+        }
+    )
+}
+
+@Composable
+fun getComparisonColor(value: Double, isCost: Boolean = false): Color {
+    val diff = if (isCost) -value else value
+    return when {
+        diff > 0.05 -> Color(0xFF2E7D32) // Green: Better Profit, Lower Cost
+        diff < -0.05 -> Color(0xFFC62828) // Red: Higher Cost, Lower Profit
+        Math.abs(diff) <= 0.05 && Math.abs(diff) > 0.0 -> Color(0xFFEF6C00) // Orange: Small Difference
+        else -> Color.Gray // Grey: No Difference
+    }
+}
+
+@Composable
+fun DetailedComparisonDialog(
+    filteredSales: List<SalesEntry>,
+    initialTab: String,
+    onDismiss: () -> Unit,
+    products: List<ProductMaster>,
+    prices: List<ProductPrice>,
+    calculations: List<CostCalculation>
+) {
+    var activeTab by remember { mutableStateOf(initialTab) }
+    
+    val prods = products
+    val allPrices = prices
+    val allCalcs = calculations
+    
+    var totalSales = 0.0
+    var totalPackets = 0
+    var dynamicProductionCost = 0.0
+    var normalProductionCost = 0.0
+    var dynamicProfit = 0.0
+    var normalProfit = 0.0
+    
+    filteredSales.forEach { sale ->
+        val product = prods.firstOrNull { it.productName.equals(sale.productName, ignoreCase = true) }
+        val productPrices = product?.let { p -> allPrices.filter { it.productId == p.id } } ?: emptyList()
+        val priceObj = product?.let { p ->
+            allPrices.firstOrNull { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+        }
+        val priceIds = productPrices.map { it.priceId }
+        val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
+        
+        val applicableCalc = if (priceIds.isNotEmpty()) {
+            if (priceObj != null) {
+                allCalcs
+                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .maxByOrNull { it.calculationDate }
+            } else {
+                allCalcs
+                    .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
+                    .maxByOrNull { it.calculationDate }
+            }
+        } else null
+        
+        val dynCostPerPacket = sale.productionCostUsed ?: applicableCalc?.totalProductionCost ?: priceObj?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+        val normalCostPerPacket = priceObj?.let { it.sellingPrice - it.profitPerPacket } ?: dynCostPerPacket
+        
+        val sold = sale.packetsSold
+        totalSales += sold * sale.ratePerPacket
+        totalPackets += sold
+        dynamicProductionCost += sold * dynCostPerPacket
+        normalProductionCost += sold * normalCostPerPacket
+        dynamicProfit += sold * (sale.ratePerPacket - dynCostPerPacket)
+        normalProfit += sold * (sale.ratePerPacket - normalCostPerPacket)
+    }
+    
+    val prodCostDiff = normalProductionCost - dynamicProductionCost
+    val profitDiff = dynamicProfit - normalProfit
+    val savings = if (prodCostDiff > 0) prodCostDiff else 0.0
+    val extraCost = if (prodCostDiff < 0) -prodCostDiff else 0.0
+    
+    val profitDiffPercent = if (normalProfit > 0) (profitDiff / normalProfit) * 100.0 else 0.0
+    
+    val dynProfitMargin = if (totalSales > 0) (dynamicProfit / totalSales) * 100.0 else 0.0
+    val normalProfitMargin = if (totalSales > 0) (normalProfit / totalSales) * 100.0 else 0.0
+    val dynProdCostPercent = if (totalSales > 0) (dynamicProductionCost / totalSales) * 100.0 else 0.0
+    val normalProdCostPercent = if (totalSales > 0) (normalProductionCost / totalSales) * 100.0 else 0.0
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Analytics, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Sales Summary Analysis", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val tabs = listOf("Sales", "Profit", "Comparison")
+                    tabs.forEach { tabName ->
+                        val selected = (tabName == activeTab || (tabName == "Sales" && activeTab == "Sales") || (tabName == "Profit" && activeTab == "Profit") || (tabName == "Comparison" && activeTab == "Comparison"))
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { activeTab = tabName }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (tabName == "Comparison") "Dynamic vs Normal" else tabName,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    when (activeTab) {
+                        "Sales" -> {
+                            Text("Sales Impact Analysis", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                            MetricRow(label = "Total Sales Revenue", value = "₹${"%.2f".format(totalSales)}")
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            MetricRow(label = "Dynamic Production Cost", value = "₹${"%.2f".format(dynamicProductionCost)}", valueColor = MaterialTheme.colorScheme.error)
+                            MetricRow(label = "Normal Production Cost", value = "₹${"%.2f".format(normalProductionCost)}", valueColor = Color.Gray)
+                            MetricRow(
+                                label = "Production Cost Difference", 
+                                value = "₹${"%.2f".format(prodCostDiff)}", 
+                                valueColor = getComparisonColor(prodCostDiff, isCost = true)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            MetricRow(label = "Dynamic Total Profit", value = "₹${"%.2f".format(dynamicProfit)}", valueColor = Color(0xFF2E7D32))
+                            MetricRow(label = "Manual Total Profit", value = "₹${"%.2f".format(normalProfit)}", valueColor = Color.Gray)
+                            MetricRow(
+                                label = "Total Profit Difference", 
+                                value = "₹${"%.2f".format(profitDiff)}", 
+                                valueColor = getComparisonColor(profitDiff)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            MetricRow(label = "Dynamic Profit Margin", value = "${"%.2f".format(dynProfitMargin)}%")
+                            MetricRow(label = "Dynamic Production Cost %", value = "${"%.2f".format(dynProdCostPercent)}%", valueColor = Color.Gray)
+                            MetricRow(label = "Net Margin", value = "${"%.2f".format(dynProfitMargin)}%", valueColor = Color(0xFF2E7D32))
+                        }
+                        "Profit" -> {
+                            Text("Profitability Analysis", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                            
+                            MetricRow(label = "Dynamic Profit", value = "₹${"%.2f".format(dynamicProfit)}", valueColor = Color(0xFF2E7D32))
+                            MetricRow(label = "Manual/Normal Profit", value = "₹${"%.2f".format(normalProfit)}", valueColor = Color.Gray)
+                            MetricRow(
+                                label = "Profit Difference", 
+                                value = "₹${"%.2f".format(profitDiff)}", 
+                                valueColor = getComparisonColor(profitDiff)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            val isIncrease = profitDiff > 0.05
+                            val isDecrease = profitDiff < -0.05
+                            MetricRow(label = "Profit Increase (Dynamic)", value = if (isIncrease) "₹${"%.2f".format(profitDiff)}" else "₹0.00", valueColor = if (isIncrease) Color(0xFF2E7D32) else Color.Gray)
+                            MetricRow(label = "Profit Decrease (Dynamic)", value = if (isDecrease) "₹${"%.2f".format(-profitDiff)}" else "₹0.00", valueColor = if (isDecrease) Color(0xFFC62828) else Color.Gray)
+                            
+                            MetricRow(
+                                label = "Percentage Difference", 
+                                value = "${if (profitDiff >= 0) "+" else ""}${"%.2f".format(profitDiffPercent)}%", 
+                                valueColor = getComparisonColor(profitDiff)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            Text("Overall Impact:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.Gray)
+                            val impactText = when {
+                                profitDiff > 0.05 -> "Positive: The dynamic cost calculations show HIGHER profit than manual estimates, reflecting actual cost efficiency savings of ₹${"%.2f".format(profitDiff)}."
+                                profitDiff < -0.05 -> "Caution: Dynamic costs are HIGHER than manual estimates. Manual profit estimates are inflated, causing an unexpected negative gap of ₹${"%.2f".format(-profitDiff)}."
+                                else -> "Neutral: Dynamic and manual profit calculations are identical or within a minimal variance of ₹${"%.2f".format(Math.abs(profitDiff))}."
+                            }
+                            Text(
+                                text = impactText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = getComparisonColor(profitDiff)
+                            )
+                        }
+                        else -> {
+                            Text("Dynamic vs Normal Comparison", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                            
+                            MetricRow(label = "Dynamic Production Cost", value = "₹${"%.2f".format(dynamicProductionCost)}", valueColor = Color.Gray)
+                            MetricRow(label = "Normal Production Cost", value = "₹${"%.2f".format(normalProductionCost)}", valueColor = Color.Gray)
+                            MetricRow(
+                                label = "Cost Difference", 
+                                value = "₹${"%.2f".format(prodCostDiff)}", 
+                                valueColor = getComparisonColor(prodCostDiff, isCost = true)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            MetricRow(label = "Dynamic Profit", value = "₹${"%.2f".format(dynamicProfit)}")
+                            MetricRow(label = "Normal Profit", value = "₹${"%.2f".format(normalProfit)}")
+                            MetricRow(
+                                label = "Profit Difference", 
+                                value = "₹${"%.2f".format(profitDiff)}", 
+                                valueColor = getComparisonColor(profitDiff)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            MetricRow(label = "Total Sales", value = "₹${"%.2f".format(totalSales)}")
+                            MetricRow(
+                                label = "Difference %", 
+                                value = "${if (profitDiff >= 0) "+" else ""}${"%.2f".format(profitDiffPercent)}%", 
+                                valueColor = getComparisonColor(profitDiff)
+                            )
+                            
+                            MetricRow(label = "Higher Profit Value Source", value = if (dynamicProfit >= normalProfit) "Dynamic" else "Normal")
+                            MetricRow(label = "Lower Profit Value Source", value = if (dynamicProfit < normalProfit) "Dynamic" else "Normal", valueColor = Color.Gray)
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            MetricRow(label = "Savings", value = "₹${"%.2f".format(savings)}", valueColor = if (savings > 0) Color(0xFF2E7D32) else Color.Gray)
+                            MetricRow(label = "Extra Cost", value = "₹${"%.2f".format(extraCost)}", valueColor = if (extraCost > 0) Color(0xFFC62828) else Color.Gray)
+                            MetricRow(
+                                label = "Net Profit Difference", 
+                                value = "₹${"%.2f".format(profitDiff)}", 
+                                valueColor = getComparisonColor(profitDiff)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close Analysis")
+            }
+        }
+    )
+}
+
+@Composable
+private fun MetricRow(label: String, value: String, valueColor: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = valueColor)
     }
 }
