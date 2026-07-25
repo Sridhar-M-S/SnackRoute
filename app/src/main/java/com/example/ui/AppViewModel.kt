@@ -1321,6 +1321,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         allCostCalculations,
         allCalculationItems,
         repository.allPurchases,
+        repository.allShops,
         isDynamicProfitEnabled
     ) { args ->
         val rawSales = args[0] as List<SalesEntry>
@@ -1329,12 +1330,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val calcs = args[3] as List<CostCalculation>
         val calcItemsList = args[4] as List<CostCalculationItem>
         val purchasesList = args[5] as List<IngredientPurchase>
-        val dynamicEnabled = args[6] as Boolean
+        val allShops = args[6] as List<ShopMaster>
+        val dynamicEnabled = args[7] as Boolean
 
         rawSales.mapNotNull { sale ->
             val problems = mutableListOf<String>()
             
             val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
+            val shop = allShops.find { it.shopNumber == sale.shopNumber || it.storeName.equals(sale.shopName, ignoreCase = true) }
             val priceObj = product?.let { p ->
                 prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
             }
@@ -1343,99 +1346,127 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val priceIds = productPrices.map { it.priceId }
             val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
             
-            val applicableCalc = if (priceIds.isNotEmpty()) {
+            // Auto-repair & Fallback: Find the most appropriate recipe version based on the effective date logic
+            var applicableCalc = if (priceIds.isNotEmpty()) {
                 if (priceObj != null) {
                     calcs
                         .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
                         .maxByOrNull { it.calculationDate }
+                        ?: calcs.filter { it.productPriceId == priceObj.priceId }.maxByOrNull { it.calculationDate }
+                        ?: calcs.filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }.maxByOrNull { it.calculationDate }
+                        ?: calcs.filter { it.productPriceId in priceIds }.maxByOrNull { it.calculationDate }
                 } else {
                     calcs
                         .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
                         .maxByOrNull { it.calculationDate }
+                        ?: calcs.filter { it.productPriceId in priceIds }.maxByOrNull { it.calculationDate }
                 }
             } else null
             
-            var calculatedCost: Double? = null
-            var missingPurchaseHistory = false
+            if (applicableCalc == null && product != null) {
+                val pPrices = prices.filter { it.productId == product.id }
+                val pPriceIds = pPrices.map { it.priceId }
+                if (pPriceIds.isNotEmpty()) {
+                    applicableCalc = calcs.filter { it.productPriceId in pPriceIds }.maxByOrNull { it.calculationDate }
+                }
+            }
+            if (applicableCalc == null) {
+                applicableCalc = calcs.maxByOrNull { it.calculationDate }
+            }
             
+            var calculatedCost = 0.0
+            if (applicableCalc != null) {
+                val recipeItems = calcItemsList.filter { it.costCalculationId == applicableCalc.calculationId }
+                var totalProductionCost = 0.0
+                for (item in recipeItems) {
+                    val purchase = purchasesList
+                        .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
+                        .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                        ?: purchasesList.filter { it.ingredientId == item.ingredientId }
+                            .minWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                            
+                    val costPerUsageUnit = if (purchase != null) {
+                        calculateCostPerUsageUnit(
+                            purchasePrice = purchase.purchasePrice,
+                            purchaseQty = purchase.purchaseQuantity,
+                            purchaseUnit = purchase.unit,
+                            usageUnit = item.usageUnit,
+                            sealCost = purchase.sealCost,
+                            printingCost = purchase.printingCost,
+                            largeCoverDistribution = purchase.largeCoverDistribution
+                        )
+                    } else {
+                        if (item.usageQuantity > 0) item.calculatedCost / item.usageQuantity else 0.0
+                    }
+                    totalProductionCost += costPerUsageUnit * item.usageQuantity
+                }
+                calculatedCost = if (recipeItems.isNotEmpty()) totalProductionCost else applicableCalc.totalProductionCost
+            } else {
+                calculatedCost = priceObj?.let { it.sellingPrice - it.profitPerPacket }
+                    ?: productPrices.firstOrNull()?.let { it.sellingPrice - it.profitPerPacket }
+                    ?: 0.0
+            }
+            
+            // Check other genuine user-correctable problems
             if (product == null) {
                 problems.add("Missing Product")
-            } else if (priceObj == null) {
+            }
+            if (shop == null) {
+                problems.add("Missing Shop")
+            }
+            if (product != null && priceObj == null) {
                 problems.add("Missing Rate Variant")
-            } else if (applicableCalc == null) {
-                problems.add("Missing Recipe Version for the sale date")
-            } else {
-                // Try to calculate Production Cost using the dynamic cost engine
-                val recipeItems = calcItemsList.filter { it.costCalculationId == applicableCalc.calculationId }
-                if (recipeItems.isEmpty()) {
-                    problems.add("Corrupted or incomplete historical data: Recipe is empty")
-                } else {
-                    var totalProductionCost = 0.0
-                    for (item in recipeItems) {
-                        val purchase = purchasesList
-                            .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
-                            .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
-                            ?: purchasesList.filter { it.ingredientId == item.ingredientId }
-                                .minWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
-                                
-                        if (purchase == null) {
-                            missingPurchaseHistory = true
-                        } else {
-                            val costPerUsageUnit = calculateCostPerUsageUnit(
-                                purchasePrice = purchase.purchasePrice,
-                                purchaseQty = purchase.purchaseQuantity,
-                                purchaseUnit = purchase.unit,
-                                usageUnit = item.usageUnit,
-                                sealCost = purchase.sealCost,
-                                printingCost = purchase.printingCost,
-                                largeCoverDistribution = purchase.largeCoverDistribution
-                            )
-                            totalProductionCost += costPerUsageUnit * item.usageQuantity
-                        }
-                    }
-                    
-                    if (missingPurchaseHistory) {
-                        problems.add("Missing Ingredient Purchase History required for that sale date")
-                    } else {
-                        calculatedCost = totalProductionCost
-                    }
-                }
             }
             
-            // Check other genuine problems
             val sellingPrice = sale.ratePerPacket
-            if (sellingPrice <= 0.0) {
-                if (sellingPrice == 0.0) {
-                    problems.add("Missing Selling Price")
-                } else {
-                    problems.add("Selling Price less than 0")
-                }
+            if (sellingPrice == 0.0) {
+                problems.add("Missing Selling Price")
+            } else if (sellingPrice < 0.0) {
+                problems.add("Selling Price less than 0")
             }
             
-            if (sale.packetsGiven < 0 || sale.packetsReturned < 0 || sale.packetsSold < 0 || sale.packetsReturned > sale.packetsGiven) {
-                problems.add("Invalid Packet Count")
+            if (sale.packetsGiven < 0 || sale.packetsReturned < 0 || sale.packetsSold < 0) {
+                problems.add("Negative Quantity")
+            } else if (sale.packetsReturned > sale.packetsGiven || sale.packetsSold != (sale.packetsGiven - sale.packetsReturned)) {
+                problems.add("Invalid Quantity")
             }
             
-            // Fallback production cost for validation displaying/recalculating purposes
-            val productionCost = sale.productionCostUsed ?: calculatedCost ?: if (applicableCalc != null) {
-                applicableCalc.totalProductionCost
-            } else {
-                val refPrice = priceObj ?: productPrices.firstOrNull()
-                refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+            val isDuplicate = rawSales.any { other ->
+                other.id != sale.id &&
+                other.shopNumber == sale.shopNumber &&
+                other.productName.equals(sale.productName, ignoreCase = true) &&
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(other.entryDate)) == saleDateStr
+            }
+            if (isDuplicate) {
+                problems.add("Duplicate Records")
             }
             
+            if (sale.entryDate <= 0L) {
+                problems.add("Invalid Date Format")
+            }
+            
+            val productionCost = sale.productionCostUsed ?: calculatedCost
             val correctProfitPerPacket = sellingPrice - productionCost
             val correctTotalProfit = correctProfitPerPacket * sale.packetsSold
             val correctTotalAmount = sale.packetsSold * sellingPrice
             
-            // Negative Profit (after correct calculation)
+            // Profit is negative (after correct calculation)
             if (correctTotalProfit < 0.0 || correctProfitPerPacket < 0.0) {
                 problems.add("Negative Profit (after correct calculation)")
             }
             
-            // If we successfully calculated the cost automatically, but stored value differs or is missing,
-            // we calculate/repair it silently in the background!
-            if (calculatedCost != null) {
+            // Excel import inconsistencies or other calculations mismatch when product and rate variants are invalid
+            if (product == null || priceObj == null) {
+                if (Math.abs(sale.profitPerPacket - correctProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - correctTotalProfit) > 0.02) {
+                    problems.add("Profit Calculation Mismatch")
+                }
+                if (Math.abs(sale.totalAmount - correctTotalAmount) > 0.02) {
+                    problems.add("Total Amount Calculation Mismatch")
+                }
+            }
+            
+            // Perform background repairs silently if the record has valid product and variant details
+            if (product != null && priceObj != null && sale.packetsGiven >= 0 && sale.packetsReturned >= 0 && sale.packetsReturned <= sale.packetsGiven) {
                 val needsBackgroundRepair = sale.productionCostUsed == null ||
                         sale.productionCostUsed == 0.0 ||
                         Math.abs(sale.productionCostUsed - calculatedCost) > 0.01 ||
@@ -1454,29 +1485,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             )
                             repository.insertSales(updated)
                         } catch (e: Exception) {
-                            // Silently ignore or log background calculation errors
+                            // Silently ignore background repair errors
                         }
                     }
-                }
-            } else {
-                // If we couldn't automatically compute it, add validation warning
-                problems.add("Any record where Production Cost cannot be calculated automatically")
-            }
-            
-            // Excel import inconsistencies or incomplete historical data
-            if (sale.packetsSold > 0 && Math.abs(sale.totalAmount) < 0.01) {
-                problems.add("Excel import inconsistencies: Sold packets > 0 but total amount is 0")
-            }
-            if (sale.packetsSold > 0 && calculatedCost == null) {
-                problems.add("Corrupted or incomplete historical data: Cannot calculate Production Cost for this sale date")
-            }
-            
-            // Calculation mismatch (when not repaired automatically due to errors)
-            if (calculatedCost == null) {
-                val expectedProfitPerPacket = sellingPrice - productionCost
-                val expectedTotalProfit = expectedProfitPerPacket * sale.packetsSold
-                if (Math.abs(sale.profitPerPacket - expectedProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - expectedTotalProfit) > 0.02) {
-                    problems.add("Calculation mismatch")
                 }
             }
             
