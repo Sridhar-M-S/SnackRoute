@@ -1231,24 +1231,33 @@ fun SalesScreen(
                                 val rateVal = itm.ratePerPacketStr.toDouble()
                                 val finalTotal = finalSold * rateVal
                                 
+                                val isDyn = viewModel.isDynamicProfitEnabled.value
+                                val productObj = products.find { it.productName.equals(itm.productName, ignoreCase = true) }
                                 var finalProductionCost = itm.productionCostUsed
-                                if (finalProductionCost == null || finalProductionCost == 0.0) {
-                                    val isDyn = viewModel.isDynamicProfitEnabled.value
-                                    val productObj = products.find { it.productName == itm.productName }
-                                    if (productObj != null) {
-                                        val pricesForProd = viewModel.allPrices.value.filter { it.productId == productObj.id }
-                                        val variantSellingPrice = itm.originalPacketRate ?: rateVal
-                                        val variant = pricesForProd.find { it.sellingPrice == variantSellingPrice } ?: pricesForProd.firstOrNull()
-                                        if (variant != null) {
-                                            val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(entryDateMillis))
-                                            val latestCalc = if (isDyn) {
+                                if (productObj != null) {
+                                    val pricesForProd = viewModel.allPrices.value.filter { it.productId == productObj.id }
+                                    val priceObj = pricesForProd.find { Math.abs(it.sellingPrice - rateVal) < 0.01 }
+                                    val refPrice = priceObj ?: pricesForProd.firstOrNull()
+                                    val configuredProfit = refPrice?.profitPerPacket ?: 0.0
+
+                                    finalProductionCost = if (isDyn) {
+                                        val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(entryDateMillis))
+                                        val applicableCalc = if (priceObj != null) {
+                                            viewModel.allCostCalculations.value
+                                                .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                                                .maxByOrNull { it.calculationDate }
+                                        } else {
+                                            val priceIds = pricesForProd.map { it.priceId }
+                                            if (priceIds.isNotEmpty()) {
                                                 viewModel.allCostCalculations.value
-                                                    .filter { it.productPriceId == variant.priceId && it.calculationDate <= saleDateStr }
+                                                    .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
                                                     .maxByOrNull { it.calculationDate }
                                             } else null
-                                            
-                                            finalProductionCost = latestCalc?.totalProductionCost ?: (variant.sellingPrice - variant.profitPerPacket)
                                         }
+                                        
+                                        applicableCalc?.totalProductionCost ?: (rateVal - configuredProfit)
+                                    } else {
+                                        rateVal - configuredProfit
                                     }
                                 }
                                 val costUsed = finalProductionCost ?: 0.0
@@ -1649,34 +1658,51 @@ fun SaleItemRow(
     
     var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
     
-    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations, item.isProfitOverridden) {
-        if (item.productName.isNotEmpty() && availablePrices.isNotEmpty() && !item.isProfitOverridden) {
+    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations) {
+        if (item.productName.isNotEmpty() && availablePrices.isNotEmpty()) {
             val sellingPrice = item.ratePerPacketStr.toDoubleOrNull() ?: 0.0
             
-            // 1. Get the production cost
-            val priceIds = availablePrices.map { it.priceId }
-            val latestCalc = if (isDynamicProfitEnabled && priceIds.isNotEmpty()) {
-                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
-                calculations
-                    .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
-                    .maxByOrNull { it.calculationDate }
-            } else null
-
-            val productionCost = if (latestCalc != null) {
-                latestCalc.totalProductionCost
+            val priceObj = availablePrices.find { Math.abs(it.sellingPrice - sellingPrice) < 0.01 }
+            val refPrice = priceObj ?: availablePrices.firstOrNull()
+            val configuredProfit = refPrice?.profitPerPacket ?: 0.0
+            
+            val (productionCost, finalProfit) = if (isDynamicProfitEnabled) {
+                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(saleDate))
+                val applicableCalc = if (priceObj != null) {
+                    calculations
+                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                        .maxByOrNull { it.calculationDate }
+                } else {
+                    val priceIds = availablePrices.map { it.priceId }
+                    if (priceIds.isNotEmpty()) {
+                        calculations
+                            .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
+                            .maxByOrNull { it.calculationDate }
+                    } else null
+                }
+                
+                if (applicableCalc != null) {
+                    val pc = applicableCalc.totalProductionCost
+                    val pf = sellingPrice - pc
+                    Pair(pc, pf)
+                } else {
+                    val pc = sellingPrice - configuredProfit
+                    val pf = configuredProfit
+                    Pair(pc, pf)
+                }
             } else {
-                // Find matching price if any, otherwise first available
-                val refPrice = availablePrices.find { it.sellingPrice.toString() == item.ratePerPacketStr }
-                    ?: availablePrices.firstOrNull()
-                refPrice?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+                val pc = sellingPrice - configuredProfit
+                val pf = configuredProfit
+                Pair(pc, pf)
             }
 
-            // 2. Profit = Actual Selling Price - Production Cost
-            val calculatedProfit = if (item.ratePerPacketStr.isEmpty()) 0.0 else (sellingPrice - productionCost)
-            val formattedProfit = String.format(java.util.Locale.US, "%.2f", calculatedProfit)
+            val formattedProfit = String.format(java.util.Locale.US, "%.2f", finalProfit)
             
-            if (item.customProfitStr != formattedProfit && item.ratePerPacketStr.isNotEmpty()) {
-                onItemChange(item.copy(customProfitStr = formattedProfit))
+            if ((item.customProfitStr != formattedProfit || item.productionCostUsed != productionCost) && item.ratePerPacketStr.isNotEmpty()) {
+                onItemChange(item.copy(
+                    customProfitStr = formattedProfit,
+                    productionCostUsed = productionCost
+                ))
             }
         }
     }
@@ -1686,30 +1712,12 @@ fun SaleItemRow(
             viewModel.getPricesForProduct(currentProductObj.id).collect { prices ->
                 availablePrices = prices
                 
-                // If this is an existing DB row, check if its rate matches one of the prices and profit matches too.
+                // If this is an existing DB row, check if its rate matches one of the prices.
                 // If not, set isCustomRate to true so the custom price/profit fields are visible.
                 if (item.ratePerPacketStr.isNotEmpty() && item.dbId != 0 && !item.isCustomRate) {
                     val matchingPrice = prices.find { it.sellingPrice.toString() == item.ratePerPacketStr }
                     if (matchingPrice == null) {
                         onItemChange(item.copy(isCustomRate = true))
-                    } else {
-                        val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
-                        val latestCalc = if (isDynamicProfitEnabled) {
-                            calculations
-                                .filter { it.productPriceId == matchingPrice.priceId && it.calculationDate <= saleDateStr }
-                                .maxByOrNull { it.calculationDate }
-                        } else null
-                        
-                        val productionCost = latestCalc?.totalProductionCost ?: (matchingPrice.sellingPrice - matchingPrice.profitPerPacket)
-                        val expectedProfit = matchingPrice.sellingPrice - productionCost
-                        
-                        val loadedProfit = item.customProfitStr.toDoubleOrNull() ?: 0.0
-                        val expectedProfitFormatted = String.format(java.util.Locale.US, "%.2f", expectedProfit).toDoubleOrNull() ?: expectedProfit
-                        val loadedProfitFormatted = String.format(java.util.Locale.US, "%.2f", loadedProfit).toDoubleOrNull() ?: loadedProfit
-                        
-                        if (expectedProfitFormatted != loadedProfitFormatted) {
-                            onItemChange(item.copy(isCustomRate = true))
-                        }
                     }
                 }
             }
