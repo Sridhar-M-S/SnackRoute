@@ -558,38 +558,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val updatedSales = salesList.mapNotNull { sale ->
                     val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
                     val productPrices = product?.let { p -> pricesList.filter { it.productId == p.id } } ?: emptyList()
-                    val priceObj = productPrices.find { Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+                    val priceObj = if (sale.originalPacketRate != null) {
+                        productPrices.find { Math.abs(it.sellingPrice - sale.originalPacketRate) < 0.01 }
+                    } else {
+                        productPrices.find { Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+                    } ?: productPrices.firstOrNull()
                     
-                    val refPrice = priceObj ?: productPrices.firstOrNull()
-                    val configuredProfit = refPrice?.profitPerPacket ?: 0.0
+                    val configuredProfit = priceObj?.profitPerPacket ?: 0.0
 
-                    val (productionCost, profitPerPacket) = if (enabled && product != null) {
+                    val (productionCost, profitPerPacket) = if (enabled && product != null && priceObj != null) {
                         val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
-                        val applicableCalc = if (priceObj != null) {
-                            calculationsList
-                                .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
-                                .maxByOrNull { it.calculationDate }
-                        } else {
-                            val priceIds = productPrices.map { it.priceId }
-                            if (priceIds.isNotEmpty()) {
-                                calculationsList
-                                    .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
-                                    .maxByOrNull { it.calculationDate }
-                            } else null
-                        }
+                        val applicableCalc = calculationsList
+                            .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                            .maxByOrNull { it.calculationDate }
                         
                         if (applicableCalc != null) {
                             val pc = applicableCalc.totalProductionCost
                             val pf = sale.ratePerPacket - pc
                             Pair(pc, pf)
                         } else {
-                            val pc = sale.ratePerPacket - configuredProfit
-                            val pf = configuredProfit
+                            val pc = priceObj.sellingPrice - configuredProfit
+                            val pf = sale.ratePerPacket - pc
                             Pair(pc, pf)
                         }
                     } else {
-                        val pc = sale.ratePerPacket - configuredProfit
-                        val pf = configuredProfit
+                        val pc = priceObj?.let { it.sellingPrice - configuredProfit } ?: 0.0
+                        val pf = sale.ratePerPacket - pc
                         Pair(pc, pf)
                     }
                     
@@ -1275,38 +1269,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         rawSales.map { sale ->
             val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
             val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
-            val priceObj = productPrices.find { Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+            val priceObj = if (sale.originalPacketRate != null) {
+                productPrices.find { Math.abs(it.sellingPrice - sale.originalPacketRate) < 0.01 }
+            } else {
+                productPrices.find { Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+            } ?: productPrices.firstOrNull()
             
-            val refPrice = priceObj ?: productPrices.firstOrNull()
-            val configuredProfit = refPrice?.profitPerPacket ?: 0.0
+            val configuredProfit = priceObj?.profitPerPacket ?: 0.0
 
-            val (productionCost, finalProfitPerPacket) = if (dynamicEnabled && product != null) {
+            val (productionCost, finalProfitPerPacket) = if (dynamicEnabled && product != null && priceObj != null) {
                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
-                val applicableCalc = if (priceObj != null) {
-                    calcs
-                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
-                        .maxByOrNull { it.calculationDate }
-                } else {
-                    val priceIds = productPrices.map { it.priceId }
-                    if (priceIds.isNotEmpty()) {
-                        calcs
-                            .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
-                            .maxByOrNull { it.calculationDate }
-                    } else null
-                }
+                val applicableCalc = calcs
+                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
                     val pc = applicableCalc.totalProductionCost
                     val pf = sale.ratePerPacket - pc
                     Pair(pc, pf)
                 } else {
-                    val pc = sale.ratePerPacket - configuredProfit
-                    val pf = configuredProfit
+                    val pc = priceObj.sellingPrice - configuredProfit
+                    val pf = sale.ratePerPacket - pc
                     Pair(pc, pf)
                 }
             } else {
-                val pc = sale.ratePerPacket - configuredProfit
-                val pf = configuredProfit
+                val pc = priceObj?.let { it.sellingPrice - configuredProfit } ?: 0.0
+                val pf = sale.ratePerPacket - pc
                 Pair(pc, pf)
             }
             
@@ -3196,8 +3184,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     
                     val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
                     val price = if (product != null) {
-                        pricesList.find { it.productId == product.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
-                            ?: pricesList.find { it.productId == product.id }
+                        val productPrices = pricesList.filter { it.productId == product.id }
+                        if (sale.originalPacketRate != null) {
+                            productPrices.find { Math.abs(it.sellingPrice - sale.originalPacketRate) < 0.01 }
+                        } else {
+                            productPrices.find { Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+                        } ?: productPrices.firstOrNull()
                     } else null
                     
                     // Step 1: Find applicable Recipe Version (Effective Date <= Sale Date)
@@ -3252,15 +3244,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } else {
                         // Fallback to original flow if no Recipe Version is configured
-                        val profitPerPacket = if (price != null) {
-                            price.profitPerPacket
-                        } else {
-                            sale.profitPerPacket
-                        }
-                        if (sale.profitPerPacket != profitPerPacket) {
+                        val priceToUse = price
+                        val productionCost = priceToUse?.let { it.sellingPrice - it.profitPerPacket } ?: 0.0
+                        val sellingPrice = sale.customSellingPrice ?: sale.ratePerPacket
+                        val profitPerPacket = sellingPrice - productionCost
+                        
+                        if (sale.profitPerPacket != profitPerPacket || sale.productionCostUsed != productionCost) {
                             sale.copy(
                                 profitPerPacket = profitPerPacket,
-                                totalProfit = sale.packetsSold * profitPerPacket
+                                totalProfit = sale.packetsSold * profitPerPacket,
+                                productionCostUsed = productionCost
                             )
                         } else {
                             null
@@ -4261,38 +4254,32 @@ User Question: $userQuestion
             val sellingPrice = customSellingPrice ?: sale.ratePerPacket
             
             val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
-            val priceObj = productPrices.find { Math.abs(it.sellingPrice - sellingPrice) < 0.01 }
+            val priceObj = if (sale.originalPacketRate != null) {
+                productPrices.find { Math.abs(it.sellingPrice - sale.originalPacketRate) < 0.01 }
+            } else {
+                productPrices.find { Math.abs(it.sellingPrice - sellingPrice) < 0.01 }
+            } ?: productPrices.firstOrNull()
             
-            val refPrice = priceObj ?: productPrices.firstOrNull()
-            val configuredProfit = refPrice?.profitPerPacket ?: 0.0
+            val configuredProfit = priceObj?.profitPerPacket ?: 0.0
 
-            val (productionCost, profitPerPacket) = if (dynamicEnabled && product != null) {
+            val (productionCost, profitPerPacket) = if (dynamicEnabled && product != null && priceObj != null) {
                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
-                val applicableCalc = if (priceObj != null) {
-                    calcs
-                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
-                        .maxByOrNull { it.calculationDate }
-                } else {
-                    val priceIds = productPrices.map { it.priceId }
-                    if (priceIds.isNotEmpty()) {
-                        calcs
-                            .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
-                            .maxByOrNull { it.calculationDate }
-                    } else null
-                }
+                val applicableCalc = calcs
+                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
                     val pc = applicableCalc.totalProductionCost
                     val pf = sellingPrice - pc
                     Pair(pc, pf)
                 } else {
-                    val pc = sellingPrice - configuredProfit
-                    val pf = configuredProfit
+                    val pc = priceObj.sellingPrice - configuredProfit
+                    val pf = sellingPrice - pc
                     Pair(pc, pf)
                 }
             } else {
-                val pc = sellingPrice - configuredProfit
-                val pf = configuredProfit
+                val pc = priceObj?.let { it.sellingPrice - configuredProfit } ?: 0.0
+                val pf = sellingPrice - pc
                 Pair(pc, pf)
             }
             

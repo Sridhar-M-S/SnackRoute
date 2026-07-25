@@ -1658,41 +1658,36 @@ fun SaleItemRow(
     
     var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
     
-    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations) {
+    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations, item.originalPacketRate) {
         if (item.productName.isNotEmpty() && availablePrices.isNotEmpty()) {
             val sellingPrice = item.ratePerPacketStr.toDoubleOrNull() ?: 0.0
             
-            val priceObj = availablePrices.find { Math.abs(it.sellingPrice - sellingPrice) < 0.01 }
-            val refPrice = priceObj ?: availablePrices.firstOrNull()
-            val configuredProfit = refPrice?.profitPerPacket ?: 0.0
+            val priceObj = if (item.originalPacketRate != null) {
+                availablePrices.find { Math.abs(it.sellingPrice - item.originalPacketRate) < 0.01 }
+            } else {
+                availablePrices.find { Math.abs(it.sellingPrice - sellingPrice) < 0.01 }
+            } ?: availablePrices.firstOrNull()
             
-            val (productionCost, finalProfit) = if (isDynamicProfitEnabled) {
+            val configuredProfit = priceObj?.profitPerPacket ?: 0.0
+            
+            val (productionCost, finalProfit) = if (isDynamicProfitEnabled && priceObj != null) {
                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(saleDate))
-                val applicableCalc = if (priceObj != null) {
-                    calculations
-                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
-                        .maxByOrNull { it.calculationDate }
-                } else {
-                    val priceIds = availablePrices.map { it.priceId }
-                    if (priceIds.isNotEmpty()) {
-                        calculations
-                            .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
-                            .maxByOrNull { it.calculationDate }
-                    } else null
-                }
+                val applicableCalc = calculations
+                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
                     val pc = applicableCalc.totalProductionCost
                     val pf = sellingPrice - pc
                     Pair(pc, pf)
                 } else {
-                    val pc = sellingPrice - configuredProfit
-                    val pf = configuredProfit
+                    val pc = priceObj.sellingPrice - configuredProfit
+                    val pf = sellingPrice - pc
                     Pair(pc, pf)
                 }
             } else {
-                val pc = sellingPrice - configuredProfit
-                val pf = configuredProfit
+                val pc = priceObj?.let { it.sellingPrice - configuredProfit } ?: 0.0
+                val pf = sellingPrice - pc
                 Pair(pc, pf)
             }
 
