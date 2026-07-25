@@ -2284,6 +2284,7 @@ private fun SalesSummaryCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ValidationReportDialog(
     validationErrors: List<SalesValidationError>,
@@ -2292,96 +2293,279 @@ fun ValidationReportDialog(
     viewModel: AppViewModel
 ) {
     val editingSaleForCorrection = remember { mutableStateOf<SalesValidationError?>(null) }
-    
-    AlertDialog(
+    val context = LocalContext.current
+
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD84315))
-                Text("Sales Data Validation Report", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 450.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    "The validation engine found ${validationErrors.size} records with potential discrepancies or missing calculations. Please resolve them below.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(validationErrors) { error ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(error.shopName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                                    val formattedDate = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US).format(java.util.Date(error.entryDate))
-                                    Text(formattedDate, fontSize = 11.sp, color = Color.Gray)
-                                }
-                                
-                                Text(
-                                    text = "Product: ${error.productName} | Rate Variant: ₹${"%.2f".format(error.ratePerPacket)}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
                                 )
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Selling Price: ₹${"%.2f".format(error.sellingPrice)}", fontSize = 10.sp, color = Color.Gray)
-                                    Text("Prod Cost: ₹${"%.2f".format(error.productionCost)}", fontSize = 10.sp, color = Color.Gray)
-                                    Text("Profit: ₹${"%.2f".format(error.profit)}", fontSize = 10.sp, color = Color.Gray)
+                                Text(
+                                    "Issue Report Screen",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                            }
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
+                            titleContentColor = MaterialTheme.colorScheme.onSurface,
+                            navigationIconContentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                }
+            ) { paddingValues ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (validationErrors.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Success",
+                                    tint = Color(0xFF2E7D32),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    "All caught up! No validation issues detected.",
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Found ${validationErrors.size} active validation issues that require attention.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(validationErrors, key = { err ->
+                                val key = when {
+                                    err.isExcelError -> "excel_${err.id}"
+                                    err.issueType == "Profit Greater Than Selling Amount" -> "sale_${err.id}_profit_gt"
+                                    err.issueType == "Negative Profit" -> "sale_${err.id}_negative"
+                                    err.issueType == "Zero Profit" -> "sale_${err.id}_zero"
+                                    err.issueType == "Duplicate Records" -> "sale_${err.id}_duplicate"
+                                    else -> "sale_${err.id}_unknown"
                                 }
-                                
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text("Issues Detected:", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
-                                error.problems.forEach { problem ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(start = 4.dp)
-                                    ) {
-                                        Box(modifier = Modifier.size(4.dp).background(MaterialTheme.colorScheme.error, CircleShape))
-                                        Text(problem, fontSize = 10.sp, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
-                                    }
+                                key
+                            }) { error ->
+                                val issueKey = when {
+                                    error.isExcelError -> "excel_${error.id}"
+                                    error.issueType == "Profit Greater Than Selling Amount" -> "sale_${error.id}_profit_gt"
+                                    error.issueType == "Negative Profit" -> "sale_${error.id}_negative"
+                                    error.issueType == "Zero Profit" -> "sale_${error.id}_zero"
+                                    error.issueType == "Duplicate Records" -> "sale_${error.id}_duplicate"
+                                    else -> "sale_${error.id}_unknown"
                                 }
-                                
-                                Row(
-                                    horizontalArrangement = Arrangement.End,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+
+                                val formattedDate = try {
+                                    java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US).format(java.util.Date(error.entryDate))
+                                } catch (e: Exception) {
+                                    "N/A"
+                                }
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        width = 1.dp,
+                                        color = if (error.isExcelError) MaterialTheme.colorScheme.error.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant
+                                    )
                                 ) {
-                                    TextButton(
-                                        onClick = { editingSaleForCorrection.value = error },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Correct / Edit", fontSize = 11.sp)
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = { onRecalculate(error.id) },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Recalculate", fontSize = 11.sp)
+                                        // Header Row: Issue Type (Badge)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = if (error.isExcelError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = error.issueType ?: "Validation Issue",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (error.isExcelError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = formattedDate,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                        // Fields Section
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row {
+                                                Text("Shop Name: ", fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+                                                Text(error.shopName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            }
+                                            Row {
+                                                Text("Product Name: ", fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+                                                Text(error.productName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            }
+                                            if (!error.isExcelError) {
+                                                Row {
+                                                    Text("Sale Date: ", fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+                                                    Text(formattedDate, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                                                }
+                                            }
+                                        }
+
+                                        // Detailed Description
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("Detailed Description:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            Text(
+                                                text = error.detailedDescription ?: (error.problems.firstOrNull() ?: "An error occurred with this sales entry."),
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        // Suggested Fix
+                                        error.suggestedFix?.let { fix ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(10.dp),
+                                                    verticalAlignment = Alignment.Top,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Info,
+                                                        contentDescription = "Suggested Fix",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Column {
+                                                        Text("Suggested Fix:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                        Text(fix, fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                        // Actions Row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Left-aligned context-specific actions (Correct/Edit & Recalculate)
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                if (!error.isExcelError) {
+                                                    OutlinedButton(
+                                                        onClick = { editingSaleForCorrection.value = error },
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                        modifier = Modifier.height(34.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Correct / Edit", fontSize = 11.sp)
+                                                    }
+
+                                                    val requiresRecalculate = error.issueType in listOf(
+                                                        "Profit Greater Than Selling Amount",
+                                                        "Negative Profit",
+                                                        "Zero Profit"
+                                                    )
+                                                    if (requiresRecalculate) {
+                                                        Button(
+                                                            onClick = { onRecalculate(error.id) },
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                            modifier = Modifier.height(34.dp)
+                                                        ) {
+                                                            Text("Recalculate", fontSize = 11.sp)
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Right-aligned generic dismissal actions (Not an Issue & Solved)
+                                            OutlinedButton(
+                                                onClick = {
+                                                    viewModel.dismissIssue(issueKey)
+                                                    Toast.makeText(context, "Dismissed: Not an Issue", Toast.LENGTH_SHORT).show()
+                                                },
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(34.dp)
+                                            ) {
+                                                Text("Not an Issue", fontSize = 11.sp)
+                                            }
+
+                                            Button(
+                                                onClick = {
+                                                    viewModel.dismissIssue(issueKey)
+                                                    Toast.makeText(context, "Issue marked as Solved", Toast.LENGTH_SHORT).show()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(34.dp)
+                                            ) {
+                                                Text("Solved", fontSize = 11.sp)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2389,14 +2573,9 @@ fun ValidationReportDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Close Report")
-            }
         }
-    )
-    
+    }
+
     if (editingSaleForCorrection.value != null) {
         val errorItem = editingSaleForCorrection.value!!
         CorrectRecordDialog(

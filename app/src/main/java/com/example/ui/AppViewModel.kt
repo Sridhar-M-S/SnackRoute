@@ -1314,202 +1314,156 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val dismissedIssueIds = MutableStateFlow<Set<String>>(emptySet())
+    private val _excelImportIssues = MutableStateFlow<List<SalesValidationError>>(emptyList())
+    val excelImportIssues: StateFlow<List<SalesValidationError>> = _excelImportIssues.asStateFlow()
+
+    fun dismissIssue(issueId: String) {
+        dismissedIssueIds.value = dismissedIssueIds.value + issueId
+    }
+
+    fun clearExcelImportIssues() {
+        _excelImportIssues.value = emptyList()
+    }
+
     val validationErrors: StateFlow<List<SalesValidationError>> = combine(
         repository.allSales,
-        products,
-        repository.getAllPricesFlow(),
-        allCostCalculations,
-        allCalculationItems,
-        repository.allPurchases,
-        repository.allShops,
-        isDynamicProfitEnabled
-    ) { args ->
-        val rawSales = args[0] as List<SalesEntry>
-        val prods = args[1] as List<ProductMaster>
-        val prices = args[2] as List<ProductPrice>
-        val calcs = args[3] as List<CostCalculation>
-        val calcItemsList = args[4] as List<CostCalculationItem>
-        val purchasesList = args[5] as List<IngredientPurchase>
-        val allShops = args[6] as List<ShopMaster>
-        val dynamicEnabled = args[7] as Boolean
+        excelImportIssues,
+        dismissedIssueIds
+    ) { rawSales, excelErrors, dismissedIds ->
+        val issuesList = mutableListOf<SalesValidationError>()
 
-        rawSales.mapNotNull { sale ->
-            val problems = mutableListOf<String>()
-            
-            val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
-            val shop = allShops.find { it.shopNumber == sale.shopNumber || it.storeName.equals(sale.shopName, ignoreCase = true) }
-            val priceObj = product?.let { p ->
-                prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
+        // 1. Process Excel Import Errors
+        excelErrors.forEach { err ->
+            val issueKey = "excel_${err.id}"
+            if (issueKey !in dismissedIds) {
+                issuesList.add(err)
             }
-            
-            val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
-            val priceIds = productPrices.map { it.priceId }
-            val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
-            
-            // Auto-repair & Fallback: Find the most appropriate recipe version based on the effective date logic
-            var applicableCalc = if (priceIds.isNotEmpty()) {
-                if (priceObj != null) {
-                    calcs
-                        .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
-                        .maxByOrNull { it.calculationDate }
-                        ?: calcs.filter { it.productPriceId == priceObj.priceId }.maxByOrNull { it.calculationDate }
-                        ?: calcs.filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }.maxByOrNull { it.calculationDate }
-                        ?: calcs.filter { it.productPriceId in priceIds }.maxByOrNull { it.calculationDate }
-                } else {
-                    calcs
-                        .filter { it.productPriceId in priceIds && it.calculationDate <= saleDateStr }
-                        .maxByOrNull { it.calculationDate }
-                        ?: calcs.filter { it.productPriceId in priceIds }.maxByOrNull { it.calculationDate }
-                }
-            } else null
-            
-            if (applicableCalc == null && product != null) {
-                val pPrices = prices.filter { it.productId == product.id }
-                val pPriceIds = pPrices.map { it.priceId }
-                if (pPriceIds.isNotEmpty()) {
-                    applicableCalc = calcs.filter { it.productPriceId in pPriceIds }.maxByOrNull { it.calculationDate }
-                }
-            }
-            if (applicableCalc == null) {
-                applicableCalc = calcs.maxByOrNull { it.calculationDate }
-            }
-            
-            var calculatedCost = 0.0
-            if (applicableCalc != null) {
-                val recipeItems = calcItemsList.filter { it.costCalculationId == applicableCalc.calculationId }
-                var totalProductionCost = 0.0
-                for (item in recipeItems) {
-                    val purchase = purchasesList
-                        .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
-                        .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
-                        ?: purchasesList.filter { it.ingredientId == item.ingredientId }
-                            .minWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
-                            
-                    val costPerUsageUnit = if (purchase != null) {
-                        calculateCostPerUsageUnit(
-                            purchasePrice = purchase.purchasePrice,
-                            purchaseQty = purchase.purchaseQuantity,
-                            purchaseUnit = purchase.unit,
-                            usageUnit = item.usageUnit,
-                            sealCost = purchase.sealCost,
-                            printingCost = purchase.printingCost,
-                            largeCoverDistribution = purchase.largeCoverDistribution
+        }
+
+        // 2. Process database Sales Entries
+        rawSales.forEach { sale ->
+            // --- Validation 2: Profit Greater Than Selling Amount ---
+            if (sale.totalProfit > sale.totalAmount) {
+                val issueType = "Profit Greater Than Selling Amount"
+                val issueKey = "sale_${sale.id}_profit_gt"
+                if (issueKey !in dismissedIds) {
+                    issuesList.add(
+                        SalesValidationError(
+                            id = sale.id,
+                            shopName = sale.shopName,
+                            entryDate = sale.entryDate,
+                            productName = sale.productName,
+                            ratePerPacket = sale.ratePerPacket,
+                            sellingPrice = sale.ratePerPacket,
+                            productionCost = sale.productionCostUsed ?: 0.0,
+                            profit = sale.totalProfit,
+                            problems = listOf("Calculated Profit is greater than Total Selling Amount"),
+                            saleEntry = sale,
+                            issueType = issueType,
+                            detailedDescription = "The calculated Profit (₹${"%.2f".format(sale.totalProfit)}) is greater than the Total Selling Amount (₹${"%.2f".format(sale.totalAmount)}) of this sale.",
+                            suggestedFix = "Review the selling price, production cost, or packet quantities to ensure correct calculation of profit."
                         )
-                    } else {
-                        if (item.usageQuantity > 0) item.calculatedCost / item.usageQuantity else 0.0
-                    }
-                    totalProductionCost += costPerUsageUnit * item.usageQuantity
+                    )
                 }
-                calculatedCost = if (recipeItems.isNotEmpty()) totalProductionCost else applicableCalc.totalProductionCost
-            } else {
-                calculatedCost = priceObj?.let { it.sellingPrice - it.profitPerPacket }
-                    ?: productPrices.firstOrNull()?.let { it.sellingPrice - it.profitPerPacket }
-                    ?: 0.0
             }
-            
-            // Check other genuine user-correctable problems
-            if (product == null) {
-                problems.add("Missing Product")
+
+            // --- Validation 3: Negative Profit ---
+            if (sale.totalProfit < 0.0) {
+                val issueType = "Negative Profit"
+                val issueKey = "sale_${sale.id}_negative"
+                if (issueKey !in dismissedIds) {
+                    issuesList.add(
+                        SalesValidationError(
+                            id = sale.id,
+                            shopName = sale.shopName,
+                            entryDate = sale.entryDate,
+                            productName = sale.productName,
+                            ratePerPacket = sale.ratePerPacket,
+                            sellingPrice = sale.ratePerPacket,
+                            productionCost = sale.productionCostUsed ?: 0.0,
+                            profit = sale.totalProfit,
+                            problems = listOf("Profit is negative"),
+                            saleEntry = sale,
+                            issueType = issueType,
+                            detailedDescription = "The calculated Profit (₹${"%.2f".format(sale.totalProfit)}) is negative, representing a net loss.",
+                            suggestedFix = "Increase the selling price per packet or reduce production costs."
+                        )
+                    )
+                }
             }
-            if (shop == null) {
-                problems.add("Missing Shop")
+
+            // --- Validation 4: Zero Profit ---
+            if (sale.totalProfit == 0.0 && sale.packetsSold > 0) {
+                val issueType = "Zero Profit"
+                val issueKey = "sale_${sale.id}_zero"
+                if (issueKey !in dismissedIds) {
+                    issuesList.add(
+                        SalesValidationError(
+                            id = sale.id,
+                            shopName = sale.shopName,
+                            entryDate = sale.entryDate,
+                            productName = sale.productName,
+                            ratePerPacket = sale.ratePerPacket,
+                            sellingPrice = sale.ratePerPacket,
+                            productionCost = sale.productionCostUsed ?: 0.0,
+                            profit = sale.totalProfit,
+                            problems = listOf("Profit is exactly zero"),
+                            saleEntry = sale,
+                            issueType = issueType,
+                            detailedDescription = "The calculated Profit is exactly ₹0.00 despite selling ${sale.packetsSold} packet(s).",
+                            suggestedFix = "Ensure the selling price is higher than the production cost."
+                        )
+                    )
+                }
             }
-            if (product != null && priceObj == null) {
-                problems.add("Missing Rate Variant")
-            }
-            
-            val sellingPrice = sale.ratePerPacket
-            if (sellingPrice == 0.0) {
-                problems.add("Missing Selling Price")
-            } else if (sellingPrice < 0.0) {
-                problems.add("Selling Price less than 0")
-            }
-            
-            if (sale.packetsGiven < 0 || sale.packetsReturned < 0 || sale.packetsSold < 0) {
-                problems.add("Negative Quantity")
-            } else if (sale.packetsReturned > sale.packetsGiven || sale.packetsSold != (sale.packetsGiven - sale.packetsReturned)) {
-                problems.add("Invalid Quantity")
-            }
-            
+
+            // --- Validation 5: Duplicate Records ---
             val isDuplicate = rawSales.any { other ->
                 other.id != sale.id &&
                 other.shopNumber == sale.shopNumber &&
+                other.shopName.equals(sale.shopName, ignoreCase = true) &&
+                other.entryDate == sale.entryDate &&
                 other.productName.equals(sale.productName, ignoreCase = true) &&
-                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(other.entryDate)) == saleDateStr
+                other.packetsGiven == sale.packetsGiven &&
+                other.packetsReturned == sale.packetsReturned &&
+                other.packetsSold == sale.packetsSold &&
+                Math.abs(other.ratePerPacket - sale.ratePerPacket) < 0.001 &&
+                Math.abs(other.totalAmount - sale.totalAmount) < 0.001 &&
+                other.status == sale.status &&
+                other.remarks == sale.remarks &&
+                Math.abs(other.profitPerPacket - sale.profitPerPacket) < 0.001 &&
+                Math.abs(other.totalProfit - sale.totalProfit) < 0.001 &&
+                other.originalPacketRate == sale.originalPacketRate &&
+                other.customSellingPrice == sale.customSellingPrice &&
+                other.productionCostUsed == sale.productionCostUsed
             }
             if (isDuplicate) {
-                problems.add("Duplicate Records")
-            }
-            
-            if (sale.entryDate <= 0L) {
-                problems.add("Invalid Date Format")
-            }
-            
-            val productionCost = sale.productionCostUsed ?: calculatedCost
-            val correctProfitPerPacket = sellingPrice - productionCost
-            val correctTotalProfit = correctProfitPerPacket * sale.packetsSold
-            val correctTotalAmount = sale.packetsSold * sellingPrice
-            
-            // Profit is negative (after correct calculation)
-            if (correctTotalProfit < 0.0 || correctProfitPerPacket < 0.0) {
-                problems.add("Negative Profit (after correct calculation)")
-            }
-            
-            // Excel import inconsistencies or other calculations mismatch when product and rate variants are invalid
-            if (product == null || priceObj == null) {
-                if (Math.abs(sale.profitPerPacket - correctProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - correctTotalProfit) > 0.02) {
-                    problems.add("Profit Calculation Mismatch")
+                val issueType = "Duplicate Records"
+                val issueKey = "sale_${sale.id}_duplicate"
+                if (issueKey !in dismissedIds) {
+                    issuesList.add(
+                        SalesValidationError(
+                            id = sale.id,
+                            shopName = sale.shopName,
+                            entryDate = sale.entryDate,
+                            productName = sale.productName,
+                            ratePerPacket = sale.ratePerPacket,
+                            sellingPrice = sale.ratePerPacket,
+                            productionCost = sale.productionCostUsed ?: 0.0,
+                            profit = sale.totalProfit,
+                            problems = listOf("All fields are exactly identical duplicates"),
+                            saleEntry = sale,
+                            issueType = issueType,
+                            detailedDescription = "An identical duplicate sales record exists in the database (all fields are completely identical).",
+                            suggestedFix = "Remove or update one of the duplicate entries."
+                        )
+                    )
                 }
-                if (Math.abs(sale.totalAmount - correctTotalAmount) > 0.02) {
-                    problems.add("Total Amount Calculation Mismatch")
-                }
-            }
-            
-            // Perform background repairs silently if the record has valid product and variant details
-            if (product != null && priceObj != null && sale.packetsGiven >= 0 && sale.packetsReturned >= 0 && sale.packetsReturned <= sale.packetsGiven) {
-                val needsBackgroundRepair = sale.productionCostUsed == null ||
-                        sale.productionCostUsed == 0.0 ||
-                        Math.abs(sale.productionCostUsed - calculatedCost) > 0.01 ||
-                        Math.abs(sale.profitPerPacket - correctProfitPerPacket) > 0.01 ||
-                        Math.abs(sale.totalProfit - correctTotalProfit) > 0.01 ||
-                        Math.abs(sale.totalAmount - correctTotalAmount) > 0.01
-                
-                if (needsBackgroundRepair) {
-                    viewModelScope.launch(Dispatchers.IO) {
-                        try {
-                            val updated = sale.copy(
-                                productionCostUsed = calculatedCost,
-                                profitPerPacket = correctProfitPerPacket,
-                                totalProfit = correctTotalProfit,
-                                totalAmount = correctTotalAmount
-                            )
-                            repository.insertSales(updated)
-                        } catch (e: Exception) {
-                            // Silently ignore background repair errors
-                        }
-                    }
-                }
-            }
-            
-            val uniqueProblems = problems.distinct()
-            
-            if (uniqueProblems.isNotEmpty()) {
-                SalesValidationError(
-                    id = sale.id,
-                    shopName = sale.shopName,
-                    entryDate = sale.entryDate,
-                    productName = sale.productName,
-                    ratePerPacket = sale.originalPacketRate ?: sale.ratePerPacket,
-                    sellingPrice = sale.ratePerPacket,
-                    productionCost = productionCost,
-                    profit = sale.totalProfit,
-                    problems = uniqueProblems,
-                    saleEntry = sale
-                )
-            } else {
-                null
             }
         }
+
+        issuesList
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val gamificationState: StateFlow<GamificationState> = combine(
@@ -2718,6 +2672,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
+            clearExcelImportIssues()
             try {
                 val currentShops = shops.value
                 val currentProducts = products.value
@@ -2737,6 +2692,62 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _importSummary.value = summary
 
+                if (summary.errorRows.isNotEmpty()) {
+                    val parsedErrors = summary.errorRows.mapIndexed { idx, row ->
+                        val rowNumStr = row.getOrNull(0) ?: "Unknown"
+                        val shopNo = row.getOrNull(1) ?: "N/A"
+                        val prodType = row.getOrNull(2) ?: "N/A"
+                        val reason = row.getOrNull(3) ?: "Validation error during parse"
+                        
+                        val matchedShop = currentShops.find { it.shopNumber.equals(shopNo, ignoreCase = true) }
+                        val displayShopName = matchedShop?.storeName ?: shopNo
+                        
+                        val fix = when {
+                            reason.contains("Shop No is empty", ignoreCase = true) || reason.contains("Shop Number does not exist", ignoreCase = true) -> "Verify that the shop number exists in your Shop Master list."
+                            reason.contains("Product Type is empty", ignoreCase = true) || reason.contains("Product Type does not exist", ignoreCase = true) -> "Verify that the product type exists in your Product Master list."
+                            reason.contains("Entry Date", ignoreCase = true) -> "Ensure the Date column uses a valid date format like 'dd MMM yyyy' (e.g., '22 Jul 2026')."
+                            reason.contains("numerical values", ignoreCase = true) -> "Verify that 'Packets Given' and 'Rate per Packet' are valid non-negative numbers."
+                            reason.contains("Packets Returned", ignoreCase = true) -> "Ensure 'Packets Returned' is non-negative and less than or equal to 'Packets Given'."
+                            else -> "Verify the data format and values in your Excel file."
+                        }
+
+                        SalesValidationError(
+                            id = -2000 - idx,
+                            shopName = displayShopName,
+                            entryDate = System.currentTimeMillis(),
+                            productName = prodType,
+                            ratePerPacket = 0.0,
+                            sellingPrice = 0.0,
+                            productionCost = 0.0,
+                            profit = 0.0,
+                            problems = listOf(reason),
+                            saleEntry = SalesEntry(
+                                id = -2000 - idx,
+                                shopNumber = shopNo,
+                                shopName = displayShopName,
+                                entryDate = System.currentTimeMillis(),
+                                locationNumber = "",
+                                productName = prodType,
+                                packetsGiven = 0,
+                                packetsReturned = 0,
+                                packetsSold = 0,
+                                ratePerPacket = 0.0,
+                                totalAmount = 0.0,
+                                profitPerPacket = 0.0,
+                                totalProfit = 0.0,
+                                status = "Error"
+                            ),
+                            issueType = "Excel Import Error",
+                            detailedDescription = "Excel Import Error: Row $rowNumStr, Sheet: First Sheet. Reason: $reason",
+                            suggestedFix = fix,
+                            isExcelError = true,
+                            excelRow = rowNumStr.toIntOrNull() ?: (idx + 2),
+                            excelSheet = "First Sheet"
+                        )
+                    }
+                    _excelImportIssues.value = parsedErrors
+                }
+
                 if (summary.skippedRows > 0) {
                     triggerError(
                         module = "Sales Excel Import",
@@ -2748,6 +2759,40 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                val fix = "Ensure the file is a valid Excel spreadsheet (.xlsx) and contains required headers: Shop No, Product Type, Packets Given, and Rate per Packet."
+                val globalIssue = SalesValidationError(
+                    id = -1001,
+                    shopName = "N/A",
+                    entryDate = System.currentTimeMillis(),
+                    productName = "N/A",
+                    ratePerPacket = 0.0,
+                    sellingPrice = 0.0,
+                    productionCost = 0.0,
+                    profit = 0.0,
+                    problems = listOf(e.message ?: "Invalid file or structure"),
+                    saleEntry = SalesEntry(
+                        id = -1001,
+                        shopNumber = "N/A",
+                        shopName = "N/A",
+                        entryDate = System.currentTimeMillis(),
+                        locationNumber = "",
+                        productName = "N/A",
+                        packetsGiven = 0,
+                        packetsReturned = 0,
+                        packetsSold = 0,
+                        ratePerPacket = 0.0,
+                        totalAmount = 0.0,
+                        profitPerPacket = 0.0,
+                        totalProfit = 0.0,
+                        status = "Error"
+                    ),
+                    issueType = "Excel Import Error",
+                    detailedDescription = "File Import Error: ${e.message ?: "Failed to open or parse the Excel file."}",
+                    suggestedFix = fix,
+                    isExcelError = true,
+                    excelSheet = "N/A"
+                )
+                _excelImportIssues.value = listOf(globalIssue)
                 triggerError(
                     module = "Sales Excel Import",
                     operation = "importSalesFromExcel",
@@ -4264,7 +4309,14 @@ data class SalesValidationError(
     val productionCost: Double,
     val profit: Double,
     val problems: List<String>,
-    val saleEntry: SalesEntry
+    val saleEntry: SalesEntry,
+    val issueType: String = "Validation Error",
+    val detailedDescription: String = "",
+    val suggestedFix: String = "",
+    val isExcelError: Boolean = false,
+    val excelRow: Int? = null,
+    val excelColumn: String? = null,
+    val excelSheet: String? = null
 )
 
 data class ChatMessage(

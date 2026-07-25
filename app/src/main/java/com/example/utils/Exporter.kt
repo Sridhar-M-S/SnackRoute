@@ -62,7 +62,8 @@ object Exporter {
         val parsedPurchases: List<com.example.data.IngredientPurchase> = emptyList(),
         val parsedCalculations: List<com.example.data.CostCalculation> = emptyList(),
         val parsedCalculationItems: List<com.example.data.CostCalculationItem> = emptyList(),
-        val isDynamicProfitEnabledSetting: Boolean? = null
+        val isDynamicProfitEnabledSetting: Boolean? = null,
+        val errorRows: List<List<String>> = emptyList()
     )
 
     fun shareFile(context: Context, file: File, title: String) {
@@ -1515,7 +1516,8 @@ object Exporter {
                     context, "Sales_Import",
                     listOf("Row Number", "Shop No", "Product Type", "Reason", "Shop No Val", "Date Val", "Prod Val", "Given Val", "Return Val", "Rate Val", "Amount Val", "Status Val", "Remarks Val"),
                     listOf(listOf("1", "", "", e.message ?: "Invalid file format"))
-                )
+                ),
+                errorRows = listOf(listOf("1", "", "", e.message ?: "Invalid file format"))
             )
         }
         
@@ -1540,7 +1542,8 @@ object Exporter {
             invalidDatesCount = invalidDatesCount,
             failedRowsCount = failedRowsCount,
             errorReportFile = errorFile,
-            parsedSales = successSales
+            parsedSales = successSales,
+            errorRows = errorRows
         )
     }
 
