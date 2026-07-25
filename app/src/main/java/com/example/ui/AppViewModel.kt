@@ -1338,16 +1338,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             
             val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
             val shop = allShops.find { it.shopNumber == sale.shopNumber || it.storeName.equals(sale.shopName, ignoreCase = true) }
-            
-            val isCustomPriceSale = sale.customSellingPrice != null || sale.originalPacketRate != null
-            val basePriceRate = if (isCustomPriceSale) {
-                sale.originalPacketRate ?: sale.ratePerPacket
-            } else {
-                sale.ratePerPacket
-            }
-            
             val priceObj = product?.let { p ->
-                prices.find { it.productId == p.id && Math.abs(it.sellingPrice - basePriceRate) < 0.01 }
+                prices.find { it.productId == p.id && Math.abs(it.sellingPrice - sale.ratePerPacket) < 0.01 }
             }
             
             val productPrices = product?.let { p -> prices.filter { it.productId == p.id } } ?: emptyList()
@@ -1422,7 +1414,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (shop == null) {
                 problems.add("Missing Shop")
             }
-            if (product != null && priceObj == null && !isCustomPriceSale) {
+            if (product != null && priceObj == null) {
                 problems.add("Missing Rate Variant")
             }
             
@@ -1443,15 +1435,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 other.id != sale.id &&
                 other.shopNumber == sale.shopNumber &&
                 other.productName.equals(sale.productName, ignoreCase = true) &&
-                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(other.entryDate)) == saleDateStr &&
-                other.originalPacketRate == sale.originalPacketRate &&
-                other.ratePerPacket == sale.ratePerPacket &&
-                other.packetsGiven == sale.packetsGiven &&
-                other.packetsReturned == sale.packetsReturned &&
-                (other.customSellingPrice != null) == (sale.customSellingPrice != null) &&
-                other.customSellingPrice == sale.customSellingPrice &&
-                other.productionCostUsed == sale.productionCostUsed &&
-                other.profitPerPacket == sale.profitPerPacket
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(other.entryDate)) == saleDateStr
             }
             if (isDuplicate) {
                 problems.add("Duplicate Records")
@@ -1472,7 +1456,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             // Excel import inconsistencies or other calculations mismatch when product and rate variants are invalid
-            if (product == null || (priceObj == null && !isCustomPriceSale)) {
+            if (product == null || priceObj == null) {
                 if (Math.abs(sale.profitPerPacket - correctProfitPerPacket) > 0.02 || Math.abs(sale.totalProfit - correctTotalProfit) > 0.02) {
                     problems.add("Profit Calculation Mismatch")
                 }
@@ -1481,8 +1465,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             
-            // Perform background repairs silently if the record has valid product and variant details (or is a custom price sale with a valid product!)
-            if (product != null && (priceObj != null || isCustomPriceSale) && sale.packetsGiven >= 0 && sale.packetsReturned >= 0 && sale.packetsReturned <= sale.packetsGiven) {
+            // Perform background repairs silently if the record has valid product and variant details
+            if (product != null && priceObj != null && sale.packetsGiven >= 0 && sale.packetsReturned >= 0 && sale.packetsReturned <= sale.packetsGiven) {
                 val needsBackgroundRepair = sale.productionCostUsed == null ||
                         sale.productionCostUsed == 0.0 ||
                         Math.abs(sale.productionCostUsed - calculatedCost) > 0.01 ||
