@@ -5,6 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -35,7 +37,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -1120,55 +1127,208 @@ fun MonthlyChart(
         else -> data.maxOf { it.transactionCount }.toDouble().coerceAtLeast(1.0)
     }
 
-    LazyRow(
-        modifier = modifier.fillMaxWidth().height(200.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp)
-    ) {
-        items(data, key = { it.monthYear }) { item ->
-            val value = when (chartMetric) {
-                "Packets" -> item.totalPackets.toDouble()
-                "Sales" -> item.totalSales
-                "Profit" -> item.totalProfit
-                else -> item.transactionCount.toDouble()
-            }
-            val barHeight = ((value / maxVal) * 100.0).coerceAtLeast(10.0)
+    if (chartType == "Bar") {
+        LazyRow(
+            modifier = modifier.fillMaxWidth().height(200.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp)
+        ) {
+            items(data, key = { it.monthYear }) { item ->
+                val value = when (chartMetric) {
+                    "Packets" -> item.totalPackets.toDouble()
+                    "Sales" -> item.totalSales
+                    "Profit" -> item.totalProfit
+                    else -> item.transactionCount.toDouble()
+                }
+                val barHeight = ((value / maxVal) * 100.0).coerceAtLeast(10.0)
 
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(40.dp).clickable { onMonthSelected(item) }
-            ) {
-                // Chart Element
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.BottomCenter
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.width(40.dp).clickable { onMonthSelected(item) }
                 ) {
-                    if (chartType == "Bar") {
+                    // Chart Element
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
                         Box(
                             modifier = Modifier
                                 .width(32.dp)
                                 .height(barHeight.dp)
                                 .background(Color(0xFF6200EE), RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                         )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .background(Color(0xFF6200EE), CircleShape)
+                    }
+                    
+                    // Month Label
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = item.monthYear.substringBefore(" "),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    } else {
+        val scrollState = rememberScrollState()
+        val density = LocalDensity.current
+        val itemWidthDp = 48.dp // 40.dp column + 8.dp spacing
+        val paddingStartEndDp = 16.dp
+        val totalWidthDp = paddingStartEndDp * 2 + itemWidthDp * data.size - 8.dp
+        
+        val primaryColor = Color(0xFF6200EE)
+        val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+        val surfaceColor = MaterialTheme.colorScheme.surface
+        
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .horizontalScroll(scrollState)
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .width(totalWidthDp)
+                    .fillMaxHeight()
+            ) {
+                val itemWidthPx = itemWidthDp.toPx()
+                val paddingStartPx = paddingStartEndDp.toPx()
+                val canvasHeight = size.height
+                
+                val topPadding = 35.dp.toPx()
+                val bottomPadding = 35.dp.toPx()
+                val chartHeight = canvasHeight - topPadding - bottomPadding
+                
+                // Calculate coordinates for all points
+                val points = data.mapIndexed { index, item ->
+                    val value = when (chartMetric) {
+                        "Packets" -> item.totalPackets.toDouble()
+                        "Sales" -> item.totalSales
+                        "Profit" -> item.totalProfit
+                        else -> item.transactionCount.toDouble()
+                    }
+                    val x = paddingStartPx + index * itemWidthPx + (40.dp.toPx() / 2f)
+                    val y = canvasHeight - bottomPadding - ((value / maxVal) * chartHeight).toFloat()
+                    Offset(x, y)
+                }
+                
+                // Draw horizontal dashed lines
+                val linePaint = android.graphics.Paint().apply {
+                    color = onSurfaceColor.copy(alpha = 0.08f).toArgb()
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = 1.dp.toPx()
+                    pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f, 10f), 0f)
+                }
+                drawIntoCanvas { canvas ->
+                    val native = canvas.nativeCanvas
+                    native.drawLine(paddingStartPx, canvasHeight - bottomPadding, size.width - paddingStartPx, canvasHeight - bottomPadding, linePaint)
+                    native.drawLine(paddingStartPx, canvasHeight - bottomPadding - chartHeight / 2, size.width - paddingStartPx, canvasHeight - bottomPadding - chartHeight / 2, linePaint)
+                    native.drawLine(paddingStartPx, canvasHeight - bottomPadding - chartHeight, size.width - paddingStartPx, canvasHeight - bottomPadding - chartHeight, linePaint)
+                }
+                
+                // Draw area gradient and line paths
+                if (points.size > 1) {
+                    for (i in 0 until points.size - 1) {
+                        // Area gradient path
+                        val areaPath = Path().apply {
+                            moveTo(points[i].x, points[i].y)
+                            lineTo(points[i + 1].x, points[i + 1].y)
+                            lineTo(points[i + 1].x, canvasHeight - bottomPadding)
+                            lineTo(points[i].x, canvasHeight - bottomPadding)
+                            close()
+                        }
+                        drawPath(
+                            path = areaPath,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(primaryColor.copy(alpha = 0.15f), Color.Transparent),
+                                startY = points[i].y.coerceAtMost(points[i+1].y),
+                                endY = canvasHeight - bottomPadding
+                            )
+                        )
+                        
+                        // Line stroke
+                        drawLine(
+                            color = primaryColor,
+                            start = points[i],
+                            end = points[i + 1],
+                            strokeWidth = 2.5.dp.toPx(),
+                            cap = StrokeCap.Round
                         )
                     }
                 }
                 
-                // Month Label
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = item.monthYear.substringBefore(" "),
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // Draw dots and value labels above points
+                val textPaint = android.graphics.Paint().apply {
+                    color = onSurfaceColor.toArgb()
+                    textSize = 9.dp.toPx()
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                }
+                
+                points.forEachIndexed { index, point ->
+                    // Dot outer
+                    drawCircle(
+                        color = primaryColor,
+                        radius = 5.dp.toPx(),
+                        center = point
+                    )
+                    // Dot inner
+                    drawCircle(
+                        color = surfaceColor,
+                        radius = 2.5.dp.toPx(),
+                        center = point
+                    )
+                    
+                    // Draw value above point
+                    val item = data[index]
+                    val value = when (chartMetric) {
+                        "Packets" -> item.totalPackets.toDouble()
+                        "Sales" -> item.totalSales
+                        "Profit" -> item.totalProfit
+                        else -> item.transactionCount.toDouble()
+                    }
+                    val valueStr = when (chartMetric) {
+                        "Packets" -> "${value.toInt()}"
+                        "Sales" -> "₹${value.toInt()}"
+                        "Profit" -> "₹${value.toInt()}"
+                        else -> "${value.toInt()}"
+                    }
+                    drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.drawText(valueStr, point.x, point.y - 10.dp.toPx(), textPaint)
+                    }
+                }
+            }
+            
+            // Interaction Row to capture clicks and display month labels
+            Row(
+                modifier = Modifier
+                    .width(totalWidthDp)
+                    .fillMaxHeight()
+                    .padding(start = paddingStartEndDp, end = paddingStartEndDp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                data.forEach { item ->
+                    Column(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .fillMaxHeight()
+                            .clickable { onMonthSelected(item) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = item.monthYear.substringBefore(" "),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(bottom = 0.dp)
+                        )
+                    }
+                }
             }
         }
     }
