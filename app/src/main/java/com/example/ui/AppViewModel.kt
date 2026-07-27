@@ -336,6 +336,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updateReminderEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("sales_reminder_enabled", enabled).apply()
         _isReminderEnabled.value = enabled
+        com.example.utils.AlarmScheduler.scheduleDailyAlarm(getApplication())
     }
 
     fun updateDefaultReminderInterval(interval: Int) {
@@ -347,16 +348,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _notifyAfterDays.value = days
         prefs.edit().putInt("sales_reminder_interval", days).apply()
         _defaultReminderInterval.value = days
+        com.example.utils.AlarmScheduler.scheduleDailyAlarm(getApplication())
     }
 
     fun updateKeepVisibleDays(days: Int) {
         prefs.edit().putInt("sales_reminder_keep_visible_days", days).apply()
         _keepVisibleDays.value = days
+        com.example.utils.AlarmScheduler.scheduleDailyAlarm(getApplication())
     }
 
     fun updateReminderTime(time: String) {
         prefs.edit().putString("sales_reminder_time", time).apply()
         _reminderTime.value = time
+        com.example.utils.AlarmScheduler.scheduleDailyAlarm(getApplication())
     }
 
     fun sendTestNotification() {

@@ -35,6 +35,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Schedule daily reminders alarm
+        com.example.utils.AlarmScheduler.scheduleDailyAlarm(applicationContext)
+
+        // Request POST_NOTIFICATIONS runtime permission on Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val requestPermissionLauncher = registerForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+            ) { isGranted: Boolean ->
+                // Handled
+            }
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
         setContent {
             var isDarkThemeSet = isSystemInDarkTheme()
             var isDarkMode by remember { mutableStateOf(isDarkThemeSet) }
