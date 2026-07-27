@@ -1255,7 +1255,16 @@ fun SalesScreen(
                                             } else null
                                         }
                                         
-                                        applicableCalc?.totalProductionCost ?: (rateVal - configuredProfit)
+                                        if (applicableCalc != null) {
+                                            viewModel.calculateDynamicProductionCost(
+                                                calc = applicableCalc,
+                                                saleDateStr = saleDateStr,
+                                                allCalculationItemsList = viewModel.allCalculationItems.value,
+                                                purchasesList = viewModel.allIngredientPurchases.value
+                                            )
+                                        } else {
+                                            rateVal - configuredProfit
+                                        }
                                     } else {
                                         rateVal - configuredProfit
                                     }
@@ -1655,10 +1664,12 @@ fun SaleItemRow(
     
     val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
     val calculations by viewModel.allCostCalculations.collectAsStateWithLifecycle()
+    val allCalculationItems by viewModel.allCalculationItems.collectAsStateWithLifecycle()
+    val allIngredientPurchases by viewModel.allIngredientPurchases.collectAsStateWithLifecycle()
     
     var availablePrices by remember { mutableStateOf<List<com.example.data.ProductPrice>>(emptyList()) }
     
-    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations, item.originalPacketRate) {
+    LaunchedEffect(saleDate, isDynamicProfitEnabled, item.ratePerPacketStr, item.productName, availablePrices, calculations, allCalculationItems, allIngredientPurchases, item.originalPacketRate) {
         if (item.productName.isNotEmpty() && availablePrices.isNotEmpty()) {
             val sellingPrice = item.ratePerPacketStr.toDoubleOrNull() ?: 0.0
             
@@ -1677,7 +1688,12 @@ fun SaleItemRow(
                     .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
-                    val pc = applicableCalc.totalProductionCost
+                    val pc = viewModel.calculateDynamicProductionCost(
+                        calc = applicableCalc,
+                        saleDateStr = saleDateStr,
+                        allCalculationItemsList = allCalculationItems,
+                        purchasesList = allIngredientPurchases
+                    )
                     val pf = sellingPrice - pc
                     Pair(pc, pf)
                 } else {
@@ -1943,7 +1959,12 @@ fun SaleItemRow(
                                 } else null
                                 
                                 val variantProductionCost = if (latestCalcForVariant != null) {
-                                    latestCalcForVariant.totalProductionCost
+                                    viewModel.calculateDynamicProductionCost(
+                                        calc = latestCalcForVariant,
+                                        saleDateStr = saleDateStr,
+                                        allCalculationItemsList = allCalculationItems,
+                                        purchasesList = allIngredientPurchases
+                                    )
                                 } else {
                                     variant.sellingPrice - variant.profitPerPacket
                                 }
@@ -2026,7 +2047,12 @@ fun SaleItemRow(
                                 } else null
                                 
                                 val variantProductionCost = if (latestCalcForVariant != null) {
-                                    latestCalcForVariant.totalProductionCost
+                                    viewModel.calculateDynamicProductionCost(
+                                        calc = latestCalcForVariant,
+                                        saleDateStr = saleDateStr,
+                                        allCalculationItemsList = allCalculationItems,
+                                        purchasesList = allIngredientPurchases
+                                    )
                                 } else {
                                     variant.sellingPrice - variant.profitPerPacket
                                 }
@@ -2088,16 +2114,6 @@ fun SaleItemRow(
                         onDismissRequest = { rateMenuExpanded = false }
                     ) {
                         availablePrices.forEach { price ->
-                            val dynamicProfitOpt = if (isDynamicProfitEnabled) {
-                                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
-                                calculations
-                                    .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
-                                    .maxByOrNull { it.calculationDate }
-                                    ?.profitSnapshot
-                            } else null
-                            val profitToUse = dynamicProfitOpt ?: price.profitPerPacket
-                            val labelSuffix = if (dynamicProfitOpt != null) " (Dynamic Profit: ₹${String.format("%.2f", dynamicProfitOpt)})" else " (Profit: ₹${price.profitPerPacket})"
-                            
                             val standardProdCost = price.sellingPrice - price.profitPerPacket
                             val dynamicCalc = if (isDynamicProfitEnabled) {
                                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
@@ -2105,7 +2121,22 @@ fun SaleItemRow(
                                     .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
                                     .maxByOrNull { it.calculationDate }
                             } else null
-                            val prodCostToUse = dynamicCalc?.totalProductionCost ?: standardProdCost
+
+                            val prodCostToUse = if (dynamicCalc != null) {
+                                val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
+                                viewModel.calculateDynamicProductionCost(
+                                    calc = dynamicCalc,
+                                    saleDateStr = saleDateStr,
+                                    allCalculationItemsList = allCalculationItems,
+                                    purchasesList = allIngredientPurchases
+                                )
+                            } else standardProdCost
+
+                            val dynamicProfitOpt = if (isDynamicProfitEnabled && dynamicCalc != null) {
+                                price.sellingPrice - prodCostToUse
+                            } else null
+                            val profitToUse = dynamicProfitOpt ?: price.profitPerPacket
+                            val labelSuffix = if (dynamicProfitOpt != null) " (Dynamic Profit: ₹${String.format("%.2f", dynamicProfitOpt)})" else " (Profit: ₹${price.profitPerPacket})"
 
                             DropdownMenuItem(
                                 text = { Text("₹${price.sellingPrice}$labelSuffix") },

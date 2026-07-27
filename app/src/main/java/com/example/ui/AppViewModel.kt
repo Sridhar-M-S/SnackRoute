@@ -554,6 +554,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val productsList = repository.allProducts.first()
                 val pricesList = repository.getAllPrices()
                 val calculationsList = repository.allCalculations.first()
+                val purchasesList = repository.getAllPurchasesDirect()
+                val allCalculationItemsList = repository.getAllCalculationItemsDirect()
                 
                 val updatedSales = salesList.mapNotNull { sale ->
                     val product = productsList.find { it.productName.equals(sale.productName, ignoreCase = true) }
@@ -573,7 +575,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             .maxByOrNull { it.calculationDate }
                         
                         if (applicableCalc != null) {
-                            val pc = applicableCalc.totalProductionCost
+                            val pc = calculateDynamicProductionCost(
+                                calc = applicableCalc,
+                                saleDateStr = saleDateStr,
+                                allCalculationItemsList = allCalculationItemsList,
+                                purchasesList = purchasesList
+                            )
                             val pf = sale.ratePerPacket - pc
                             Pair(pc, pf)
                         } else {
@@ -620,6 +627,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    val allIngredients: StateFlow<List<Ingredient>> = repository.allIngredients
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val allIngredientPurchases: StateFlow<List<IngredientPurchase>> = repository.allPurchases
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     val allCostCalculations: StateFlow<List<CostCalculation>> = repository.allCalculations
         .stateIn(
@@ -1258,13 +1279,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val products: StateFlow<List<ProductMaster>> = repository.allProducts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val dynamicCostDataFlow = combine(
+        allCostCalculations,
+        allCalculationItems,
+        allIngredientPurchases,
+        isDynamicProfitEnabled
+    ) { calcs, items, purchases, enabled ->
+        DynamicCostData(calcs, items, purchases, enabled)
+    }
+
     val sales: StateFlow<List<SalesEntry>> = combine(
         repository.allSales,
         products,
         repository.getAllPricesFlow(),
-        allCostCalculations,
-        isDynamicProfitEnabled
-    ) { rawSales, prods, prices, calcs, dynamicEnabled ->
+        dynamicCostDataFlow
+    ) { rawSales, prods, prices, costData ->
+        val calcs = costData.calculations
+        val calcItems = costData.calculationItems
+        val purchases = costData.purchases
+        val dynamicEnabled = costData.isDynamicProfitEnabled
+        
         android.util.Log.d("DynamicCostEngine", "Mapping Sales: Dynamic Cost Engine = ${if (dynamicEnabled) "ON" else "OFF"}")
         rawSales.map { sale ->
             val product = prods.find { it.productName.equals(sale.productName, ignoreCase = true) }
@@ -1284,7 +1318,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
-                    val pc = applicableCalc.totalProductionCost
+                    val pc = calculateDynamicProductionCost(
+                        calc = applicableCalc,
+                        saleDateStr = saleDateStr,
+                        allCalculationItemsList = calcItems,
+                        purchasesList = purchases
+                    )
                     val pf = sale.ratePerPacket - pc
                     Pair(pc, pf)
                 } else {
@@ -3159,6 +3198,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun calculateDynamicProductionCost(
+        calc: CostCalculation,
+        saleDateStr: String,
+        allCalculationItemsList: List<CostCalculationItem>,
+        purchasesList: List<IngredientPurchase>
+    ): Double {
+        val calcItems = allCalculationItemsList.filter { it.costCalculationId == calc.calculationId }
+        var totalProductionCost = 0.0
+        
+        calcItems.forEach { item ->
+            val purchase = purchasesList
+                .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
+                .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+            
+            val ingredientCost = if (purchase != null) {
+                val costPerUsageUnit = calculateCostPerUsageUnit(
+                    purchasePrice = purchase.purchasePrice,
+                    purchaseQty = purchase.purchaseQuantity,
+                    purchaseUnit = purchase.unit,
+                    usageUnit = item.usageUnit,
+                    sealCost = purchase.sealCost,
+                    printingCost = purchase.printingCost,
+                    largeCoverDistribution = purchase.largeCoverDistribution
+                )
+                costPerUsageUnit * item.usageQuantity
+            } else {
+                item.calculatedCost
+            }
+            totalProductionCost += ingredientCost
+        }
+        return totalProductionCost
+    }
+
     fun recalculateHistoricalSales(effectiveDateStr: String, recalculateAll: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -3201,33 +3273,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     } else null
                     
                     if (calc != null) {
-                        // Step 2: For every ingredient inside that Recipe, find latest Purchase Price (Purchase Date <= Sale Date)
-                        val calcItems = allCalculationItemsList.filter { it.costCalculationId == calc.calculationId }
-                        var totalProductionCost = 0.0
-                        
-                        calcItems.forEach { item ->
-                            val purchase = purchasesList
-                                .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
-                                .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
-                                ?: purchasesList.filter { it.ingredientId == item.ingredientId }
-                                    .minWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
-                            
-                            val ingredientCost = if (purchase != null) {
-                                val costPerUsageUnit = calculateCostPerUsageUnit(
-                                    purchasePrice = purchase.purchasePrice,
-                                    purchaseQty = purchase.purchaseQuantity,
-                                    purchaseUnit = purchase.unit,
-                                    usageUnit = item.usageUnit,
-                                    sealCost = purchase.sealCost,
-                                    printingCost = purchase.printingCost,
-                                    largeCoverDistribution = purchase.largeCoverDistribution
-                                )
-                                costPerUsageUnit * item.usageQuantity
-                            } else {
-                                item.calculatedCost
-                            }
-                            totalProductionCost += ingredientCost
-                        }
+                        val totalProductionCost = calculateDynamicProductionCost(
+                            calc = calc,
+                            saleDateStr = saleDateStr,
+                            allCalculationItemsList = allCalculationItemsList,
+                            purchasesList = purchasesList
+                        )
                         
                         // Step 5: Profit = Selling Price - Production Cost
                         val sellingPrice = sale.customSellingPrice ?: sale.ratePerPacket
@@ -4099,19 +4150,8 @@ User Question: $userQuestion
         }
     }
 
-    val allIngredients: StateFlow<List<Ingredient>> = repository.allIngredients
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    // Relocated ingredient, purchase, dynamicCostDataFlow, and sales flows
 
-    val allIngredientPurchases: StateFlow<List<IngredientPurchase>> = repository.allPurchases
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
 
     fun addIngredient(name: String, variety: String, category: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -4269,7 +4309,14 @@ User Question: $userQuestion
                     .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
-                    val pc = applicableCalc.totalProductionCost
+                    val purchasesList = repository.getAllPurchasesDirect()
+                    val allCalculationItemsList = repository.getAllCalculationItemsDirect()
+                    val pc = calculateDynamicProductionCost(
+                        calc = applicableCalc,
+                        saleDateStr = saleDateStr,
+                        allCalculationItemsList = allCalculationItemsList,
+                        purchasesList = purchasesList
+                    )
                     val pf = sellingPrice - pc
                     Pair(pc, pf)
                 } else {
@@ -4337,4 +4384,11 @@ data class BusinessSuggestion(
     val title: String,
     val message: String,
     val type: SuggestionType
+)
+
+data class DynamicCostData(
+    val calculations: List<CostCalculation>,
+    val calculationItems: List<CostCalculationItem>,
+    val purchases: List<IngredientPurchase>,
+    val isDynamicProfitEnabled: Boolean
 )

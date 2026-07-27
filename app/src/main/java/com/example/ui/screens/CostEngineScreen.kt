@@ -1056,7 +1056,9 @@ fun CalculateCostTabContent(
             items(activeIngredients) { ingredient ->
                 val isChecked = checkedIngredients.contains(ingredient.id)
                 val ingredientPurchases = purchases.filter { it.ingredientId == ingredient.id }
-                val latestPurchase = ingredientPurchases.firstOrNull() // Purchases sorted by date desc
+                val latestPurchase = ingredientPurchases
+                    .filter { it.purchaseDate <= effectiveDate }
+                    .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
 
                 // Usage quantity & unit local controls
                 val usageQty = ingredientUsages[ingredient.id] ?: 0.0
@@ -1236,7 +1238,9 @@ fun CalculateCostTabContent(
 
             checkedIngredients.forEach { id ->
                 val ingredientObj = ingredients.find { it.id == id } ?: return@forEach
-                val purchaseObj = purchases.find { it.ingredientId == id }
+                val purchaseObj = purchases
+                    .filter { it.ingredientId == id && it.purchaseDate <= effectiveDate }
+                    .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
                 val qty = ingredientUsages[id] ?: 0.0
                 val unit = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(purchaseObj?.unit)
                 
@@ -1345,7 +1349,9 @@ fun CalculateCostTabContent(
 
                                 val itemsList = checkedIngredients.map { id ->
                                     val ing = ingredients.find { it.id == id }!!
-                                    val p = purchases.find { it.ingredientId == id }
+                                    val p = purchases
+                                        .filter { it.ingredientId == id && it.purchaseDate <= effectiveDate }
+                                        .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
                                     val qty = ingredientUsages[id] ?: 0.0
                                     val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
                                     
@@ -1395,7 +1401,9 @@ fun CalculateCostTabContent(
 
                                 val itemsList = checkedIngredients.map { id ->
                                     val ing = ingredients.find { it.id == id }!!
-                                    val p = purchases.find { it.ingredientId == id }
+                                    val p = purchases
+                                        .filter { it.ingredientId == id && it.purchaseDate <= effectiveDate }
+                                        .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
                                     val qty = ingredientUsages[id] ?: 0.0
                                     val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
                                     
