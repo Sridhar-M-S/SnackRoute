@@ -37,7 +37,7 @@ class AlarmReceiver : BroadcastReceiver() {
             val applicationScope = CoroutineScope(Dispatchers.IO)
             applicationScope.launch {
                 try {
-                    val prefs = context.getSharedPreferences("sales_reminder_prefs", Context.MODE_PRIVATE)
+                    val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
                     val enabled = prefs.getBoolean("sales_reminder_enabled", true)
                     if (!enabled) {
                         Log.d(TAG, "Reminders are disabled, skipping notification processing")

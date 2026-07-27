@@ -14,7 +14,7 @@ object AlarmScheduler {
     const val ACTION_TRIGGER_DAILY_CHECKLIST = "com.example.ACTION_TRIGGER_DAILY_CHECKLIST"
 
     fun scheduleDailyAlarm(context: Context) {
-        val prefs = context.getSharedPreferences("sales_reminder_prefs", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("sales_reminder_enabled", true)
         val timeStr = prefs.getString("sales_reminder_time", "20:00") ?: "20:00"
 
@@ -58,30 +58,60 @@ object AlarmScheduler {
         }
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setAndAllowWhileIdle(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        calendar.timeInMillis,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "Scheduled exact alarm for $timeStr using setExactAndAllowWhileIdle")
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        calendar.timeInMillis,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "Scheduled alarm for $timeStr using setAndAllowWhileIdle (exact alarms not permitted)")
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     calendar.timeInMillis,
                     pendingIntent
                 )
+                Log.d(TAG, "Scheduled exact alarm for $timeStr using setExactAndAllowWhileIdle")
             } else {
                 alarmManager.set(
                     AlarmManager.RTC_WAKEUP,
                     calendar.timeInMillis,
                     pendingIntent
                 )
+                Log.d(TAG, "Scheduled alarm for $timeStr using set")
             }
-            Log.d(TAG, "Alarm scheduled successfully for $timeStr (millis: ${calendar.timeInMillis})")
         } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException scheduling alarm: ${e.message}")
-            // Fallback to standard set if exact/while-idle fails
+            Log.e(TAG, "SecurityException scheduling exact alarm: ${e.message}")
             try {
-                alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        calendar.timeInMillis,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "Scheduled alarm for $timeStr using fallback setAndAllowWhileIdle after SecurityException")
+                } else {
+                    alarmManager.set(
+                        AlarmManager.RTC_WAKEUP,
+                        calendar.timeInMillis,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "Scheduled alarm for $timeStr using fallback set after SecurityException")
+                }
             } catch (ex: Exception) {
-                ex.printStackTrace()
+                Log.e(TAG, "Exception during fallback scheduling: ${ex.message}", ex)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Exception scheduling alarm: ${e.message}", e)
         }
     }
 }
