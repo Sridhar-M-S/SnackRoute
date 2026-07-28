@@ -381,13 +381,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _isReminderEnabled,
         _notifyAfterDays,
         _keepVisibleDays,
-        repository.allProducts
-    ) { shopsWithLastSale, enabled, notifyAfter, keepVisible, products ->
+        _reminderTime
+    ) { shopsWithLastSale, enabled, notifyAfter, keepVisible, rTime ->
         if (!enabled) return@combine emptyList<ReminderItem>()
 
         val now = System.currentTimeMillis()
         val oneDayMs = 24 * 60 * 60 * 1000L
         val nowMidnight = getMidnight(now)
+
+        val (targetHour, targetMinute) = com.example.utils.AlarmScheduler.parseTime(rTime)
+        val calendarNow = Calendar.getInstance()
+        val currentHour = calendarNow.get(Calendar.HOUR_OF_DAY)
+        val currentMinute = calendarNow.get(Calendar.MINUTE)
+        val isTimePassed = (currentHour > targetHour) || (currentHour == targetHour && currentMinute >= targetMinute)
 
         val activeShopItems = shopsWithLastSale.mapNotNull { item ->
             val shop = item.shop
@@ -403,7 +409,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (daysSince < interval) return@mapNotNull null
             if (daysSince > keepVisible) return@mapNotNull null
 
-            val daysDifference = interval - daysSince
+            // If it is exactly today's reminder, only allow it if the configured notification time has passed
+            if (daysSince == interval && !isTimePassed) return@mapNotNull null
 
             Triple(item, daysSince, interval)
         }
@@ -413,6 +420,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val activeShopNumbers = activeShopItems.map { it.first.shop.shopNumber }
         val salesForActiveShops = repository.getSalesForShopsDirect(activeShopNumbers)
         val salesByShop = salesForActiveShops.groupBy { it.shopNumber }
+        val allProds = products.value
 
         activeShopItems.map { (item, daysSince, interval) ->
             val shop = item.shop
@@ -427,7 +435,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             val latestSales = shopSales.filter { it.entryDate == lastSaleDate }
             val lastSaleProducts = latestSales.map { sale ->
-                val matchingProduct = products.find { it.productName == sale.productName }
+                val matchingProduct = allProds.find { it.productName == sale.productName }
                 val variety = matchingProduct?.productCategory ?: "Standard"
                 LastSaleProduct(
                     productName = sale.productName,
