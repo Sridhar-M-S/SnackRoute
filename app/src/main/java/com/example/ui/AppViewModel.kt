@@ -2,6 +2,7 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -317,6 +318,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _reminderTime = MutableStateFlow(prefs.getString("sales_reminder_time", "20:00") ?: "20:00")
     val reminderTime: StateFlow<String> = _reminderTime.asStateFlow()
 
+    private val _reminderTrigger = MutableStateFlow(0L)
+    val reminderTrigger: StateFlow<Long> = _reminderTrigger.asStateFlow()
+
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "in_app_notifications_set" || key?.startsWith("notified_due_") == true) {
+            loadInAppNotifications()
+            _reminderTrigger.value = System.currentTimeMillis()
+        }
+    }
+
+    private val combinedReminderTime: Flow<String> = combine(_reminderTime, _reminderTrigger) { rTime, _ -> rTime }
+
     private val _notifyAfterDays = MutableStateFlow(prefs.getInt("sales_reminder_notify_after_days", 7))
     val notifyAfterDays: StateFlow<Int> = _notifyAfterDays.asStateFlow()
 
@@ -381,7 +394,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _isReminderEnabled,
         _notifyAfterDays,
         _keepVisibleDays,
-        _reminderTime
+        combinedReminderTime
     ) { shopsWithLastSale, enabled, notifyAfter, keepVisible, rTime ->
         if (!enabled) return@combine emptyList<ReminderItem>()
 
@@ -2163,6 +2176,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         loadInAppNotifications()
 
         viewModelScope.launch(Dispatchers.Default) {
@@ -4359,6 +4373,11 @@ User Question: $userQuestion
         } catch (e: Exception) {
             triggerError("Validation", "recalculateSalesRecord", "RecalculationError", e.message ?: "", "", e)
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
     }
 }
 
