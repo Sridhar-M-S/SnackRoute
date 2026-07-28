@@ -1610,6 +1610,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     val salesSearchQuery = MutableStateFlow("")
     val salesFilterShopNumber = MutableStateFlow<String?>(null)
+    val salesFilterCategory = MutableStateFlow<String?>(null)
+    val salesFilterProductName = MutableStateFlow<String?>(null)
+    val salesFilterSellingPrice = MutableStateFlow<Double?>(null)
+
+    fun setSalesBreakdownFilters(category: String?, productName: String?, sellingPrice: Double?) {
+        salesFilterCategory.value = category
+        salesFilterProductName.value = productName
+        salesFilterSellingPrice.value = sellingPrice
+    }
+
+    fun clearSalesBreakdownFilters() {
+        salesFilterCategory.value = null
+        salesFilterProductName.value = null
+        salesFilterSellingPrice.value = null
+    }
 
     fun setSalesSearchQuery(query: String) {
         salesSearchQuery.value = query

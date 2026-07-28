@@ -59,7 +59,8 @@ fun SalesScreen(
     onOpenChat: () -> Unit,
     onOpenTimetable: () -> Unit,
     onBackToParent: () -> Unit = {},
-    showBackButton: Boolean = false
+    showBackButton: Boolean = false,
+    onNavigateToBreakdown: () -> Unit = {}
 ) {
     val context = LocalContext.current
     
@@ -105,6 +106,21 @@ fun SalesScreen(
     var filterStatus by remember { mutableStateOf<String?>(null) }
     var filterStartDate by remember { mutableStateOf<Long?>(null) }
     var filterEndDate by remember { mutableStateOf<Long?>(null) }
+    var filterCategory by remember { mutableStateOf<String?>(null) }
+    var filterSellingPrice by remember { mutableStateOf<Double?>(null) }
+
+    val extCategory by viewModel.salesFilterCategory.collectAsStateWithLifecycle()
+    val extProductName by viewModel.salesFilterProductName.collectAsStateWithLifecycle()
+    val extSellingPrice by viewModel.salesFilterSellingPrice.collectAsStateWithLifecycle()
+
+    LaunchedEffect(extCategory, extProductName, extSellingPrice) {
+        if (extCategory != null || extProductName != null || extSellingPrice != null) {
+            filterCategory = extCategory
+            filterProductName = extProductName
+            filterSellingPrice = extSellingPrice
+            filterExpanded = true
+        }
+    }
     var sortBy by remember { mutableStateOf("Date") } // Date, Amount, Profit
     var sortAscending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -122,14 +138,16 @@ fun SalesScreen(
     // --- Filter logic ---
     LaunchedEffect(
         searchQuery, filterShopNumber, filterLocationNumber,
-        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy, sortAscending
+        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy, sortAscending,
+        filterCategory, filterSellingPrice
     ) {
         listState.scrollToItem(0)
     }
 
     val filteredSales = remember(
         sales, searchQuery, filterShopNumber, filterLocationNumber,
-        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy, sortAscending
+        filterProductName, filterStatus, filterStartDate, filterEndDate, sortBy, sortAscending,
+        filterCategory, filterSellingPrice, products
     ) {
         var list = sales.filter { sale ->
             // Search filter
@@ -153,7 +171,11 @@ fun SalesScreen(
             val matchDate = (filterStartDate == null || sale.entryDate >= filterStartDate!!) &&
                     (filterEndDate == null || sale.entryDate <= filterEndDate!! + 86400000L) // Include whole end day
 
-            matchSearch && matchShop && matchLocation && matchProduct && matchStatus && matchDate
+            // Category & Selling Price filters from Packets Sold Breakdown
+            val matchCategory = filterCategory == null || products.find { it.productName.equals(sale.productName, ignoreCase = true) }?.productCategory == filterCategory
+            val matchSellingPrice = filterSellingPrice == null || Math.abs(sale.ratePerPacket - filterSellingPrice!!) < 0.01
+
+            matchSearch && matchShop && matchLocation && matchProduct && matchStatus && matchDate && matchCategory && matchSellingPrice
         }
 
         // Sorting
@@ -571,8 +593,11 @@ fun SalesScreen(
                                 IconButton(onClick = {
                                     viewModel.setSalesFilterShopNumber(null)
                                     viewModel.setSalesSearchQuery("")
+                                    viewModel.clearSalesBreakdownFilters()
                                     filterLocationNumber = null
                                     filterProductName = null
+                                    filterCategory = null
+                                    filterSellingPrice = null
                                     filterStatus = null
                                     filterStartDate = null
                                     filterEndDate = null
@@ -680,7 +705,8 @@ fun SalesScreen(
                                         icon = Icons.Default.ShoppingBag,
                                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.weight(1f).testTag("summary_total_packets")
+                                        modifier = Modifier.weight(1f).testTag("summary_total_packets"),
+                                        onClick = onNavigateToBreakdown
                                     )
                                     SalesSummaryCard(
                                         label = "Total Records",

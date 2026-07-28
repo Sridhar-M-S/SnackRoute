@@ -222,7 +222,8 @@ class MainActivity : ComponentActivity() {
                                             onOpenChat = { isAiChatOpen = true },
                                             onOpenTimetable = { isTimetableOpen = true },
                                             onBackToParent = { navigateBack() },
-                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Sales"
+                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Sales",
+                                            onNavigateToBreakdown = { navigateToChildTab("PacketsSoldBreakdown") }
                                         )
                                     }
                                 }
@@ -280,6 +281,15 @@ class MainActivity : ComponentActivity() {
                                         RemarksScreen(
                                             viewModel = viewModel,
                                             onBack = { navigateBack() }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("PacketsSoldBreakdown")) {
+                                    Box(modifier = if (currentTab == "PacketsSoldBreakdown") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        PacketsSoldBreakdownScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() },
+                                            onNavigateToSales = { navigateToParentTab("Sales") }
                                         )
                                     }
                                 }
