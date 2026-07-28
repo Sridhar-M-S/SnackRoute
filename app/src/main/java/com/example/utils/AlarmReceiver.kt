@@ -85,11 +85,10 @@ class AlarmReceiver : BroadcastReceiver() {
                     }
 
                     if (generatedCount > 0) {
-                        NotificationHelper.showNotification(
-                            context,
-                            "Today's Checklist Generated",
-                            "Generated $generatedCount shop visit tasks based on your weekly timetable!"
-                        )
+                        val title = "Today's Checklist Generated"
+                        val body = "Generated $generatedCount shop visit tasks based on your weekly timetable!"
+                        NotificationHelper.showNotification(context, title, body)
+                        saveInAppNotification(context, title, body)
                     }
 
                     // 2. Overdue Sales Reminders Notification
@@ -124,6 +123,7 @@ class AlarmReceiver : BroadcastReceiver() {
                                     val body = "A sales reminder is due today for ${shop.storeName} in $locName."
 
                                     NotificationHelper.showNotification(context, title, body)
+                                    saveInAppNotification(context, title, body)
                                     reminderNotifiedCount++
                                 }
                             }
@@ -137,6 +137,24 @@ class AlarmReceiver : BroadcastReceiver() {
                     pendingResult.finish()
                 }
             }
+        }
+    }
+
+    private fun saveInAppNotification(context: Context, title: String, message: String) {
+        try {
+            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+            val serializedSet = prefs.getStringSet("in_app_notifications_set", emptySet())?.toMutableSet() ?: mutableSetOf()
+            
+            val id = java.util.UUID.randomUUID().toString()
+            val timestamp = System.currentTimeMillis()
+            val isRead = false
+            val serialized = "$id||$title||$message||$timestamp||$isRead"
+            
+            serializedSet.add(serialized)
+            prefs.edit().putStringSet("in_app_notifications_set", serializedSet).apply()
+            Log.d("AlarmReceiver", "Saved in-app notification successfully: $title")
+        } catch (e: Exception) {
+            Log.e("AlarmReceiver", "Failed to save in-app notification: ${e.message}", e)
         }
     }
 

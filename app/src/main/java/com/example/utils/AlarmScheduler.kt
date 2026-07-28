@@ -13,6 +13,40 @@ object AlarmScheduler {
     private const val ALARM_REQ_CODE = 1001
     const val ACTION_TRIGGER_DAILY_CHECKLIST = "com.example.ACTION_TRIGGER_DAILY_CHECKLIST"
 
+    fun parseTime(timeStr: String): Pair<Int, Int> {
+        val clean = timeStr.trim().replace("\\s+".toRegex(), " ").uppercase()
+        val isPm = clean.endsWith("PM")
+        val isAm = clean.endsWith("AM")
+        val timePart = if (isPm || isAm) {
+            if (clean.length > 2) {
+                clean.substring(0, clean.length - 2).trim()
+            } else {
+                clean
+            }
+        } else {
+            clean
+        }
+        val parts = timePart.split(":")
+        var hour = parts.getOrNull(0)?.toIntOrNull() ?: 20
+        val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        if (isPm) {
+            if (hour < 12) hour += 12
+        } else if (isAm) {
+            if (hour == 12) hour = 0
+        }
+        return Pair(hour, minute)
+    }
+
+    fun formatTo12Hour(hour: Int, minute: Int): String {
+        val suffix = if (hour >= 12) "PM" else "AM"
+        val displayHour = when {
+            hour == 0 -> 12
+            hour > 12 -> hour - 12
+            else -> hour
+        }
+        return String.format(java.util.Locale.US, "%02d:%02d %s", displayHour, minute, suffix)
+    }
+
     fun scheduleDailyAlarm(context: Context) {
         val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("sales_reminder_enabled", true)
@@ -34,28 +68,44 @@ object AlarmScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
 
+        // Cancel existing alarm first to prevent duplicates or stale times
+        alarmManager.cancel(pendingIntent)
+
         if (!enabled) {
-            alarmManager.cancel(pendingIntent)
             Log.d(TAG, "Notification disabled, cancelled existing alarms")
             return
         }
 
-        val parts = timeStr.split(":")
-        val hour = parts.getOrNull(0)?.toIntOrNull() ?: 20
-        val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        val (hour, minute) = parseTime(timeStr)
+
+        val nowMs = System.currentTimeMillis()
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US)
+        
+        Log.d(TAG, "Calculating trigger time. Configured: $timeStr (Parsed Hour: $hour, Minute: $minute)")
+        Log.d(TAG, "Current time: ${sdf.format(java.util.Date(nowMs))} ($nowMs ms)")
 
         val calendar = Calendar.getInstance().apply {
-            timeInMillis = System.currentTimeMillis()
+            timeInMillis = nowMs
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
 
+        val originalTargetMs = calendar.timeInMillis
+        Log.d(TAG, "Initial target time (today): ${sdf.format(java.util.Date(originalTargetMs))} ($originalTargetMs ms)")
+
         // If time is in the past, set for tomorrow
-        if (calendar.timeInMillis <= System.currentTimeMillis()) {
+        if (calendar.timeInMillis <= nowMs) {
             calendar.add(Calendar.DAY_OF_YEAR, 1)
+            Log.d(TAG, "Target time is in the past. Rolled forward to tomorrow: ${sdf.format(java.util.Date(calendar.timeInMillis))} (${calendar.timeInMillis} ms)")
+        } else {
+            Log.d(TAG, "Target time is in the future. Kept for today: ${sdf.format(java.util.Date(calendar.timeInMillis))} (${calendar.timeInMillis} ms)")
         }
+
+        val finalTriggerMs = calendar.timeInMillis
+        val delaySec = (finalTriggerMs - nowMs) / 1000.0
+        Log.d(TAG, "Final scheduled trigger time: ${sdf.format(java.util.Date(finalTriggerMs))} in $delaySec seconds ($finalTriggerMs ms)")
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

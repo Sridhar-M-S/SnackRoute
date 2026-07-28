@@ -446,8 +446,10 @@ fun SettingsScreen(
                                     .width(120.dp)
                                     .clickable { showTimePickerDialog = true }
                             ) {
+                                val parsedPair = com.example.utils.AlarmScheduler.parseTime(reminderTime)
+                                val formattedDisplayTime = com.example.utils.AlarmScheduler.formatTo12Hour(parsedPair.first, parsedPair.second)
                                 OutlinedTextField(
-                                    value = reminderTime,
+                                    value = formattedDisplayTime,
                                     onValueChange = {},
                                     readOnly = true,
                                     enabled = false,
@@ -463,12 +465,11 @@ fun SettingsScreen(
                         }
 
                         if (showTimePickerDialog) {
-                            val initialHour = reminderTime.substringBefore(":", "20").toIntOrNull() ?: 20
-                            val initialMinute = reminderTime.substringAfter(":", "00").toIntOrNull() ?: 0
+                            val parsedPair = com.example.utils.AlarmScheduler.parseTime(reminderTime)
                             val timePickerState = rememberTimePickerState(
-                                initialHour = initialHour,
-                                initialMinute = initialMinute,
-                                is24Hour = true
+                                initialHour = parsedPair.first,
+                                initialMinute = parsedPair.second,
+                                is24Hour = false
                             )
                             
                             AlertDialog(
@@ -476,7 +477,7 @@ fun SettingsScreen(
                                 confirmButton = {
                                     TextButton(
                                         onClick = {
-                                            val formattedTime = String.format(java.util.Locale.US, "%02d:%02d", timePickerState.hour, timePickerState.minute)
+                                            val formattedTime = com.example.utils.AlarmScheduler.formatTo12Hour(timePickerState.hour, timePickerState.minute)
                                             viewModel.updateReminderTime(formattedTime)
                                             showTimePickerDialog = false
                                         },
