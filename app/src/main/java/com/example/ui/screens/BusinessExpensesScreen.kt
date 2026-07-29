@@ -57,6 +57,16 @@ fun BusinessExpensesScreen(
 ) {
     val context = LocalContext.current
     val expenses by viewModel.allExpensesList.collectAsStateWithLifecycle()
+    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
+    val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importExpensesFromExcel(context, uri)
+        }
+    }
 
     var activeTab by remember { mutableStateOf("History") } // History, Category Analysis, Monthly Reports
     val tabs = listOf("History", "Category Analysis", "Monthly Reports")
@@ -218,6 +228,12 @@ fun BusinessExpensesScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        modifier = Modifier.testTag("btn_expenses_import")
+                    ) {
+                        Icon(Icons.Default.Upload, contentDescription = "Import Excel")
+                    }
                     IconButton(
                         onClick = { viewModel.exportExpensesToExcel(context) },
                         modifier = Modifier.testTag("btn_expenses_export")
@@ -598,6 +614,115 @@ fun BusinessExpensesScreen(
             onConfirm = { expense ->
                 viewModel.updateExpense(expense)
                 showAddEditDialog = null
+            }
+        )
+    }
+
+    // --- Importing Loading Dialog ---
+    if (isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing Expenses") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(8.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Reading spreadsheet and importing business expenses...")
+                }
+            }
+        )
+    }
+
+    // --- Excel Import Summary Dialog ---
+    if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.BUSINESS_EXPENSES) {
+        val summary = importSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (summary.failedRowsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Import Summary", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Text("The spreadsheet import has completed. Here are the details:")
+                    
+                    HorizontalDivider()
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Total Rows Scanned:", fontWeight = FontWeight.Medium)
+                        Text("${summary.totalRows}")
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Successfully Imported:", fontWeight = FontWeight.Medium)
+                        Text("${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Failed Rows:", fontWeight = FontWeight.Medium)
+                        Text("${summary.failedRowsCount}", color = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    if (summary.errorReportFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Some rows could not be imported due to formatting or validation errors. Download the error report to review.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (summary.errorReportFile != null) {
+                        Button(
+                            onClick = {
+                                com.example.utils.Exporter.shareFile(context, summary.errorReportFile, "Expenses Import Error Report")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Download Report", fontSize = 11.sp)
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.weight(1f).testTag("btn_close_import_summary")
+                    ) {
+                        Text("Close")
+                    }
+                }
             }
         )
     }

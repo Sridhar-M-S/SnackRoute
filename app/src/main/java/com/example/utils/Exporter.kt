@@ -32,7 +32,7 @@ object Exporter {
     )
 
     enum class ImportType {
-        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE, BUSINESS_EXPENSES
+        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE, BUSINESS_EXPENSES, UNIFIED_BACKUP
     }
 
     data class ImportSummary(
@@ -65,7 +65,8 @@ object Exporter {
         val parsedCalculations: List<com.example.data.CostCalculation> = emptyList(),
         val parsedCalculationItems: List<com.example.data.CostCalculationItem> = emptyList(),
         val isDynamicProfitEnabledSetting: Boolean? = null,
-        val errorRows: List<List<String>> = emptyList()
+        val errorRows: List<List<String>> = emptyList(),
+        val remarks: String? = null
     )
 
     fun shareFile(context: Context, file: File, title: String) {
@@ -597,10 +598,21 @@ object Exporter {
                     var dateLong = timestampStr?.toDoubleOrNull()?.toLong()
                     if (dateLong == null && dateIdx != null) {
                         val dateStr = getCellValueAsString(row, dateIdx)?.trim() ?: ""
-                        try {
-                            dateLong = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).parse(dateStr)?.time
-                        } catch (e: Exception) {
-                            // fallback
+                        val formats = listOf(
+                            "dd MMM yyyy",
+                            "yyyy-MM-dd",
+                            "dd-MM-yyyy",
+                            "dd/MM/yyyy",
+                            "MM/dd/yyyy",
+                            "yyyy/MM/dd"
+                        )
+                        for (fmt in formats) {
+                            try {
+                                dateLong = SimpleDateFormat(fmt, Locale.getDefault()).parse(dateStr)?.time
+                                if (dateLong != null) break
+                            } catch (e: Exception) {
+                                // try next format
+                            }
                         }
                     }
                     val finalDate = dateLong ?: System.currentTimeMillis()
@@ -2579,5 +2591,455 @@ object Exporter {
                 )
             )
         }
+    }
+
+    fun exportAllUnified(
+        context: Context,
+        locations: List<LocationMaster>,
+        shops: List<ShopMaster>,
+        products: List<ProductMaster>,
+        allPrices: List<com.example.data.ProductPrice>,
+        salesList: List<SalesEntry>,
+        expensesList: List<BusinessExpense>,
+        tasks: List<DailyTask>,
+        ingredients: List<com.example.data.Ingredient>,
+        purchases: List<com.example.data.IngredientPurchase>,
+        calculations: List<com.example.data.CostCalculation>,
+        calculationItems: List<com.example.data.CostCalculationItem>,
+        isDynamicProfitEnabled: Boolean
+    ) {
+        val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
+        val file = File(context.cacheDir, fileName)
+
+        try {
+            val workbook = XSSFWorkbook()
+
+            // Define styles
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.getIndex()
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                fillForegroundColor = IndexedColors.DARK_BLUE.getIndex()
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.CENTER
+            }
+
+            // --- 1. Locations Sheet ---
+            val locationsSheet = workbook.createSheet("Locations")
+            val locationsHeaders = listOf("Location Number", "Location Name")
+            val locationsHeaderRow = locationsSheet.createRow(0)
+            for (i in locationsHeaders.indices) {
+                val cell = locationsHeaderRow.createCell(i)
+                cell.setCellValue(locationsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            var rowIdx = 1
+            for (loc in locations) {
+                val row = locationsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(loc.locationNumber)
+                row.createCell(1).setCellValue(loc.locationName)
+            }
+            locationsSheet.setColumnWidth(0, 5000)
+            locationsSheet.setColumnWidth(1, 8000)
+
+            // --- 2. Shops Sheet ---
+            val shopsSheet = workbook.createSheet("Shops")
+            val shopsHeaders = listOf(
+                "Shop Number", "Location Number", "Store Name", 
+                "Rating", "Score", "Starting Date", 
+                "Google Maps", "Latitude & Longitude", "Mobile", "Notes", "Image"
+            )
+            val shopsHeaderRow = shopsSheet.createRow(0)
+            for (i in shopsHeaders.indices) {
+                val cell = shopsHeaderRow.createCell(i)
+                cell.setCellValue(shopsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (shop in shops) {
+                val row = shopsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(shop.shopNumber)
+                row.createCell(1).setCellValue(shop.locationNumber)
+                row.createCell(2).setCellValue(shop.storeName)
+                row.createCell(3).setCellValue(shop.rating.toDouble())
+                row.createCell(4).setCellValue(shop.score.toDouble())
+                row.createCell(5).setCellValue(shop.startingDateFormatted)
+                row.createCell(6).setCellValue(shop.googleMapLink ?: "")
+                val latLngStr = if (shop.latitude != null && shop.longitude != null) {
+                    "${shop.latitude},${shop.longitude}"
+                } else {
+                    ""
+                }
+                row.createCell(7).setCellValue(latLngStr)
+                row.createCell(8).setCellValue(shop.mobileNumber ?: "")
+                row.createCell(9).setCellValue(shop.notes ?: "")
+                row.createCell(10).setCellValue(shop.storeImage ?: "")
+            }
+            for (i in shopsHeaders.indices) {
+                shopsSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 3. Products Sheet ---
+            val productsSheet = workbook.createSheet("Products")
+            val productsHeaders = listOf("Product ID", "Product Name", "Category", "Price/Profit Values", "Status")
+            val productsHeaderRow = productsSheet.createRow(0)
+            for (i in productsHeaders.indices) {
+                val cell = productsHeaderRow.createCell(i)
+                cell.setCellValue(productsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (prod in products) {
+                val row = productsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(prod.id.toDouble())
+                row.createCell(1).setCellValue(prod.productName)
+                row.createCell(2).setCellValue(prod.productCategory)
+                
+                val productPrices = allPrices.filter { it.productId == prod.id }
+                val priceString = productPrices.joinToString(",") { "(${it.sellingPrice.toInt()},${it.profitPerPacket.toInt()})" }
+                
+                row.createCell(3).setCellValue(priceString)
+                row.createCell(4).setCellValue(prod.status)
+            }
+            for (i in productsHeaders.indices) {
+                productsSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 4. Sales Sheet ---
+            val salesSheet = workbook.createSheet("Sales")
+            val salesHeaders = listOf(
+                "Date", "Shop Number", "Shop Name", "Location Number", "Product Name",
+                "Packets Given", "Packets Returned", "Packets Sold", "Rate", "Total Amount",
+                "Profit Per Packet", "Total Profit", "Status", "Remarks",
+                "Original Packet Rate", "Custom Selling Price", "Production Cost Used"
+            )
+            val salesHeaderRow = salesSheet.createRow(0)
+            for (i in salesHeaders.indices) {
+                val cell = salesHeaderRow.createCell(i)
+                cell.setCellValue(salesHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (sales in salesList) {
+                val row = salesSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(sales.entryDateFormatted)
+                row.createCell(1).setCellValue(sales.shopNumber)
+                row.createCell(2).setCellValue(sales.shopName)
+                row.createCell(3).setCellValue(sales.locationNumber)
+                row.createCell(4).setCellValue(sales.productName)
+                row.createCell(5).setCellValue(sales.packetsGiven.toDouble())
+                row.createCell(6).setCellValue(sales.packetsReturned.toDouble())
+                row.createCell(7).setCellValue(sales.packetsSold.toDouble())
+                row.createCell(8).setCellValue(sales.ratePerPacket)
+                row.createCell(9).setCellValue(sales.totalAmount)
+                row.createCell(10).setCellValue(sales.profitPerPacket)
+                row.createCell(11).setCellValue(sales.totalProfit)
+                row.createCell(12).setCellValue(sales.status)
+                row.createCell(13).setCellValue(sales.remarks ?: "")
+                if (sales.originalPacketRate != null) {
+                    row.createCell(14).setCellValue(sales.originalPacketRate)
+                }
+                if (sales.customSellingPrice != null) {
+                    row.createCell(15).setCellValue(sales.customSellingPrice)
+                }
+                if (sales.productionCostUsed != null) {
+                    row.createCell(16).setCellValue(sales.productionCostUsed)
+                }
+            }
+            for (i in salesHeaders.indices) {
+                salesSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 5. Expenses Sheet ---
+            val expensesSheet = workbook.createSheet("Expenses")
+            val expensesHeaders = listOf(
+                "Date", "Category", "Description", "Amount", "Notes", "Payment Method", "Attachment", "Timestamp"
+            )
+            val expensesHeaderRow = expensesSheet.createRow(0)
+            for (i in expensesHeaders.indices) {
+                val cell = expensesHeaderRow.createCell(i)
+                cell.setCellValue(expensesHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (expense in expensesList) {
+                val row = expensesSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(expense.expenseDateFormatted)
+                row.createCell(1).setCellValue(expense.category)
+                row.createCell(2).setCellValue(expense.description)
+                row.createCell(3).setCellValue(expense.amount)
+                row.createCell(4).setCellValue(expense.notes ?: "")
+                row.createCell(5).setCellValue(expense.paymentMethod)
+                row.createCell(6).setCellValue(expense.attachmentUri ?: "")
+                row.createCell(7).setCellValue(expense.expenseDate.toDouble())
+            }
+            for (i in expensesHeaders.indices) {
+                expensesSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 6. Daily Tasks Sheet ---
+            val tasksSheet = workbook.createSheet("Daily Tasks")
+            val tasksHeaders = listOf("Task ID", "Title", "Description", "Is Completed", "Task Date", "Reminder Time", "Is Reminder Enabled")
+            val tasksHeaderRow = tasksSheet.createRow(0)
+            for (i in tasksHeaders.indices) {
+                val cell = tasksHeaderRow.createCell(i)
+                cell.setCellValue(tasksHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (task in tasks) {
+                val row = tasksSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(task.id.toDouble())
+                row.createCell(1).setCellValue(task.title)
+                row.createCell(2).setCellValue(task.description)
+                row.createCell(3).setCellValue(if (task.isCompleted) "Yes" else "No")
+                row.createCell(4).setCellValue(task.taskDate)
+                row.createCell(5).setCellValue(task.reminderTime ?: "")
+                row.createCell(6).setCellValue(if (task.isReminderEnabled) "Yes" else "No")
+            }
+            for (i in tasksHeaders.indices) {
+                tasksSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 7. Ingredients Sheet ---
+            val ingredientsSheet = workbook.createSheet("Ingredients")
+            val ingredientsHeaders = listOf("ID", "Name", "Variety", "Category", "Status")
+            val ingredientsHeaderRow = ingredientsSheet.createRow(0)
+            for (i in ingredientsHeaders.indices) {
+                val cell = ingredientsHeaderRow.createCell(i)
+                cell.setCellValue(ingredientsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in ingredients) {
+                val row = ingredientsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.id.toDouble())
+                row.createCell(1).setCellValue(item.name)
+                row.createCell(2).setCellValue(item.variety)
+                row.createCell(3).setCellValue(item.category)
+                row.createCell(4).setCellValue(item.status)
+            }
+            for (i in ingredientsHeaders.indices) {
+                ingredientsSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 8. Ingredient Purchases Sheet ---
+            val purchasesSheet = workbook.createSheet("Ingredient Purchases")
+            val purchasesHeaders = listOf(
+                "Purchase ID", "Ingredient ID", "Purchase Quantity", "Unit", 
+                "Purchase Price", "Purchase Date", "Supplier", "Remarks", 
+                "Seal Cost", "Printing Cost", "Large Cover Distribution",
+                "Number of Fillable Packets", "Calculated Cost Per Filled Packet"
+            )
+            val purchasesHeaderRow = purchasesSheet.createRow(0)
+            for (i in purchasesHeaders.indices) {
+                val cell = purchasesHeaderRow.createCell(i)
+                cell.setCellValue(purchasesHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in purchases) {
+                val row = purchasesSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.purchaseId.toDouble())
+                row.createCell(1).setCellValue(item.ingredientId.toDouble())
+                row.createCell(2).setCellValue(item.purchaseQuantity)
+                row.createCell(3).setCellValue(item.unit)
+                row.createCell(4).setCellValue(item.purchasePrice)
+                row.createCell(5).setCellValue(item.purchaseDate)
+                row.createCell(6).setCellValue(item.supplier ?: "")
+                row.createCell(7).setCellValue(item.remarks ?: "")
+                row.createCell(8).setCellValue(item.sealCost)
+                row.createCell(9).setCellValue(item.printingCost)
+                row.createCell(10).setCellValue(item.largeCoverDistribution.toDouble())
+                row.createCell(11).setCellValue(item.largeCoverDistribution.toDouble())
+                val calculatedCostPerFilled = if (item.largeCoverDistribution > 0 && item.purchaseQuantity > 0.0) {
+                    item.purchasePrice / (item.purchaseQuantity * item.largeCoverDistribution.toDouble())
+                } else {
+                    0.0
+                }
+                row.createCell(12).setCellValue(calculatedCostPerFilled)
+            }
+            for (i in purchasesHeaders.indices) {
+                purchasesSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 9. Cost Calculations Sheet ---
+            val calcsSheet = workbook.createSheet("Cost Calculations")
+            val calcsHeaders = listOf(
+                "Calculation ID", "Product Price ID", "Version", "Calculation Date", 
+                "Total Production Cost", "Selling Price Snapshot", "Profit Snapshot", "Remarks"
+            )
+            val calcsHeaderRow = calcsSheet.createRow(0)
+            for (i in calcsHeaders.indices) {
+                val cell = calcsHeaderRow.createCell(i)
+                cell.setCellValue(calcsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in calculations) {
+                val row = calcsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.calculationId.toDouble())
+                row.createCell(1).setCellValue(item.productPriceId.toDouble())
+                row.createCell(2).setCellValue(item.version.toDouble())
+                row.createCell(3).setCellValue(item.calculationDate)
+                row.createCell(4).setCellValue(item.totalProductionCost)
+                row.createCell(5).setCellValue(item.sellingPriceSnapshot)
+                row.createCell(6).setCellValue(item.profitSnapshot)
+                row.createCell(7).setCellValue(item.remarks ?: "")
+            }
+            for (i in calcsHeaders.indices) {
+                calcsSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 10. Cost Calculation Items Sheet ---
+            val itemsSheet = workbook.createSheet("Cost Calculation Items")
+            val itemsHeaders = listOf(
+                "Item ID", "Cost Calculation ID", "Ingredient ID", "Ingredient Name", 
+                "Ingredient Variety", "Usage Quantity", "Usage Unit", 
+                "Cost Per Unit Snapshot", "Calculated Cost", "Purchase Unit Snapshot"
+            )
+            val itemsHeaderRow = itemsSheet.createRow(0)
+            for (i in itemsHeaders.indices) {
+                val cell = itemsHeaderRow.createCell(i)
+                cell.setCellValue(itemsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in calculationItems) {
+                val row = itemsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.itemId.toDouble())
+                row.createCell(1).setCellValue(item.costCalculationId.toDouble())
+                row.createCell(2).setCellValue(item.ingredientId.toDouble())
+                row.createCell(3).setCellValue(item.ingredientName)
+                row.createCell(4).setCellValue(item.ingredientVariety)
+                row.createCell(5).setCellValue(item.usageQuantity)
+                row.createCell(6).setCellValue(item.usageUnit)
+                row.createCell(7).setCellValue(item.costPerUnitSnapshot)
+                row.createCell(8).setCellValue(item.calculatedCost)
+                row.createCell(9).setCellValue(item.purchaseUnitSnapshot)
+            }
+            for (i in itemsHeaders.indices) {
+                itemsSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 11. Settings Sheet ---
+            val settingsSheet = workbook.createSheet("Settings")
+            val settingsHeaders = listOf("Setting Key", "Setting Value")
+            val settingsHeaderRow = settingsSheet.createRow(0)
+            for (i in settingsHeaders.indices) {
+                val cell = settingsHeaderRow.createCell(i)
+                cell.setCellValue(settingsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            val row1 = settingsSheet.createRow(1)
+            row1.createCell(0).setCellValue("is_dynamic_profit_enabled")
+            row1.createCell(1).setCellValue(isDynamicProfitEnabled.toString())
+            for (i in settingsHeaders.indices) {
+                settingsSheet.setColumnWidth(i, 8000)
+            }
+
+            // Write workbook to file
+            FileOutputStream(file).use { out ->
+                workbook.write(out)
+            }
+            workbook.close()
+
+            shareFile(context, file, "Unified All-Data Backup")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Unified Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun getSheetIgnoreCase(workbook: Workbook, name: String): Sheet? {
+        for (i in 0 until workbook.numberOfSheets) {
+            val sheet = workbook.getSheetAt(i)
+            if (sheet.sheetName.equals(name, ignoreCase = true)) {
+                return sheet
+            }
+        }
+        return null
+    }
+
+    fun getSheetIgnoreCaseAnyOf(workbook: Workbook, names: List<String>): Sheet? {
+        for (name in names) {
+            val s = getSheetIgnoreCase(workbook, name)
+            if (s != null) return s
+        }
+        return null
+    }
+
+    fun copySheet(sourceSheet: Sheet, destSheet: Sheet) {
+        for (r in 0..sourceSheet.lastRowNum) {
+            val sourceRow = sourceSheet.getRow(r) ?: continue
+            val destRow = destSheet.createRow(r)
+            try {
+                destRow.height = sourceRow.height
+            } catch (e: Exception) {
+                // Ignore height exception
+            }
+            for (c in 0 until sourceRow.lastCellNum) {
+                val sourceCell = sourceRow.getCell(c) ?: continue
+                val destCell = destRow.createCell(c)
+                try {
+                    when (sourceCell.cellType) {
+                        CellType.BLANK -> destCell.setBlank()
+                        CellType.BOOLEAN -> destCell.setCellValue(sourceCell.booleanCellValue)
+                        CellType.FORMULA -> destCell.cellFormula = sourceCell.cellFormula
+                        CellType.NUMERIC -> destCell.setCellValue(sourceCell.numericCellValue)
+                        CellType.STRING -> destCell.setCellValue(sourceCell.stringCellValue)
+                        else -> destCell.setCellValue(sourceCell.toString())
+                    }
+                } catch (e: Exception) {
+                    try {
+                        destCell.setCellValue(sourceCell.toString())
+                    } catch (ex: Exception) {
+                        // ignore
+                    }
+                }
+            }
+        }
+    }
+
+    fun extractSheetToTempUri(context: Context, sourceSheet: Sheet, prefix: String): Uri {
+        val tempWorkbook = XSSFWorkbook()
+        val destSheet = tempWorkbook.createSheet(sourceSheet.sheetName)
+        copySheet(sourceSheet, destSheet)
+        
+        val tempFile = File.createTempFile(prefix, ".xlsx", context.cacheDir)
+        FileOutputStream(tempFile).use { fos ->
+            tempWorkbook.write(fos)
+        }
+        tempWorkbook.close()
+        return FileProvider.getUriForFile(context, "com.example.snackroutepro.fileprovider", tempFile)
+    }
+
+    fun extractCostEngineSheetsToTempUri(context: Context, sourceWorkbook: Workbook): Uri? {
+        val tempWorkbook = XSSFWorkbook()
+        var hasAny = false
+        
+        val costEngineSheets = listOf("Ingredients", "Ingredient Purchases", "Cost Calculations", "Cost Calculation Items", "Settings")
+        for (sheetName in costEngineSheets) {
+            val srcSheet = getSheetIgnoreCase(sourceWorkbook, sheetName)
+            if (srcSheet != null) {
+                val destSheet = tempWorkbook.createSheet(srcSheet.sheetName)
+                copySheet(srcSheet, destSheet)
+                hasAny = true
+            }
+        }
+        
+        if (!hasAny) {
+            tempWorkbook.close()
+            return null
+        }
+        
+        val tempFile = File.createTempFile("temp_cost_engine", ".xlsx", context.cacheDir)
+        FileOutputStream(tempFile).use { fos ->
+            tempWorkbook.write(fos)
+        }
+        tempWorkbook.close()
+        return FileProvider.getUriForFile(context, "com.example.snackroutepro.fileprovider", tempFile)
     }
 }

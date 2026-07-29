@@ -4228,6 +4228,285 @@ User Question: $userQuestion
         }
     }
 
+    fun exportAllUnifiedToExcel(context: Context) {
+        viewModelScope.launch {
+            try {
+                val locationsList = repository.allLocations.first()
+                val shopsList = repository.allShops.first()
+                val productsList = repository.allProducts.first()
+                val allPrices = repository.getAllPrices()
+                val salesList = repository.allSales.first()
+                val expensesList = repository.getAllExpensesDirect()
+                val tasks = repository.allTasks.first()
+                val ingredients = repository.getAllIngredientsDirect()
+                val purchases = repository.getAllPurchasesDirect()
+                val calculations = repository.getAllCalculationsDirect()
+                val calculationItems = repository.getAllCalculationItemsDirect()
+                val isEnabled = isDynamicProfitEnabled.value
+
+                com.example.utils.Exporter.exportAllUnified(
+                    context = context,
+                    locations = locationsList,
+                    shops = shopsList,
+                    products = productsList,
+                    allPrices = allPrices,
+                    salesList = salesList,
+                    expensesList = expensesList,
+                    tasks = tasks,
+                    ingredients = ingredients,
+                    purchases = purchases,
+                    calculations = calculations,
+                    calculationItems = calculationItems,
+                    isDynamicProfitEnabled = isEnabled
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "UnifiedBackup",
+                    operation = "exportAllUnifiedToExcel",
+                    errorMessage = e.message ?: "Failed to export unified backup data",
+                    stackTrace = e.stackTraceToString(),
+                    possibleReason = "Excel export failure."
+                )
+            }
+        }
+    }
+
+    fun importAllUnifiedFromExcel(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _isImporting.value = true
+            _importSummary.value = null
+            clearExcelImportIssues()
+            
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open file stream")
+                val workbook = org.apache.poi.xssf.usermodel.XSSFWorkbook(inputStream)
+                
+                var totalRowCounter = 0
+                var successRowCounter = 0
+                var skippedRowCounter = 0
+                var failedRowCounter = 0
+                val sheetMessages = mutableListOf<String>()
+
+                // 1. Locations
+                val locSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Locations", "LocationMaster", "Location Master"))
+                if (locSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, locSheet, "temp_locations")
+                    val currentLocations = locations.value
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importLocations(context, tempUri, currentLocations)
+                    }
+                    if (summary.parsedLocations.isNotEmpty()) {
+                        repository.insertLocations(summary.parsedLocations)
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Locations: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 2. Shops
+                val shopSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Shops", "ShopMaster", "Shop Master"))
+                if (shopSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, shopSheet, "temp_shops")
+                    val currentLocations = repository.allLocations.first()
+                    val currentShops = repository.allShops.first()
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importShops(context, tempUri, currentLocations, currentShops)
+                    }
+                    if (summary.parsedShops.isNotEmpty()) {
+                        val resolvedShops = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            summary.parsedShops.map { shop ->
+                                async { resolveShopCoords(context, shop) }
+                            }.awaitAll()
+                        }
+                        repository.insertShops(resolvedShops)
+                        refreshNextShopNumber()
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Shops: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 3. Products
+                val prodSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Products", "ProductMaster", "Product Master"))
+                if (prodSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, prodSheet, "temp_products")
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importProducts(context, tempUri)
+                    }
+                    var successCount = 0
+                    if (summary.parsedProducts.isNotEmpty()) {
+                        summary.parsedProducts.forEach { (product, prices) ->
+                            val trimmedName = product.productName.trim()
+                            val existingProduct = repository.allProducts.first().find { it.productName.trim().equals(trimmedName, ignoreCase = true) }
+                            if (existingProduct != null) {
+                                if (existingProduct.productCategory != product.productCategory || existingProduct.status != product.status) {
+                                    val updatedProduct = existingProduct.copy(
+                                        productCategory = product.productCategory,
+                                        status = product.status
+                                    )
+                                    repository.updateProduct(updatedProduct)
+                                }
+                                val existingPrices = repository.getAllPrices().filter { it.productId == existingProduct.id }
+                                prices.forEach { incomingPrice ->
+                                    val matchPrice = existingPrices.find { it.sellingPrice == incomingPrice.sellingPrice }
+                                    if (matchPrice != null) {
+                                        if (matchPrice.profitPerPacket != incomingPrice.profitPerPacket) {
+                                            repository.updatePrice(matchPrice.copy(profitPerPacket = incomingPrice.profitPerPacket))
+                                        }
+                                    } else {
+                                        repository.insertPrice(incomingPrice.copy(productId = existingProduct.id))
+                                    }
+                                }
+                            } else {
+                                val newId = repository.insertProduct(product)
+                                prices.forEach { price ->
+                                    repository.insertPrice(price.copy(productId = newId.toInt()))
+                                }
+                            }
+                            successCount++
+                        }
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += successCount
+                    skippedRowCounter += (summary.totalRows - successCount)
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Products: Imported $successCount/${summary.totalRows}")
+                }
+
+                // 4. Sales
+                val salesSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Sales", "SalesEntry", "Sales Entry"))
+                if (salesSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, salesSheet, "temp_sales")
+                    val currentShops = repository.allShops.first()
+                    val currentProducts = repository.allProducts.first()
+                    val allPrices = repository.getAllPrices()
+                    val currentSales = repository.allSales.first()
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importSales(context, tempUri, currentShops, currentProducts, allPrices, currentSales)
+                    }
+                    if (summary.parsedSales.isNotEmpty()) {
+                        repository.insertSalesList(summary.parsedSales)
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Sales: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 5. Expenses
+                val expSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Expenses", "Business Expenses", "Business Expense", "BusinessExpenses"))
+                if (expSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, expSheet, "temp_expenses")
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importExpenses(context, tempUri)
+                    }
+                    if (summary.parsedExpenses.isNotEmpty()) {
+                        repository.insertExpenses(summary.parsedExpenses)
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Expenses: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 6. Daily Tasks
+                val taskSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Daily Tasks", "DailyTask", "Tasks", "Daily_Tasks"))
+                if (taskSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, taskSheet, "temp_tasks")
+                    val existingTasks = repository.allTasks.first()
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importDailyTasks(context, tempUri, existingTasks)
+                    }
+                    if (summary.parsedDailyTasks.isNotEmpty()) {
+                        summary.parsedDailyTasks.forEach { task ->
+                            if (task.id > 0) {
+                                repository.updateTask(task)
+                            } else {
+                                repository.insertTask(task)
+                            }
+                        }
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Daily Tasks: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 7. Cost Engine Sheets (Ingredients, Ingredient Purchases, Cost Calculations, Cost Calculation Items, Settings)
+                val costEngineUri = com.example.utils.Exporter.extractCostEngineSheetsToTempUri(context, workbook)
+                if (costEngineUri != null) {
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importDynamicCostEngine(context, costEngineUri)
+                    }
+                    if (summary.parsedIngredients.isNotEmpty()) {
+                        repository.insertIngredients(summary.parsedIngredients)
+                    }
+                    if (summary.parsedPurchases.isNotEmpty()) {
+                        repository.insertPurchases(summary.parsedPurchases)
+                    }
+                    if (summary.parsedCalculations.isNotEmpty()) {
+                        repository.insertCalculations(summary.parsedCalculations)
+                    }
+                    if (summary.parsedCalculationItems.isNotEmpty()) {
+                        repository.insertCalculationItems(summary.parsedCalculationItems)
+                    }
+                    if (summary.isDynamicProfitEnabledSetting != null) {
+                        setDynamicProfitEnabled(summary.isDynamicProfitEnabledSetting)
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Cost Engine: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                workbook.close()
+                inputStream.close()
+
+                // Clean up any old/orphaned images
+                com.example.utils.BackupHelper.cleanupUnusedImages(context)
+                
+                val remarkMsg = if (sheetMessages.isNotEmpty()) {
+                    sheetMessages.joinToString("\n")
+                } else {
+                    "No valid backup sheets found in file."
+                }
+                
+                _importSummary.value = com.example.utils.Exporter.ImportSummary(
+                    type = com.example.utils.Exporter.ImportType.UNIFIED_BACKUP,
+                    totalRows = totalRowCounter,
+                    successfullyImported = successRowCounter,
+                    skippedRows = skippedRowCounter,
+                    failedRowsCount = failedRowCounter,
+                    remarks = remarkMsg
+                )
+
+                Toast.makeText(context, "Unified Import Completed successfully!", Toast.LENGTH_LONG).show()
+                recalculateHistoricalSales("", true)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "UnifiedBackup",
+                    operation = "importAllUnifiedFromExcel",
+                    errorMessage = e.message ?: "Failed to import unified backup data",
+                    stackTrace = e.stackTraceToString(),
+                    possibleReason = "Corrupt file or parsing error."
+                )
+                Toast.makeText(context, "Unified Import Failed: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
     fun copyUnfinishedTasksFromPreviousDay(currentDate: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {

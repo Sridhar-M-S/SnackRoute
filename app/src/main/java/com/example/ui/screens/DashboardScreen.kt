@@ -2,6 +2,9 @@ package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
@@ -68,6 +71,17 @@ fun DashboardScreen(
     val suggestions by viewModel.businessInsights.collectAsStateWithLifecycle(emptyList())
     val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
     val expenses by viewModel.allExpensesList.collectAsStateWithLifecycle()
+
+    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
+    val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
+
+    val unifiedImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importAllUnifiedFromExcel(context, uri)
+        }
+    }
 
     val thisMonthExpense = remember(expenses) {
         val cal = Calendar.getInstance()
@@ -286,6 +300,28 @@ fun DashboardScreen(
                         Icon(
                             imageVector = Icons.Default.PlaylistAddCheck,
                             contentDescription = "Daily Tasks",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { unifiedImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        modifier = Modifier.testTag("btn_unified_import")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = "Restore All Data (Excel)",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { viewModel.exportAllUnifiedToExcel(context) },
+                        modifier = Modifier.testTag("btn_unified_export")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = "Backup All Data (Excel)",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(28.dp)
                         )
@@ -734,6 +770,95 @@ fun DashboardScreen(
             CelebrationOverlay(
                 event = activeCelebration!!,
                 onDismiss = { activeCelebration = null }
+            )
+        }
+
+        if (isImporting) {
+            AlertDialog(
+                onDismissRequest = {},
+                confirmButton = {},
+                title = { Text("Restoring Unified Backup...", fontWeight = FontWeight.Bold) },
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(8.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Text("Reading all-in-one backup spreadsheet and updating database states...")
+                    }
+                }
+            )
+        }
+
+        if (importSummary != null && importSummary!!.type == com.example.utils.Exporter.ImportType.UNIFIED_BACKUP) {
+            val summary = importSummary!!
+            AlertDialog(
+                onDismissRequest = { viewModel.clearImportSummary() },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (summary.failedRowsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text("Restore Summary", fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        Text("The all-in-one spreadsheet restore has completed successfully:")
+                        
+                        HorizontalDivider()
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Total Rows Scanned:", fontWeight = FontWeight.Medium)
+                            Text("${summary.totalRows}")
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Successfully Imported:", fontWeight = FontWeight.Medium)
+                            Text("${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Skipped/Failed Rows:", fontWeight = FontWeight.Medium)
+                            Text("${summary.skippedRows}", color = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                        }
+                        
+                        HorizontalDivider()
+                        
+                        Text("Module Breakdown:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        
+                        Text(
+                            text = summary.remarks ?: "No details provided.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Dismiss")
+                    }
+                }
             )
         }
     }
