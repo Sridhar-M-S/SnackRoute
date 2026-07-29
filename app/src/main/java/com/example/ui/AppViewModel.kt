@@ -392,6 +392,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun reloadSalesReminderSettings() {
+        _isReminderEnabled.value = prefs.getBoolean("sales_reminder_enabled", true)
+        _defaultReminderInterval.value = prefs.getInt("sales_reminder_interval", 7)
+        _reminderTime.value = prefs.getString("sales_reminder_time", "20:00") ?: "20:00"
+        _notifyAfterDays.value = prefs.getInt("sales_reminder_notify_after_days", 7)
+        _keepVisibleDays.value = prefs.getInt("sales_reminder_keep_visible_days", 30)
+        com.example.utils.AlarmScheduler.scheduleDailyAlarm(getApplication())
+    }
+
     val dueReminders: StateFlow<List<ReminderItem>> = combine(
         repository.getShopsWithLastSale(),
         _isReminderEnabled,
@@ -4211,6 +4220,7 @@ User Question: $userQuestion
                     setDynamicProfitEnabled(summary.isDynamicProfitEnabledSetting)
                 }
 
+                reloadSalesReminderSettings()
                 _importSummary.value = summary
                 recalculateHistoricalSales("", true)
             } catch (e: Exception) {
@@ -4489,6 +4499,7 @@ User Question: $userQuestion
                     remarks = remarkMsg
                 )
 
+                reloadSalesReminderSettings()
                 Toast.makeText(context, "Unified Import Completed successfully!", Toast.LENGTH_LONG).show()
                 recalculateHistoricalSales("", true)
             } catch (e: Exception) {

@@ -2538,14 +2538,30 @@ object Exporter {
                 if (settingsSheet != null) {
                     val setRequired = listOf("Setting Key", "Setting Value")
                     val setIndices = getHeaderIndices(settingsSheet, setRequired, emptyList())
+                    val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+                    val editor = prefs.edit()
                     for (rowIdx in 1..settingsSheet.lastRowNum) {
                         val row = settingsSheet.getRow(rowIdx) ?: continue
-                        val key = getCellValueAsString(row, setIndices["Setting Key"])
-                        val value = getCellValueAsString(row, setIndices["Setting Value"])
-                        if (key?.lowercase()?.trim() == "is_dynamic_profit_enabled") {
-                            parsedSettingsDynamicProfitEnabled = value?.lowercase()?.trim() == "true"
+                        val key = getCellValueAsString(row, setIndices["Setting Key"])?.lowercase()?.trim()
+                        val value = getCellValueAsString(row, setIndices["Setting Value"])?.trim() ?: ""
+                        if (key == "is_dynamic_profit_enabled") {
+                            parsedSettingsDynamicProfitEnabled = value.lowercase() == "true"
+                        } else if (key == "sales_reminder_enabled") {
+                            editor.putBoolean("sales_reminder_enabled", value.lowercase() == "true")
+                        } else if (key == "sales_reminder_interval") {
+                            val intVal = value.toIntOrNull() ?: 7
+                            editor.putInt("sales_reminder_interval", intVal)
+                        } else if (key == "sales_reminder_time") {
+                            editor.putString("sales_reminder_time", value)
+                        } else if (key == "sales_reminder_notify_after_days") {
+                            val intVal = value.toIntOrNull() ?: 7
+                            editor.putInt("sales_reminder_notify_after_days", intVal)
+                        } else if (key == "sales_reminder_keep_visible_days") {
+                            val intVal = value.toIntOrNull() ?: 30
+                            editor.putInt("sales_reminder_keep_visible_days", intVal)
                         }
                     }
+                    editor.apply()
                 }
 
                 workbook.close()
@@ -2933,9 +2949,38 @@ object Exporter {
                 cell.setCellValue(settingsHeaders[i])
                 cell.cellStyle = headerStyle
             }
+            
+            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+            val reminderEnabled = prefs.getBoolean("sales_reminder_enabled", true)
+            val reminderInterval = prefs.getInt("sales_reminder_interval", 7)
+            val reminderTime = prefs.getString("sales_reminder_time", "20:00") ?: "20:00"
+            val notifyAfterDays = prefs.getInt("sales_reminder_notify_after_days", 7)
+            val keepVisibleDays = prefs.getInt("sales_reminder_keep_visible_days", 30)
+
             val row1 = settingsSheet.createRow(1)
             row1.createCell(0).setCellValue("is_dynamic_profit_enabled")
             row1.createCell(1).setCellValue(isDynamicProfitEnabled.toString())
+
+            val row2 = settingsSheet.createRow(2)
+            row2.createCell(0).setCellValue("sales_reminder_enabled")
+            row2.createCell(1).setCellValue(reminderEnabled.toString())
+
+            val row3 = settingsSheet.createRow(3)
+            row3.createCell(0).setCellValue("sales_reminder_interval")
+            row3.createCell(1).setCellValue(reminderInterval.toDouble())
+
+            val row4 = settingsSheet.createRow(4)
+            row4.createCell(0).setCellValue("sales_reminder_time")
+            row4.createCell(1).setCellValue(reminderTime)
+
+            val row5 = settingsSheet.createRow(5)
+            row5.createCell(0).setCellValue("sales_reminder_notify_after_days")
+            row5.createCell(1).setCellValue(notifyAfterDays.toDouble())
+
+            val row6 = settingsSheet.createRow(6)
+            row6.createCell(0).setCellValue("sales_reminder_keep_visible_days")
+            row6.createCell(1).setCellValue(keepVisibleDays.toDouble())
+
             for (i in settingsHeaders.indices) {
                 settingsSheet.setColumnWidth(i, 8000)
             }
