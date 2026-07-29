@@ -67,6 +67,18 @@ fun DashboardScreen(
     val sales by viewModel.sales.collectAsStateWithLifecycle()
     val suggestions by viewModel.businessInsights.collectAsStateWithLifecycle(emptyList())
     val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
+    val expenses by viewModel.allExpensesList.collectAsStateWithLifecycle()
+
+    val thisMonthExpense = remember(expenses) {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.DAY_OF_MONTH, 1)
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        val startOfMonth = cal.timeInMillis
+        expenses.filter { it.expenseDate >= startOfMonth }.sumOf { it.amount }
+    }
 
     val gameProgress by viewModel.gamificationState.collectAsStateWithLifecycle()
     val dailyTarget by viewModel.dailyTarget.collectAsStateWithLifecycle()
@@ -471,6 +483,14 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
+
+            // --- Business Expenses Shortcut Card ---
+            item {
+                BentoExpensesCard(
+                    thisMonthExpense = thisMonthExpense,
+                    onClick = { onNavigateToTab("BusinessExpenses") }
+                )
             }
 
             // --- Profit Engine Analytics Section ---
@@ -2369,3 +2389,65 @@ data class DashboardStats(
     val productProfits: Map<String, Double>,
     val shopProfits: Map<String, Double>
 )
+
+@Composable
+fun BentoExpensesCard(
+    thisMonthExpense: Double,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .testTag("dashboard_bento_expenses_card"),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+        ),
+        border = CardDefaults.outlinedCardBorder()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "BUSINESS EXPENSES",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = "₹${"%,.2f".format(thisMonthExpense)}",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Text(
+                    text = "Total logged expenses this month",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.1f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ReceiptLong,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}

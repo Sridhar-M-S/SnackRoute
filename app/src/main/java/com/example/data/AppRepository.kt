@@ -21,8 +21,19 @@ class AppRepository(
     private val errorLogDao: ErrorLogDao,
     private val dailyTaskDao: DailyTaskDao,
     private val dynamicCostDao: DynamicCostDao,
-    private val shopRemarkDao: ShopRemarkDao
+    private val shopRemarkDao: ShopRemarkDao,
+    private val businessExpenseDao: BusinessExpenseDao
 ) {
+    // --- Business Expense Queries ---
+    val allExpenses: Flow<List<BusinessExpense>> = businessExpenseDao.getAllExpenses()
+    suspend fun insertExpense(expense: BusinessExpense): Long = businessExpenseDao.insertExpense(expense)
+    suspend fun updateExpense(expense: BusinessExpense) = businessExpenseDao.updateExpense(expense)
+    suspend fun deleteExpense(expense: BusinessExpense) = businessExpenseDao.deleteExpense(expense)
+    suspend fun deleteExpenseById(id: Int) = businessExpenseDao.deleteExpenseById(id)
+    suspend fun getAllExpensesDirect(): List<BusinessExpense> = businessExpenseDao.getAllExpensesDirect()
+    suspend fun insertExpenses(expenses: List<BusinessExpense>) = businessExpenseDao.insertExpenses(expenses)
+    suspend fun deleteAllExpenses() = businessExpenseDao.deleteAllExpenses()
+
     // --- Shop Remark Queries ---
     val allRemarks: Flow<List<ShopRemark>> = shopRemarkDao.getAllRemarks()
     suspend fun insertRemark(remark: ShopRemark): Long = shopRemarkDao.insertRemark(remark)

@@ -248,7 +248,16 @@ class MainActivity : ComponentActivity() {
                                             onOpenTimetable = { isTimetableOpen = true },
                                             onOpenDebug = { isDebugOpen = true },
                                             onOpenCostEngine = { navigateToChildTab("CostEngine") },
-                                            onOpenRemarks = { navigateToChildTab("Remarks") }
+                                            onOpenRemarks = { navigateToChildTab("Remarks") },
+                                            onOpenExpenses = { navigateToChildTab("BusinessExpenses") }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("BusinessExpenses")) {
+                                    Box(modifier = if (currentTab == "BusinessExpenses") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        BusinessExpensesScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
                                         )
                                     }
                                 }

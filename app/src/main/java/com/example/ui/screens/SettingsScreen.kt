@@ -141,7 +141,8 @@ fun SettingsScreen(
     onOpenTimetable: () -> Unit,
     onOpenDebug: () -> Unit,
     onOpenCostEngine: () -> Unit,
-    onOpenRemarks: () -> Unit = {}
+    onOpenRemarks: () -> Unit = {},
+    onOpenExpenses: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
@@ -774,6 +775,51 @@ fun SettingsScreen(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                         ) {
                             Text("Save Key", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            // --- Business Expenses Menu ---
+            Text("Business Expenses", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("business_expenses_settings_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text("Manage Business Expenses", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Track materials, fuel, rent, salary, marketing, and repairs to calculate net business profit.", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                        Button(
+                            onClick = onOpenExpenses,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.testTag("btn_settings_open_expenses")
+                        ) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open", fontSize = 12.sp)
                         }
                     }
                 }

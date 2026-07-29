@@ -352,6 +352,33 @@ interface ShopRemarkDao {
     suspend fun deleteRemarkBySalesId(salesId: Int)
 }
 
+@Dao
+interface BusinessExpenseDao {
+    @Query("SELECT * FROM business_expenses ORDER BY expenseDate DESC")
+    fun getAllExpenses(): Flow<List<BusinessExpense>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExpense(expense: BusinessExpense): Long
+
+    @Update
+    suspend fun updateExpense(expense: BusinessExpense)
+
+    @Delete
+    suspend fun deleteExpense(expense: BusinessExpense)
+
+    @Query("DELETE FROM business_expenses WHERE id = :id")
+    suspend fun deleteExpenseById(id: Int)
+
+    @Query("SELECT * FROM business_expenses")
+    suspend fun getAllExpensesDirect(): List<BusinessExpense>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExpenses(expenses: List<BusinessExpense>)
+
+    @Query("DELETE FROM business_expenses")
+    suspend fun deleteAllExpenses()
+}
+
 
 
 

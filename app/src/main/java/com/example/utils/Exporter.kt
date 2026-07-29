@@ -12,6 +12,7 @@ import com.example.data.SalesEntry
 import com.example.data.ShopMaster
 import com.example.data.ErrorLog
 import com.example.data.DailyTask
+import com.example.data.BusinessExpense
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.apache.poi.ss.usermodel.*
 import java.io.File
@@ -31,7 +32,7 @@ object Exporter {
     )
 
     enum class ImportType {
-        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE
+        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE, BUSINESS_EXPENSES
     }
 
     data class ImportSummary(
@@ -52,6 +53,7 @@ object Exporter {
         val invalidDatesCount: Int = 0,
         val parsedProducts: List<Pair<ProductMaster, List<ProductPrice>>> = emptyList(),
         val parsedDailyTasks: List<DailyTask> = emptyList(),
+        val parsedExpenses: List<BusinessExpense> = emptyList(),
         val updatedRecordsCount: Int = 0,
         val totalImagesFound: Int = 0,
         val imagesImportedSuccessfully: Int = 0,
@@ -473,6 +475,181 @@ object Exporter {
             e.printStackTrace()
             Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun exportExpenses(context: Context, expensesList: List<BusinessExpense>) {
+        val fileName = "Expenses_Export_${System.currentTimeMillis()}.xlsx"
+        val file = File(context.cacheDir, fileName)
+
+        try {
+            val workbook = XSSFWorkbook()
+            val sheet = workbook.createSheet("Expenses")
+            
+            // Styles
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.getIndex()
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                fillForegroundColor = IndexedColors.DARK_BLUE.getIndex()
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.CENTER
+            }
+            
+            // Headers
+            val headers = listOf(
+                "Date", "Category", "Description", "Amount", "Notes", "Payment Method", "Attachment", "Timestamp"
+            )
+            val headerRow = sheet.createRow(0)
+            for (i in headers.indices) {
+                val cell = headerRow.createCell(i)
+                cell.setCellValue(headers[i])
+                cell.cellStyle = headerStyle
+            }
+            
+            // Data
+            var rowIdx = 1
+            for (expense in expensesList) {
+                val row = sheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(expense.expenseDateFormatted)
+                row.createCell(1).setCellValue(expense.category)
+                row.createCell(2).setCellValue(expense.description)
+                row.createCell(3).setCellValue(expense.amount)
+                row.createCell(4).setCellValue(expense.notes ?: "")
+                row.createCell(5).setCellValue(expense.paymentMethod)
+                row.createCell(6).setCellValue(expense.attachmentUri ?: "")
+                row.createCell(7).setCellValue(expense.expenseDate.toDouble())
+            }
+            
+            // Set column widths
+            sheet.setColumnWidth(0, 4500)  // Date
+            sheet.setColumnWidth(1, 5500)  // Category
+            sheet.setColumnWidth(2, 8000)  // Description
+            sheet.setColumnWidth(3, 4000)  // Amount
+            sheet.setColumnWidth(4, 6000)  // Notes
+            sheet.setColumnWidth(5, 4500)  // Payment Method
+            sheet.setColumnWidth(6, 6000)  // Attachment
+            sheet.setColumnWidth(7, 5000)  // Timestamp
+            
+            FileOutputStream(file).use { out ->
+                workbook.write(out)
+            }
+            workbook.close()
+            
+            shareFile(context, file, "Business Expenses Export")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun importExpenses(context: Context, uri: Uri): ImportSummary {
+        val successExpenses = mutableListOf<BusinessExpense>()
+        val errorRows = mutableListOf<List<String>>()
+        
+        var totalRows = 0
+        var successfullyImported = 0
+        var failedRowsCount = 0
+        
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open file stream")
+            val workbook = XSSFWorkbook(inputStream)
+            val sheet = workbook.getSheetAt(0) ?: throw Exception("Workbook is empty")
+            
+            val headerRow = sheet.getRow(0) ?: throw Exception("Excel file header row is missing")
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
+                }
+            }
+            
+            val dateIdx = headerMap["date"]
+            val categoryIdx = headerMap["category"]
+            val descriptionIdx = headerMap["description"] ?: headerMap["expense name"] ?: headerMap["name"]
+            val amountIdx = headerMap["amount"] ?: headerMap["amount (₹)"]
+            val notesIdx = headerMap["notes"]
+            val paymentMethodIdx = headerMap["payment method"] ?: headerMap["payment"]
+            val attachmentIdx = headerMap["attachment"] ?: headerMap["attachment uri"]
+            val timestampIdx = headerMap["timestamp"]
+            
+            if (categoryIdx == null || descriptionIdx == null || amountIdx == null) {
+                throw Exception("Required headers (Category, Description, Amount) are missing")
+            }
+            
+            for (r in 1..sheet.lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                totalRows++
+                
+                try {
+                    val category = getCellValueAsString(row, categoryIdx)?.trim() ?: ""
+                    val description = getCellValueAsString(row, descriptionIdx)?.trim() ?: ""
+                    val amountStr = getCellValueAsString(row, amountIdx)?.trim() ?: ""
+                    val amount = amountStr.toDoubleOrNull() ?: 0.0
+                    val notes = if (notesIdx != null) getCellValueAsString(row, notesIdx)?.trim() else null
+                    val paymentMethod = if (paymentMethodIdx != null) getCellValueAsString(row, paymentMethodIdx)?.trim() ?: "Cash" else "Cash"
+                    val attachment = if (attachmentIdx != null) getCellValueAsString(row, attachmentIdx)?.trim() else null
+                    
+                    val timestampStr = if (timestampIdx != null) getCellValueAsString(row, timestampIdx)?.trim() else null
+                    var dateLong = timestampStr?.toDoubleOrNull()?.toLong()
+                    if (dateLong == null && dateIdx != null) {
+                        val dateStr = getCellValueAsString(row, dateIdx)?.trim() ?: ""
+                        try {
+                            dateLong = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).parse(dateStr)?.time
+                        } catch (e: Exception) {
+                            // fallback
+                        }
+                    }
+                    val finalDate = dateLong ?: System.currentTimeMillis()
+                    
+                    if (category.isEmpty() || description.isEmpty() || amount <= 0.0) {
+                        failedRowsCount++
+                        val rowData = mutableListOf<String>()
+                        for (c in 0 until row.lastCellNum) {
+                            rowData.add(getCellValueAsString(row, c) ?: "")
+                        }
+                        errorRows.add(rowData)
+                        continue
+                    }
+                    
+                    val expense = BusinessExpense(
+                        expenseDate = finalDate,
+                        category = category,
+                        description = description,
+                        amount = amount,
+                        notes = notes,
+                        paymentMethod = paymentMethod,
+                        attachmentUri = attachment
+                    )
+                    successExpenses.add(expense)
+                    successfullyImported++
+                } catch (e: Exception) {
+                    failedRowsCount++
+                    val rowData = mutableListOf<String>()
+                    for (c in 0 until row.lastCellNum) {
+                        rowData.add(getCellValueAsString(row, c) ?: "")
+                    }
+                    errorRows.add(rowData)
+                }
+            }
+            
+            inputStream.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        
+        return ImportSummary(
+            type = ImportType.BUSINESS_EXPENSES,
+            totalRows = totalRows,
+            successfullyImported = successfullyImported,
+            skippedRows = totalRows - successfullyImported,
+            failedRowsCount = failedRowsCount,
+            parsedExpenses = successExpenses,
+            errorRows = errorRows
+        )
     }
 
     // --- EXCEL IMPORTER FOR PRODUCT MASTER ---

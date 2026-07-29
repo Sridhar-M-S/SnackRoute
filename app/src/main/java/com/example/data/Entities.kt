@@ -209,6 +209,21 @@ data class ShopRemark(
         get() = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(date))
 }
 
+@Entity(tableName = "business_expenses")
+data class BusinessExpense(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val expenseDate: Long = System.currentTimeMillis(),
+    val category: String,
+    val description: String,
+    val amount: Double,
+    val notes: String? = null,
+    val paymentMethod: String,
+    val attachmentUri: String? = null
+) {
+    val expenseDateFormatted: String
+        get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(expenseDate))
+}
+
 
 
 

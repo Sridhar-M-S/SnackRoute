@@ -1,5 +1,7 @@
 package com.example.ui
 
+import android.widget.Toast
+
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
@@ -104,7 +106,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.errorLogDao(),
         db.dailyTaskDao(),
         db.dynamicCostDao(),
-        db.shopRemarkDao()
+        db.shopRemarkDao(),
+        db.businessExpenseDao()
     )
 
     // --- Centralized Error States ---
@@ -512,6 +515,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             markRemindersCompleted(shopNumbers)
         }
     }
+
+    // --- Business Expenses State & Flows ---
+    val allExpensesList: StateFlow<List<com.example.data.BusinessExpense>> = repository.allExpenses
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // --- Shop Remarks State & Flows ---
     val allRemarks: StateFlow<List<ShopRemark>> = repository.allRemarks
@@ -2745,6 +2752,68 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     operation = "importLocationsFromExcel",
                     exception = e,
                     possibleReason = "The Excel file might be corrupt, have incorrect columns, or contain invalid values."
+                )
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
+    fun insertExpense(expense: com.example.data.BusinessExpense) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertExpense(expense)
+        }
+    }
+
+    fun updateExpense(expense: com.example.data.BusinessExpense) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateExpense(expense)
+        }
+    }
+
+    fun deleteExpense(expense: com.example.data.BusinessExpense) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteExpense(expense)
+        }
+    }
+
+    fun deleteExpenseById(id: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteExpenseById(id)
+        }
+    }
+
+    fun exportExpensesToExcel(context: Context) {
+        viewModelScope.launch {
+            try {
+                val expenseList = repository.getAllExpensesDirect()
+                com.example.utils.Exporter.exportExpenses(context, expenseList)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(context, "Failed to export expenses: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun importExpensesFromExcel(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _isImporting.value = true
+            _importSummary.value = null
+            try {
+                val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.utils.Exporter.importExpenses(context, uri)
+                }
+                if (summary.parsedExpenses.isNotEmpty()) {
+                    repository.insertExpenses(summary.parsedExpenses)
+                }
+                _importSummary.value = summary
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerError(
+                    module = "Expenses Excel Import",
+                    operation = "importExpensesFromExcel",
+                    exception = e,
+                    possibleReason = "The Excel file might be corrupt or missing headers."
                 )
             } finally {
                 _isImporting.value = false

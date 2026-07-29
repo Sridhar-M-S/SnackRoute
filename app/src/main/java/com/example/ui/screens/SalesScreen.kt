@@ -191,10 +191,26 @@ fun SalesScreen(
         viewModel.updateFilteredSalesList(filteredSales)
     }
 
+    val expenses by viewModel.allExpensesList.collectAsStateWithLifecycle()
+
     val summaryTotalSales = remember(filteredSales) { filteredSales.sumOf { it.totalAmount } }
     val summaryTotalProfit = remember(filteredSales) { filteredSales.sumOf { it.totalProfit } }
     val summaryTotalPackets = remember(filteredSales) { filteredSales.sumOf { it.packetsSold } }
     val summaryTotalRecords = remember(filteredSales) { filteredSales.size }
+
+    val summaryProductionCost = remember(filteredSales) { filteredSales.sumOf { (it.productionCostUsed ?: 0.0) * it.packetsSold } }
+    val summaryGrossProfit = remember(summaryTotalSales, summaryProductionCost) { summaryTotalSales - summaryProductionCost }
+
+    val summaryBusinessExpenses = remember(expenses, filterStartDate, filterEndDate) {
+        val start = filterStartDate
+        val end = filterEndDate
+        expenses.filter { expense ->
+            val matchStart = start == null || expense.expenseDate >= start
+            val matchEnd = end == null || expense.expenseDate <= (end + 86400000L)
+            matchStart && matchEnd
+        }.sumOf { it.amount }
+    }
+    val summaryNetProfit = remember(summaryGrossProfit, summaryBusinessExpenses) { summaryGrossProfit - summaryBusinessExpenses }
 
     // --- Excel Import Summary Dialog ---
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
@@ -690,12 +706,33 @@ fun SalesScreen(
                                         onClick = { selectedTabForComparison = "Sales" }
                                     )
                                     SalesSummaryCard(
-                                        label = "Total Profit",
-                                        value = "₹${"%.2f".format(summaryTotalProfit)}",
+                                        label = "Production Cost",
+                                        value = "₹${"%.2f".format(summaryProductionCost)}",
+                                        icon = Icons.Default.Factory,
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f).testTag("summary_production_cost")
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SalesSummaryCard(
+                                        label = "Business Expenses",
+                                        value = "₹${"%.2f".format(summaryBusinessExpenses)}",
+                                        icon = Icons.Default.Receipt,
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.weight(1f).testTag("summary_business_expenses")
+                                    )
+                                    SalesSummaryCard(
+                                        label = "Gross Profit",
+                                        value = "₹${"%.2f".format(summaryGrossProfit)}",
                                         icon = Icons.Default.Payments,
                                         containerColor = Color(0xFFE8F5E9),
                                         contentColor = Color(0xFF2E7D32),
-                                        modifier = Modifier.weight(1f).testTag("summary_total_profit"),
+                                        modifier = Modifier.weight(1f).testTag("summary_gross_profit"),
                                         onClick = { selectedTabForComparison = "Profit" }
                                     )
                                 }
@@ -703,6 +740,14 @@ fun SalesScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
+                                    SalesSummaryCard(
+                                        label = "Net Profit",
+                                        value = "₹${"%.2f".format(summaryNetProfit)}",
+                                        icon = Icons.Default.AccountBalance,
+                                        containerColor = Color(0xFFE0F7FA),
+                                        contentColor = Color(0xFF006064),
+                                        modifier = Modifier.weight(1f).testTag("summary_net_profit")
+                                    )
                                     SalesSummaryCard(
                                         label = "Packets Sold",
                                         value = "$summaryTotalPackets pkts",
@@ -712,14 +757,20 @@ fun SalesScreen(
                                         modifier = Modifier.weight(1f).testTag("summary_total_packets"),
                                         onClick = onNavigateToBreakdown
                                     )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     SalesSummaryCard(
                                         label = "Total Records",
                                         value = "$summaryTotalRecords",
                                         icon = Icons.Default.ListAlt,
                                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        modifier = Modifier.weight(1f).testTag("summary_total_records")
+                                        modifier = Modifier.weight(0.5f).testTag("summary_total_records")
                                     )
+                                    Spacer(modifier = Modifier.weight(0.5f))
                                 }
                             }
                         }
