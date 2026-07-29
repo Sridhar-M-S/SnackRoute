@@ -28,7 +28,7 @@ fun PacketsSoldBreakdownScreen(
     onBack: () -> Unit,
     onNavigateToSales: () -> Unit
 ) {
-    val sales by viewModel.sales.collectAsStateWithLifecycle()
+    val sales by viewModel.filteredSalesList.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
 
     val breakdownGroups = remember(sales, products) {
@@ -45,8 +45,19 @@ fun PacketsSoldBreakdownScreen(
                 val groupedByPrice = salesInVariety.groupBy { it.ratePerPacket }
                 val priceGroups = groupedByPrice.map { (sellingPrice, salesInPrice) ->
                     val totalPacketsSold = salesInPrice.sumOf { it.packetsSold }
-                    val totalSalesAmount = sellingPrice * totalPacketsSold
-                    PriceGroup(sellingPrice, totalPacketsSold, totalSalesAmount)
+                    val totalSalesAmount = salesInPrice.sumOf { it.totalAmount }
+                    val totalProductionCost = salesInPrice.sumOf { 
+                        (it.productionCostUsed ?: (it.ratePerPacket - it.profitPerPacket)) * it.packetsSold 
+                    }
+                    val totalProfit = salesInPrice.sumOf { it.totalProfit }
+                    
+                    PriceGroup(
+                        sellingPrice = sellingPrice,
+                        totalPacketsSold = totalPacketsSold,
+                        totalSalesAmount = totalSalesAmount,
+                        totalProductionCost = totalProductionCost,
+                        totalProfit = totalProfit
+                    )
                 }.sortedBy { it.sellingPrice }
 
                 VarietyGroup(varietyName, priceGroups)
@@ -68,6 +79,22 @@ fun PacketsSoldBreakdownScreen(
         breakdownGroups.sumOf { cat ->
             cat.varieties.sumOf { v ->
                 v.priceGroups.sumOf { p -> p.totalSalesAmount }
+            }
+        }
+    }
+
+    val grandTotalProductionCost = remember(breakdownGroups) {
+        breakdownGroups.sumOf { cat ->
+            cat.varieties.sumOf { v ->
+                v.priceGroups.sumOf { p -> p.totalProductionCost }
+            }
+        }
+    }
+
+    val grandTotalProfit = remember(breakdownGroups) {
+        breakdownGroups.sumOf { cat ->
+            cat.varieties.sumOf { v ->
+                v.priceGroups.sumOf { p -> p.totalProfit }
             }
         }
     }
@@ -109,7 +136,7 @@ fun PacketsSoldBreakdownScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No sold packets records found.",
+                        text = "No sold packets records found for the active filters.",
                         color = Color.Gray,
                         style = MaterialTheme.typography.bodyLarge
                     )
@@ -248,6 +275,42 @@ fun PacketsSoldBreakdownScreen(
                             modifier = Modifier.testTag("grand_total_amount")
                         )
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Grand Total Production Cost:",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "₹${"%.2f".format(grandTotalProductionCost)}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.testTag("grand_total_production_cost")
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Grand Total Profit:",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "₹${"%.2f".format(grandTotalProfit)}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.testTag("grand_total_profit")
+                        )
+                    }
                 }
             }
         }
@@ -257,7 +320,9 @@ fun PacketsSoldBreakdownScreen(
 data class PriceGroup(
     val sellingPrice: Double,
     val totalPacketsSold: Int,
-    val totalSalesAmount: Double
+    val totalSalesAmount: Double,
+    val totalProductionCost: Double,
+    val totalProfit: Double
 )
 
 data class VarietyGroup(

@@ -187,6 +187,10 @@ fun SalesScreen(
         list
     }
 
+    LaunchedEffect(filteredSales) {
+        viewModel.updateFilteredSalesList(filteredSales)
+    }
+
     val summaryTotalSales = remember(filteredSales) { filteredSales.sumOf { it.totalAmount } }
     val summaryTotalProfit = remember(filteredSales) { filteredSales.sumOf { it.totalProfit } }
     val summaryTotalPackets = remember(filteredSales) { filteredSales.sumOf { it.packetsSold } }

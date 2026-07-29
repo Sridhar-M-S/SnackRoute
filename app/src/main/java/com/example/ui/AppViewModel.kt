@@ -1614,6 +1614,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val salesFilterProductName = MutableStateFlow<String?>(null)
     val salesFilterSellingPrice = MutableStateFlow<Double?>(null)
 
+    private val _filteredSalesList = MutableStateFlow<List<SalesEntry>>(emptyList())
+    val filteredSalesList: StateFlow<List<SalesEntry>> = _filteredSalesList.asStateFlow()
+
+    fun updateFilteredSalesList(list: List<SalesEntry>) {
+        _filteredSalesList.value = list
+    }
+
     fun setSalesBreakdownFilters(category: String?, productName: String?, sellingPrice: Double?) {
         salesFilterCategory.value = category
         salesFilterProductName.value = productName
