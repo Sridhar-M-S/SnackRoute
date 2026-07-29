@@ -2676,9 +2676,12 @@ object Exporter {
                 cell.setCellValue(shopsHeaders[i])
                 cell.cellStyle = headerStyle
             }
+            val helper = workbook.getCreationHelper()
+            val drawing = shopsSheet.createDrawingPatriarch()
             rowIdx = 1
             for (shop in shops) {
                 val row = shopsSheet.createRow(rowIdx++)
+                row.heightInPoints = 80f
                 row.createCell(0).setCellValue(shop.shopNumber)
                 row.createCell(1).setCellValue(shop.locationNumber)
                 row.createCell(2).setCellValue(shop.storeName)
@@ -2694,7 +2697,32 @@ object Exporter {
                 row.createCell(7).setCellValue(latLngStr)
                 row.createCell(8).setCellValue(shop.mobileNumber ?: "")
                 row.createCell(9).setCellValue(shop.notes ?: "")
-                row.createCell(10).setCellValue(shop.storeImage ?: "")
+                
+                // Embed the actual image
+                val bytes = getBytesFromImagePath(context, shop.storeImage)
+                if (bytes != null) {
+                    try {
+                        val anchor = helper.createClientAnchor().apply {
+                            setCol1(10)
+                            setRow1(row.rowNum)
+                            setCol2(11)
+                            setRow2(row.rowNum + 1)
+                        }
+                        val type = if (shop.storeImage?.endsWith(".png", ignoreCase = true) == true) {
+                            Workbook.PICTURE_TYPE_PNG
+                        } else {
+                            Workbook.PICTURE_TYPE_JPEG
+                        }
+                        val pictureIdx = workbook.addPicture(bytes, type)
+                        drawing.createPicture(anchor, pictureIdx)
+                        row.createCell(10).setCellValue("")
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        row.createCell(10).setCellValue(shop.storeImage ?: "")
+                    }
+                } else {
+                    row.createCell(10).setCellValue("")
+                }
             }
             for (i in shopsHeaders.indices) {
                 shopsSheet.setColumnWidth(i, 5000)
@@ -3053,6 +3081,44 @@ object Exporter {
                     }
                 }
             }
+        }
+        
+        // Copy embedded pictures (drawings) if any
+        try {
+            val srcDrawing = sourceSheet.getDrawingPatriarch() as? org.apache.poi.xssf.usermodel.XSSFDrawing
+            if (srcDrawing != null) {
+                val destDrawing = destSheet.createDrawingPatriarch() as? org.apache.poi.xssf.usermodel.XSSFDrawing
+                val helper = destSheet.workbook.getCreationHelper()
+                for (shape in srcDrawing.shapes) {
+                    if (shape is org.apache.poi.xssf.usermodel.XSSFPicture) {
+                        val anchor = shape.clientAnchor as? org.apache.poi.xssf.usermodel.XSSFClientAnchor
+                        val pictureData = shape.pictureData
+                        if (anchor != null && pictureData != null) {
+                            val bytes = pictureData.data
+                            val ext = pictureData.suggestFileExtension() ?: "png"
+                            val type = if (ext.equals("png", ignoreCase = true)) {
+                                org.apache.poi.ss.usermodel.Workbook.PICTURE_TYPE_PNG
+                            } else {
+                                org.apache.poi.ss.usermodel.Workbook.PICTURE_TYPE_JPEG
+                            }
+                            val pictureIdx = destSheet.workbook.addPicture(bytes, type)
+                            val newAnchor = helper.createClientAnchor().apply {
+                                setCol1(anchor.col1.toInt())
+                                setRow1(anchor.row1)
+                                setCol2(anchor.col2.toInt())
+                                setRow2(anchor.row2)
+                                dx1 = anchor.dx1
+                                dy1 = anchor.dy1
+                                dx2 = anchor.dx2
+                                dy2 = anchor.dy2
+                            }
+                            destDrawing?.createPicture(newAnchor, pictureIdx)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
