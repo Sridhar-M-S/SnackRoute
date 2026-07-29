@@ -267,6 +267,67 @@ fun SettingsScreen(
                 }
             }
 
+            // --- Image Upload Settings ---
+            val maxImageSizeKb by viewModel.maxImageSizeKb.collectAsState()
+            Text("Image Upload Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("image_upload_settings_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text("Max Image Upload Size (KB)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Images will be compressed under this limit dynamically", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+
+                    var sizeInput by remember(maxImageSizeKb) {
+                        mutableStateOf(maxImageSizeKb.toString())
+                    }
+                    OutlinedTextField(
+                        value = sizeInput,
+                        onValueChange = { newValue ->
+                            if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                                sizeInput = newValue
+                                newValue.toIntOrNull()?.let {
+                                    if (it > 0) {
+                                        viewModel.updateMaxImageSizeKb(it)
+                                    }
+                                }
+                            }
+                        },
+                        placeholder = { Text("50") },
+                        suffix = { Text("KB", style = MaterialTheme.typography.bodyMedium) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("max_image_upload_size_input"),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                        )
+                    )
+                }
+            }
+
             // --- Dynamic Cost & Profit Engine Settings (Steps 17, 18, 20) ---
             val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsState()
             Text("Cost & Profit Engine", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)

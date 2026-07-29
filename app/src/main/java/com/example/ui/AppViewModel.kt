@@ -1,6 +1,10 @@
 package com.example.ui
 
 import android.widget.Toast
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 
 import android.app.Application
 import android.content.Context
@@ -339,6 +343,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _keepVisibleDays = MutableStateFlow(prefs.getInt("sales_reminder_keep_visible_days", 30))
     val keepVisibleDays: StateFlow<Int> = _keepVisibleDays.asStateFlow()
 
+    private val _maxImageSizeKb = MutableStateFlow(prefs.getInt("max_image_upload_size_kb", 50))
+    val maxImageSizeKb: StateFlow<Int> = _maxImageSizeKb.asStateFlow()
+
+    fun updateMaxImageSizeKb(sizeKb: Int) {
+        prefs.edit().putInt("max_image_upload_size_kb", sizeKb).apply()
+        _maxImageSizeKb.value = sizeKb
+    }
+
     private fun getMidnight(timeMs: Long): Long {
         val cal = Calendar.getInstance()
         cal.timeInMillis = timeMs
@@ -398,6 +410,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _reminderTime.value = prefs.getString("sales_reminder_time", "20:00") ?: "20:00"
         _notifyAfterDays.value = prefs.getInt("sales_reminder_notify_after_days", 7)
         _keepVisibleDays.value = prefs.getInt("sales_reminder_keep_visible_days", 30)
+        _maxImageSizeKb.value = prefs.getInt("max_image_upload_size_kb", 50)
         com.example.utils.AlarmScheduler.scheduleDailyAlarm(getApplication())
     }
 
@@ -3798,7 +3811,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    // --- Persistent Shop Image Saving Utility ---
+    // --- Persistent Shop Image Saving Utility with Dynamic Compression ---
     fun saveImageToStorage(uri: Uri): String? {
         val context = getApplication<Application>()
         return try {
@@ -3807,11 +3820,70 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (mimeType.isNotEmpty() && !mimeType.contains("jpeg") && !mimeType.contains("jpg") && !mimeType.contains("png") && !mimeType.contains("webp")) {
                 throw IllegalArgumentException("Unsupported image format: '$mimeType'. Only JPG, PNG, and WEBP files are supported.")
             }
-            val inputStream = contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("Could not open source image stream.")
+
+            val maxKb = prefs.getInt("max_image_upload_size_kb", 50)
+            val maxFileSizeBytes = maxKb.toLong() * 1024L
+
+            var inputStream = contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("Could not open source image stream.")
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = 1
+            }
+            val bitmap = BitmapFactory.decodeStream(inputStream, null, options) ?: throw java.io.IOException("Could not decode source image.")
+            inputStream.close()
+
+            // Compress to a ByteArray first
+            var quality = 90
+            var stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+            var size = stream.size()
+
+            // If still too large, dynamically reduce quality
+            while (size > maxFileSizeBytes && quality > 15) {
+                stream.reset()
+                quality -= 10
+                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+                size = stream.size()
+            }
+
+            // If still too large, let's scale down the dimensions and repeat
+            var currentBitmap = bitmap
+            var scale = 0.9f
+            while (size > maxFileSizeBytes && scale > 0.1f) {
+                val width = (currentBitmap.width * scale).toInt()
+                val height = (currentBitmap.height * scale).toInt()
+                if (width <= 0 || height <= 0) break
+
+                val scaledBitmap = Bitmap.createScaledBitmap(currentBitmap, width, height, true)
+                if (currentBitmap != bitmap) {
+                    currentBitmap.recycle()
+                }
+                currentBitmap = scaledBitmap
+
+                stream.reset()
+                quality = 80
+                currentBitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+                size = stream.size()
+
+                while (size > maxFileSizeBytes && quality > 15) {
+                    stream.reset()
+                    quality -= 10
+                    currentBitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+                    size = stream.size()
+                }
+
+                scale -= 0.15f
+            }
+
             val file = File(context.filesDir, "shop_img_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { out ->
-                inputStream.copyTo(out)
+                out.write(stream.toByteArray())
             }
+
+            if (currentBitmap != bitmap) {
+                currentBitmap.recycle()
+            }
+            bitmap.recycle()
+
             file.absolutePath
         } catch (e: Exception) {
             e.printStackTrace()

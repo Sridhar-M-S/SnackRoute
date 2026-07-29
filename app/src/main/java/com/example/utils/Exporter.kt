@@ -2559,6 +2559,9 @@ object Exporter {
                         } else if (key == "sales_reminder_keep_visible_days") {
                             val intVal = value.toIntOrNull() ?: 30
                             editor.putInt("sales_reminder_keep_visible_days", intVal)
+                        } else if (key == "max_image_upload_size_kb") {
+                            val intVal = value.toIntOrNull() ?: 50
+                            editor.putInt("max_image_upload_size_kb", intVal)
                         }
                     }
                     editor.apply()
@@ -2980,6 +2983,11 @@ object Exporter {
             val row6 = settingsSheet.createRow(6)
             row6.createCell(0).setCellValue("sales_reminder_keep_visible_days")
             row6.createCell(1).setCellValue(keepVisibleDays.toDouble())
+
+            val maxImageUploadSizeKb = prefs.getInt("max_image_upload_size_kb", 50)
+            val row7 = settingsSheet.createRow(7)
+            row7.createCell(0).setCellValue("max_image_upload_size_kb")
+            row7.createCell(1).setCellValue(maxImageUploadSizeKb.toDouble())
 
             for (i in settingsHeaders.indices) {
                 settingsSheet.setColumnWidth(i, 8000)
