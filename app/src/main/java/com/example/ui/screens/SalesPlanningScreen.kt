@@ -38,7 +38,8 @@ import java.util.Locale
 @Composable
 fun SalesPlanningScreen(
     viewModel: AppViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenMapRoutePlanner: (() -> Unit)? = null
 ) {
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val locations by viewModel.locations.collectAsStateWithLifecycle()
@@ -97,6 +98,16 @@ fun SalesPlanningScreen(
                         modifier = Modifier.testTag("sales_planning_back_button")
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (onOpenMapRoutePlanner != null) {
+                        IconButton(
+                            onClick = onOpenMapRoutePlanner,
+                            modifier = Modifier.testTag("sales_planning_map_button")
+                        ) {
+                            Icon(Icons.Default.Map, contentDescription = "Map Planner")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

@@ -294,6 +294,17 @@ fun DashboardScreen(
                         }
                     }
                     IconButton(
+                        onClick = { onNavigateToTab("MapRoutePlanner") },
+                        modifier = Modifier.testTag("open_route_planner_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = "Map Route Planner",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    IconButton(
                         onClick = onOpenDailyTasks,
                         modifier = Modifier.testTag("open_daily_tasks_button")
                     ) {
@@ -515,6 +526,14 @@ fun DashboardScreen(
                                 iconColor = MaterialTheme.colorScheme.secondary,
                                 iconBgColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
                                 onClick = { onNavigateToTab("Shops") }
+                            )
+                            BentoMiniStatCard(
+                                label = "Route Planner",
+                                value = "${dueReminders.size} Due",
+                                icon = Icons.Default.Navigation,
+                                iconColor = MaterialTheme.colorScheme.tertiary,
+                                iconBgColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f),
+                                onClick = { onNavigateToTab("MapRoutePlanner") }
                             )
                         }
                     }

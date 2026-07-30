@@ -282,7 +282,8 @@ class MainActivity : ComponentActivity() {
                                     Box(modifier = if (currentTab == "SalesPlanning") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         SalesPlanningScreen(
                                             viewModel = viewModel,
-                                            onBack = { navigateBack() }
+                                            onBack = { navigateBack() },
+                                            onOpenMapRoutePlanner = { navigateToChildTab("MapRoutePlanner") }
                                         )
                                     }
                                 }
@@ -300,6 +301,15 @@ class MainActivity : ComponentActivity() {
                                             viewModel = viewModel,
                                             onBack = { navigateBack() },
                                             onNavigateToSales = { navigateToParentTab("Sales") }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("MapRoutePlanner")) {
+                                    Box(modifier = if (currentTab == "MapRoutePlanner") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        MapRoutePlannerScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() },
+                                            showBackButton = true
                                         )
                                     }
                                 }
