@@ -65,6 +65,8 @@ fun RemarksScreen(
     var newRemarkShopNo by remember { mutableStateOf("") }
     var newRemarkText by remember { mutableStateOf("") }
     var isFormShopDropdownExpanded by remember { mutableStateOf(false) }
+    var isShopSelectionDialogOpen by remember { mutableStateOf(false) }
+    var shopSearchQuery by remember { mutableStateOf("") }
 
     // Form states for Edit remark
     var editRemarkText by remember { mutableStateOf("") }
@@ -543,29 +545,27 @@ fun RemarksScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("Select Shop:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isShopSelectionDialogOpen = true }
+                    ) {
                         OutlinedTextField(
                             value = if (newRemarkShopNo.isEmpty()) "Tap to select shop" else shops.find { it.shopNumber == newRemarkShopNo }?.storeName ?: "",
                             onValueChange = {},
                             readOnly = true,
+                            enabled = false, // Disable to pass clicks to the Box container
                             trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth().clickable { isFormShopDropdownExpanded = true }
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         )
-                        DropdownMenu(
-                            expanded = isFormShopDropdownExpanded,
-                            onDismissRequest = { isFormShopDropdownExpanded = false },
-                            modifier = Modifier.fillMaxWidth(0.8f)
-                        ) {
-                            shops.forEach { s ->
-                                DropdownMenuItem(
-                                    text = { Text(s.storeName) },
-                                    onClick = {
-                                        newRemarkShopNo = s.shopNumber
-                                        isFormShopDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
                     }
 
                     OutlinedTextField(
@@ -599,6 +599,128 @@ fun RemarksScreen(
             dismissButton = {
                 TextButton(onClick = { isAddRemarkDialogOpen = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // 1b. Searchable Shop Selection Dialog (for Add general remark)
+    if (isShopSelectionDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { 
+                isShopSelectionDialogOpen = false 
+                shopSearchQuery = ""
+            },
+            title = { Text("Select Shop", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = shopSearchQuery,
+                        onValueChange = { shopSearchQuery = it },
+                        placeholder = { Text("Search shop name, ID or route...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            if (shopSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { shopSearchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                }
+                            }
+                        }
+                    )
+
+                    val filteredShopsForSelection = remember(shops, shopSearchQuery) {
+                        shops.filter { s ->
+                            s.storeName.contains(shopSearchQuery, ignoreCase = true) ||
+                            s.shopNumber.contains(shopSearchQuery, ignoreCase = true) ||
+                            s.locationNumber.contains(shopSearchQuery, ignoreCase = true)
+                        }
+                    }
+
+                    if (filteredShopsForSelection.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No shops found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(filteredShopsForSelection) { s ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            newRemarkShopNo = s.shopNumber
+                                            isShopSelectionDialogOpen = false
+                                            shopSearchQuery = ""
+                                        },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (newRemarkShopNo == s.shopNumber) 
+                                            MaterialTheme.colorScheme.primaryContainer 
+                                        else 
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = s.storeName,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = if (newRemarkShopNo == s.shopNumber)
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "ID: ${s.shopNumber}",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Route: ${s.locationNumber}",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(
+                    onClick = { 
+                        isShopSelectionDialogOpen = false 
+                        shopSearchQuery = ""
+                    }
+                ) {
+                    Text("Close")
                 }
             }
         )

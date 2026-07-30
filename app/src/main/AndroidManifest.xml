@@ -32,6 +32,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".utils.ExportActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="com.example.snackroutepro.fileprovider"

@@ -411,6 +411,7 @@ fun ShopsScreen(
     var showAddEditScreen by remember { mutableStateOf(false) }
     var selectedShopForEdit by remember { mutableStateOf<ShopMaster?>(null) }
     var selectedShopForDetail by remember { mutableStateOf<ShopMaster?>(null) }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
 
     // Form fields
     var formShopNumber by remember { mutableStateOf("") }
@@ -836,7 +837,8 @@ fun ShopsScreen(
                                     onDelete = {
                                         viewModel.deleteShop(shop)
                                         Toast.makeText(context, "Shop deleted", Toast.LENGTH_SHORT).show()
-                                    }
+                                    },
+                                    onImageClick = { previewImagePath = it }
                                 )
                             }
                         }
@@ -1229,7 +1231,8 @@ fun ShopsScreen(
                                         onCreateSale = {
                                             viewModel.setPrefilledSaleData(shop.shopNumber, shop.storeName, locName)
                                             onNavigateToTab("Sales")
-                                        }
+                                        },
+                                        onImageClick = { previewImagePath = it }
                                     )
                                 }
                             }
@@ -1666,6 +1669,7 @@ fun ShopsScreen(
                                 .fillMaxWidth()
                                 .height(130.dp)
                                 .clip(RoundedCornerShape(8.dp))
+                                .clickable { previewImagePath = detail.storeImage }
                         )
                     }
 
@@ -2142,6 +2146,88 @@ fun ShopsScreen(
             }
         )
     }
+
+    if (previewImagePath != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { previewImagePath = null }
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Image Preview", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { previewImagePath = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close preview")
+                        }
+                    }
+
+                    if (File(previewImagePath!!).exists()) {
+                        Image(
+                            painter = rememberAsyncImagePainter(File(previewImagePath!!)),
+                            contentDescription = "Full preview of store image",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Image file not found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { previewImagePath = null },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Close")
+                        }
+                        Button(
+                            onClick = {
+                                val success = com.example.utils.Exporter.saveImageToGallery(context, previewImagePath!!)
+                                if (success) {
+                                    Toast.makeText(context, "Image saved to Gallery successfully!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to save image to Gallery", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Save Gallery")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private @Composable
@@ -2173,7 +2259,8 @@ fun ShopCard(
     onGoToSales: () -> Unit,
     onRecordSale: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onImageClick: ((String) -> Unit)? = null
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -2198,6 +2285,7 @@ fun ShopCard(
                         modifier = Modifier
                             .size(60.dp)
                             .clip(RoundedCornerShape(8.dp))
+                            .clickable { if (onImageClick != null) onImageClick(shop.storeImage) }
                     )
                 } else {
                     Box(
@@ -2418,7 +2506,8 @@ fun NearestShopCard(
     index: Int,
     onClick: () -> Unit,
     onNavigate: () -> Unit,
-    onCreateSale: () -> Unit
+    onCreateSale: () -> Unit,
+    onImageClick: ((String) -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -2513,6 +2602,7 @@ fun NearestShopCard(
                         .fillMaxWidth()
                         .height(100.dp)
                         .clip(RoundedCornerShape(8.dp))
+                        .clickable { if (onImageClick != null) onImageClick(shop.storeImage) }
                 )
             }
 

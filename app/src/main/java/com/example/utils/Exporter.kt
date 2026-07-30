@@ -71,6 +71,22 @@ object Exporter {
 
     fun shareFile(context: Context, file: File, title: String) {
         try {
+            val intent = Intent(context, ExportActivity::class.java).apply {
+                putExtra("file_path", file.absolutePath)
+                putExtra("file_title", title)
+                if (context !is android.app.Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            shareFileDirectlyFallback(context, file, title)
+        }
+    }
+
+    fun shareFileDirectlyFallback(context: Context, file: File, title: String) {
+        try {
             val uri = FileProvider.getUriForFile(
                 context,
                 "com.example.snackroutepro.fileprovider",
@@ -87,6 +103,45 @@ object Exporter {
             e.printStackTrace()
             Toast.makeText(context, "Error exporting: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    fun saveImageToGallery(context: Context, imagePath: String): Boolean {
+        try {
+            val file = File(imagePath)
+            if (!file.exists() || !file.isFile) return false
+            
+            val contentResolver = context.contentResolver
+            val bytes = file.readBytes()
+            
+            val name = file.nameWithoutExtension + "_" + System.currentTimeMillis()
+            val ext = file.extension.lowercase(Locale.ROOT)
+            val mimeType = if (ext == "png") "image/png" else "image/jpeg"
+            
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "$name.$ext")
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/ShopMaster")
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+            
+            val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(bytes)
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                    contentResolver.update(uri, contentValues, null, null)
+                }
+                return true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return false
     }
 
     fun exportErrorLogs(context: Context, errorLogs: List<ErrorLog>) {
