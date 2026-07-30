@@ -630,7 +630,7 @@ fun SalesScreen(
                 }
 
                 // --- Sales Summary Section ---
-                var isSummaryExpanded by rememberSaveable { mutableStateOf(true) }
+                var isSummaryExpanded by rememberSaveable { mutableStateOf(false) }
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
