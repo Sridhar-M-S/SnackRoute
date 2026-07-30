@@ -2214,8 +2214,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _prefilledSaleData = MutableStateFlow<Triple<String, String, String>?>(null) // ShopNumber, ShopName, LocationName
     val prefilledSaleData: StateFlow<Triple<String, String, String>?> = _prefilledSaleData.asStateFlow()
 
+    // Pre-filled search query for Shop Master (Shops screen)
+    private val _prefilledShopSearchQuery = MutableStateFlow<String?>(null)
+    val prefilledShopSearchQuery: StateFlow<String?> = _prefilledShopSearchQuery.asStateFlow()
+
     fun setShopLocationFilter(locationNumber: String?) {
         _shopLocationFilter.value = locationNumber
+    }
+
+    fun setPrefilledShopSearchQuery(query: String?) {
+        _prefilledShopSearchQuery.value = query
     }
 
     fun setPrefilledSaleData(shopNumber: String?, shopName: String?, locationName: String?) {
@@ -4324,6 +4332,7 @@ User Question: $userQuestion
                 val purchases = repository.getAllPurchasesDirect()
                 val calculations = repository.getAllCalculationsDirect()
                 val calculationItems = repository.getAllCalculationItemsDirect()
+                val remarksList = repository.getAllRemarksDirect()
                 val isEnabled = isDynamicProfitEnabled.value
 
                 com.example.utils.Exporter.exportAllUnified(
@@ -4339,6 +4348,7 @@ User Question: $userQuestion
                     purchases = purchases,
                     calculations = calculations,
                     calculationItems = calculationItems,
+                    remarksList = remarksList,
                     isDynamicProfitEnabled = isEnabled
                 )
             } catch (e: Exception) {
@@ -4547,6 +4557,25 @@ User Question: $userQuestion
                     skippedRowCounter += summary.skippedRows
                     failedRowCounter += summary.failedRowsCount
                     sheetMessages.add("Cost Engine: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 8. Shop Remarks
+                val remarksSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Shop Remarks", "Remarks", "Shop_Remarks", "ShopRemarks"))
+                if (remarksSheet != null) {
+                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, remarksSheet, "temp_remarks")
+                    val existingRemarks = repository.getAllRemarksDirect()
+                    val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importShopRemarks(context, tempUri, existingRemarks)
+                    }
+                    if (summary.parsedRemarks.isNotEmpty()) {
+                        repository.deleteAllRemarks()
+                        repository.insertRemarks(summary.parsedRemarks)
+                    }
+                    totalRowCounter += summary.totalRows
+                    successRowCounter += summary.successfullyImported
+                    skippedRowCounter += summary.skippedRows
+                    failedRowCounter += summary.failedRowsCount
+                    sheetMessages.add("Shop Remarks: Imported ${summary.successfullyImported}/${summary.totalRows}")
                 }
 
                 workbook.close()

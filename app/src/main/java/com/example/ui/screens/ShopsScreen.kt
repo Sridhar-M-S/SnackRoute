@@ -159,11 +159,20 @@ fun ShopsScreen(
     }
 
     var searchQuery by remember { mutableStateOf("") }
+    var activeSubTab by remember { mutableStateOf("Directory") } // "Directory" or "Nearest Search"
+    val prefilledShopSearchQuery by viewModel.prefilledShopSearchQuery.collectAsStateWithLifecycle()
+    LaunchedEffect(prefilledShopSearchQuery) {
+        prefilledShopSearchQuery?.let { query ->
+            searchQuery = query
+            activeSubTab = "Directory"
+            viewModel.setPrefilledShopSearchQuery(null)
+        }
+    }
+
     val selectedLocationFilter by viewModel.shopLocationFilter.collectAsStateWithLifecycle()
     var sortBy by remember { mutableStateOf("Name") } // Name, Number, Rating, Date
     var sortAscending by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
-    var activeSubTab by remember { mutableStateOf("Directory") } // "Directory" or "Nearest Search"
     var nearestQuery by remember { mutableStateOf("") }
 
     val fusedLocationClient = remember { com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context) }
@@ -645,6 +654,17 @@ fun ShopsScreen(
                         onValueChange = { searchQuery = it },
                         placeholder = { Text("Search by Shop Name, ID, Mobile...") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("shop_search_input"),

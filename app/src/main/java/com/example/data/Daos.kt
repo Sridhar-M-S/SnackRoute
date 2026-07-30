@@ -333,14 +333,23 @@ interface ShopRemarkDao {
     @Query("SELECT * FROM shop_remarks ORDER BY date DESC")
     fun getAllRemarks(): Flow<List<ShopRemark>>
 
+    @Query("SELECT * FROM shop_remarks ORDER BY date DESC")
+    suspend fun getAllRemarksDirect(): List<ShopRemark>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRemark(remark: ShopRemark): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRemarks(remarks: List<ShopRemark>)
 
     @Update
     suspend fun updateRemark(remark: ShopRemark)
 
     @Delete
     suspend fun deleteRemark(remark: ShopRemark)
+
+    @Query("DELETE FROM shop_remarks")
+    suspend fun deleteAllRemarks()
 
     @Query("DELETE FROM shop_remarks WHERE id = :id")
     suspend fun deleteRemarkById(id: Int)

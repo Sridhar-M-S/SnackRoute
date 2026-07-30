@@ -60,7 +60,8 @@ fun SalesScreen(
     onOpenTimetable: () -> Unit,
     onBackToParent: () -> Unit = {},
     showBackButton: Boolean = false,
-    onNavigateToBreakdown: () -> Unit = {}
+    onNavigateToBreakdown: () -> Unit = {},
+    onNavigateToTab: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     
@@ -876,6 +877,10 @@ fun SalesScreen(
                                 onDelete = {
                                     viewModel.deleteSales(sale)
                                     Toast.makeText(context, "Log deleted", Toast.LENGTH_SHORT).show()
+                                },
+                                onNavigateToShop = {
+                                    viewModel.setPrefilledShopSearchQuery(sale.shopName)
+                                    onNavigateToTab("Shops")
                                 }
                             )
                         }
@@ -1546,7 +1551,8 @@ fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorS
 fun SalesCard(
     sale: SalesEntry,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onNavigateToShop: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val formattedDate = remember(sale.entryDate) { sale.entryDateFormatted }
@@ -1576,7 +1582,17 @@ fun SalesCard(
                     )
                 }
 
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onNavigateToShop,
+                        modifier = Modifier.testTag("navigate_to_shop_button_${sale.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Storefront,
+                            contentDescription = "Navigate to Shop",
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                     IconButton(onClick = onEdit) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
                     }

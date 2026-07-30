@@ -223,7 +223,8 @@ class MainActivity : ComponentActivity() {
                                             onOpenTimetable = { isTimetableOpen = true },
                                             onBackToParent = { navigateBack() },
                                             showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Sales",
-                                            onNavigateToBreakdown = { navigateToChildTab("PacketsSoldBreakdown") }
+                                            onNavigateToBreakdown = { navigateToChildTab("PacketsSoldBreakdown") },
+                                            onNavigateToTab = { navigateToChildTab(it) }
                                         )
                                     }
                                 }

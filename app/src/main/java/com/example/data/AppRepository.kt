@@ -36,9 +36,12 @@ class AppRepository(
 
     // --- Shop Remark Queries ---
     val allRemarks: Flow<List<ShopRemark>> = shopRemarkDao.getAllRemarks()
+    suspend fun getAllRemarksDirect(): List<ShopRemark> = shopRemarkDao.getAllRemarksDirect()
     suspend fun insertRemark(remark: ShopRemark): Long = shopRemarkDao.insertRemark(remark)
+    suspend fun insertRemarks(remarks: List<ShopRemark>) = shopRemarkDao.insertRemarks(remarks)
     suspend fun updateRemark(remark: ShopRemark) = shopRemarkDao.updateRemark(remark)
     suspend fun deleteRemark(remark: ShopRemark) = shopRemarkDao.deleteRemark(remark)
+    suspend fun deleteAllRemarks() = shopRemarkDao.deleteAllRemarks()
     suspend fun deleteRemarkById(id: Int) = shopRemarkDao.deleteRemarkById(id)
     suspend fun getRemarkBySalesId(salesId: Int): ShopRemark? = shopRemarkDao.getRemarkBySalesId(salesId)
     suspend fun deleteRemarkBySalesId(salesId: Int) = shopRemarkDao.deleteRemarkBySalesId(salesId)

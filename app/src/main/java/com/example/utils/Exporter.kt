@@ -10,6 +10,8 @@ import com.example.data.ProductMaster
 import com.example.data.ProductPrice
 import com.example.data.SalesEntry
 import com.example.data.ShopMaster
+import com.example.data.ShopRemark
+import com.example.data.RemarkHistoryItem
 import com.example.data.ErrorLog
 import com.example.data.DailyTask
 import com.example.data.BusinessExpense
@@ -32,7 +34,7 @@ object Exporter {
     )
 
     enum class ImportType {
-        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE, BUSINESS_EXPENSES, UNIFIED_BACKUP
+        SHOPS, LOCATIONS, SALES, PRODUCTS, DAILY_TASKS, DYNAMIC_COST_ENGINE, BUSINESS_EXPENSES, UNIFIED_BACKUP, REMARKS
     }
 
     data class ImportSummary(
@@ -66,7 +68,8 @@ object Exporter {
         val parsedCalculationItems: List<com.example.data.CostCalculationItem> = emptyList(),
         val isDynamicProfitEnabledSetting: Boolean? = null,
         val errorRows: List<List<String>> = emptyList(),
-        val remarks: String? = null
+        val remarks: String? = null,
+        val parsedRemarks: List<ShopRemark> = emptyList()
     )
 
     fun shareFile(context: Context, file: File, title: String) {
@@ -1234,7 +1237,7 @@ object Exporter {
             val startDateIdx = getHeaderIndex(headerMap, "Starting Date", "Start Date")
             val mapsIdx = getHeaderIndex(headerMap, "Google Maps", "Location", "GoogleMapLink")
             val mobileIdx = getHeaderIndex(headerMap, "Mobile", "Mobile No", "MobileNo")
-            val notesIdx = getHeaderIndex(headerMap, "Notes")
+            val notesIdx = getHeaderIndex(headerMap, "Notes", "Remarks", "Remark")
             val latitudeIdx = getHeaderIndex(headerMap, "Latitude", "Lat")
             val longitudeIdx = getHeaderIndex(headerMap, "Longitude", "Lng", "Long")
             val latLngIdx = getHeaderIndex(headerMap, "Latitude & Longitude", "Coordinates", "Lat & Lng", "Lat,Lng", "Lat, Lng", "Latitude/Longitude")
@@ -2203,6 +2206,104 @@ object Exporter {
         }
     }
 
+    fun importShopRemarks(
+        context: Context,
+        uri: Uri,
+        existingRemarks: List<ShopRemark>
+    ): ImportSummary {
+        val errorRows = mutableListOf<List<String>>()
+        val successRemarks = mutableListOf<ShopRemark>()
+        
+        var totalRows = 0
+        var successfullyImported = 0
+        var failedRowsCount = 0
+
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open file stream")
+            val workbook = XSSFWorkbook(inputStream)
+            val sheet = workbook.getSheetAt(0) ?: throw Exception("Workbook is empty")
+            
+            val headerRow = sheet.getRow(0) ?: throw Exception("Excel file header row is missing")
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal] = c
+                }
+            }
+            
+            val idIdx = getHeaderIndex(headerMap, "ID", "Remark ID", "id")
+            val dateIdx = getHeaderIndex(headerMap, "Date", "Timestamp", "date")
+            val shopNoIdx = getHeaderIndex(headerMap, "Shop Number", "Shop No", "Shop_Number", "shopNumber")
+            val shopNameIdx = getHeaderIndex(headerMap, "Shop Name", "ShopName", "shopName")
+            val locNoIdx = getHeaderIndex(headerMap, "Location Number", "Location No", "Location_Number", "locationNumber")
+            val remarkIdx = getHeaderIndex(headerMap, "Remark", "Notes", "remark", "Remarks", "Remarks Text")
+            val statusIdx = getHeaderIndex(headerMap, "Status", "status")
+            val salesIdIdx = getHeaderIndex(headerMap, "Sales Entry ID", "Sales ID", "salesEntryId")
+            val historyIdx = getHeaderIndex(headerMap, "History", "history")
+            
+            val missingHeaders = mutableListOf<String>()
+            if (shopNoIdx == null) missingHeaders.add("Shop Number")
+            if (remarkIdx == null) missingHeaders.add("Remark")
+            if (missingHeaders.isNotEmpty()) {
+                throw Exception("Missing required column headers: ${missingHeaders.joinToString(", ")}")
+            }
+            
+            val converters = com.example.data.Converters()
+            val lastRowNum = sheet.lastRowNum
+            for (r in 1..lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                if (isRowEmpty(row)) continue
+                
+                totalRows++
+                
+                val idVal = if (idIdx != null) getCellValueAsString(row, idIdx)?.trim() ?: "" else ""
+                val dateVal = if (dateIdx != null) getCellValueAsString(row, dateIdx)?.trim() ?: "" else ""
+                val shopNo = if (shopNoIdx != null) getCellValueAsString(row, shopNoIdx)?.trim() ?: "" else ""
+                val shopName = if (shopNameIdx != null) getCellValueAsString(row, shopNameIdx)?.trim() ?: "" else ""
+                val locNo = if (locNoIdx != null) getCellValueAsString(row, locNoIdx)?.trim() ?: "" else ""
+                val remarkStr = if (remarkIdx != null) getCellValueAsString(row, remarkIdx)?.trim() ?: "" else ""
+                val statusStr = if (statusIdx != null) getCellValueAsString(row, statusIdx)?.trim() ?: "" else ""
+                val salesIdVal = if (salesIdIdx != null) getCellValueAsString(row, salesIdIdx)?.trim() ?: "" else ""
+                val historyStr = if (historyIdx != null) getCellValueAsString(row, historyIdx)?.trim() ?: "" else ""
+                
+                val idInt = idVal.toDoubleOrNull()?.toInt() ?: 0
+                val dateLong = dateVal.toDoubleOrNull()?.toLong() ?: System.currentTimeMillis()
+                val salesIdInt = salesIdVal.toDoubleOrNull()?.toInt()
+                val historyList = converters.toHistoryList(historyStr) ?: emptyList()
+                
+                val shopRemark = ShopRemark(
+                    id = idInt,
+                    date = dateLong,
+                    shopNumber = shopNo,
+                    shopName = shopName,
+                    locationNumber = locNo,
+                    remark = remarkStr,
+                    status = statusStr.ifEmpty { "Pending" },
+                    salesEntryId = salesIdInt,
+                    history = historyList
+                )
+                successRemarks.add(shopRemark)
+                successfullyImported++
+            }
+            workbook.close()
+            inputStream.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            failedRowsCount = 1
+        }
+        
+        return ImportSummary(
+            type = ImportType.REMARKS,
+            totalRows = totalRows,
+            successfullyImported = successfullyImported,
+            skippedRows = totalRows - successfullyImported,
+            failedRowsCount = failedRowsCount,
+            parsedRemarks = successRemarks
+        )
+    }
+
     fun exportDynamicCostEngine(
         context: Context,
         ingredients: List<com.example.data.Ingredient>,
@@ -2721,6 +2822,7 @@ object Exporter {
         purchases: List<com.example.data.IngredientPurchase>,
         calculations: List<com.example.data.CostCalculation>,
         calculationItems: List<com.example.data.CostCalculationItem>,
+        remarksList: List<ShopRemark>,
         isDynamicProfitEnabled: Boolean
     ) {
         val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
@@ -3067,7 +3169,41 @@ object Exporter {
                 itemsSheet.setColumnWidth(i, 5000)
             }
 
-            // --- 11. Settings Sheet ---
+            // --- 11. Shop Remarks Sheet ---
+            val remarksSheet = workbook.createSheet("Shop Remarks")
+            val remarksHeaders = listOf(
+                "ID", "Date", "Shop Number", "Shop Name", 
+                "Location Number", "Remark", "Status", "Sales Entry ID", "History"
+            )
+            val remarksHeaderRow = remarksSheet.createRow(0)
+            for (i in remarksHeaders.indices) {
+                val cell = remarksHeaderRow.createCell(i)
+                cell.setCellValue(remarksHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            val converters = com.example.data.Converters()
+            for (item in remarksList) {
+                val row = remarksSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.id.toDouble())
+                row.createCell(1).setCellValue(item.date.toDouble())
+                row.createCell(2).setCellValue(item.shopNumber)
+                row.createCell(3).setCellValue(item.shopName)
+                row.createCell(4).setCellValue(item.locationNumber)
+                row.createCell(5).setCellValue(item.remark)
+                row.createCell(6).setCellValue(item.status)
+                if (item.salesEntryId != null) {
+                    row.createCell(7).setCellValue(item.salesEntryId.toDouble())
+                } else {
+                    row.createCell(7).setCellValue("")
+                }
+                row.createCell(8).setCellValue(converters.fromHistoryList(item.history) ?: "")
+            }
+            for (i in remarksHeaders.indices) {
+                remarksSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 12. Settings Sheet ---
             val settingsSheet = workbook.createSheet("Settings")
             val settingsHeaders = listOf("Setting Key", "Setting Value")
             val settingsHeaderRow = settingsSheet.createRow(0)
