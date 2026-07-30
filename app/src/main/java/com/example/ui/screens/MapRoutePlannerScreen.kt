@@ -81,7 +81,7 @@ fun MapRoutePlannerScreen(
     var simulatedLongitude by remember { mutableStateOf(77.5946) }
 
     // Map style / Layer state
-    var mapLayerStyle by remember { mutableStateOf("Standard") } // Standard, Satellite
+    var mapLayerStyle by remember { mutableStateOf("Satellite") } // Standard, Satellite
     var isTrafficLayerEnabled by remember { mutableStateOf(false) }
 
     // Search and Filter States
@@ -511,6 +511,40 @@ fun MapRoutePlannerScreen(
                             selectedShop = shop
                         }
                     )
+
+                    // Satellite Telemetry HUD overlay
+                    if (mapLayerStyle == "Satellite") {
+                        Card(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(bottom = if (!isWideScreen) 165.dp else 24.dp, start = 16.dp)
+                                .shadow(4.dp, shape = RoundedCornerShape(8.dp)),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF0F151B).copy(alpha = 0.85f)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(Color(0xFF00E5FF), shape = CircleShape)
+                                )
+                                Text(
+                                    text = "SENTINEL-2 HYBRID SATELLITE",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+                    }
 
                     // Map View Style Controls (Standard / Satellite / Traffic Layer)
                     Column(
@@ -1347,7 +1381,7 @@ fun GisMapCanvas(
             }
             .background(
                 if (mapStyle == "Standard") Color(0xFFF2EFE9)
-                else Color(0xFF1E2429)
+                else Color(0xFF0A131A)
             )
             .testTag("gis_map_canvas")
     ) {
@@ -1387,22 +1421,206 @@ fun GisMapCanvas(
                     drawLine(streetColor, Offset(0f, y), Offset(width, y), strokeWidth = 1.5f)
                 }
             } else {
+                // SATELLITE MAP MODE - High Fidelity Visuals
+                // Base background is deep dark ocean / water body
+                drawRect(color = Color(0xFF0A131A))
+
+                // Draw deep water contours / shallow coastal gradient
+                val waterCenter = Offset(width * 0.8f * zoom + panX, height * 0.8f * zoom + panY)
                 drawCircle(
-                    color = Color(0xFF19321E),
-                    radius = width * 0.3f * zoom,
-                    center = Offset(width * 0.5f * zoom + panX, height * 0.4f * zoom + panY)
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xFF123440), Color(0xFF0A131A)),
+                        center = waterCenter,
+                        radius = width * 0.8f * zoom
+                    ),
+                    radius = width * 0.8f * zoom,
+                    center = waterCenter
                 )
-                drawRect(
-                    color = Color(0xFF0D2531),
-                    topLeft = Offset(width * 0.6f * zoom + panX, height * 0.1f * zoom + panY),
-                    size = androidx.compose.ui.geometry.Size(width * 0.25f * zoom, height * 0.3f * zoom)
+
+                // Large landmasses/Islands (textured with green, forest, sand coastlines)
+                // Landmass 1: North-West hilly/forest area
+                val landCenter1 = Offset(width * 0.2f * zoom + panX, height * 0.3f * zoom + panY)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xFF22351E), Color(0xFF1D2F1B), Color(0xFF142012)),
+                        center = landCenter1,
+                        radius = width * 0.6f * zoom
+                    ),
+                    radius = width * 0.6f * zoom,
+                    center = landCenter1
                 )
-                val coordColor = Color(0xFF2E3B4E)
-                for (i in 0..8) {
-                    val x = (width * 0.15f * i * zoom) + panX
-                    drawLine(coordColor, Offset(x, 0f), Offset(x, height), strokeWidth = 1f)
-                    val y = (height * 0.15f * i * zoom) + panY
-                    drawLine(coordColor, Offset(0f, y), Offset(width, y), strokeWidth = 1f)
+
+                // Landmass 2: South-East plain/agricultural area
+                val landCenter2 = Offset(width * 0.7f * zoom + panX, height * 0.6f * zoom + panY)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xFF2B3A1C), Color(0xFF223016), Color(0xFF10190C)),
+                        center = landCenter2,
+                        radius = width * 0.5f * zoom
+                    ),
+                    radius = width * 0.5f * zoom,
+                    center = landCenter2
+                )
+
+                // Sandy Coastlines / Beaches surrounding Landmasses (thin glowing borders)
+                drawCircle(
+                    color = Color(0xFFB0A483).copy(alpha = 0.25f),
+                    radius = width * 0.605f * zoom,
+                    center = landCenter1,
+                    style = Stroke(width = 8f * zoom)
+                )
+                drawCircle(
+                    color = Color(0xFFB0A483).copy(alpha = 0.2f),
+                    radius = width * 0.505f * zoom,
+                    center = landCenter2,
+                    style = Stroke(width = 6f * zoom)
+                )
+
+                // Draw Agricultural Field Patterns (Green-brown patchworks)
+                val fieldBaseX = width * 0.45f * zoom + panX
+                val fieldBaseY = height * 0.55f * zoom + panY
+                val fieldColors = listOf(
+                    Color(0xFF32462A), Color(0xFF454E2C), Color(0xFF5A5F3B), 
+                    Color(0xFF2D3C23), Color(0xFF4E4D31), Color(0xFF384323)
+                )
+                // Draw a grid of fields with different colors
+                for (r in 0..2) {
+                    for (c in 0..2) {
+                        val fX = fieldBaseX + (c * 60f * zoom)
+                        val fY = fieldBaseY + (r * 40f * zoom)
+                        val colorIdx = (r * 3 + c) % fieldColors.size
+                        drawRect(
+                            color = fieldColors[colorIdx],
+                            topLeft = Offset(fX, fY),
+                            size = androidx.compose.ui.geometry.Size(54f * zoom, 34f * zoom)
+                        )
+                        // Thin dirt track between fields
+                        drawRect(
+                            color = Color(0xFF524436).copy(alpha = 0.3f),
+                            topLeft = Offset(fX, fY),
+                            size = androidx.compose.ui.geometry.Size(54f * zoom, 34f * zoom),
+                            style = Stroke(width = 2f * zoom)
+                        )
+                    }
+                }
+
+                // Airport Runway strip
+                val runwayPath = Path().apply {
+                    moveTo(width * 0.1f * zoom + panX, height * 0.55f * zoom + panY)
+                    lineTo(width * 0.35f * zoom + panX, height * 0.45f * zoom + panY)
+                }
+                drawPath(
+                    runwayPath,
+                    color = Color(0xFF2C2F33),
+                    style = Stroke(width = 16f * zoom)
+                )
+                // Runway dash lines
+                drawPath(
+                    runwayPath,
+                    color = Color(0xFFE2E2E2),
+                    style = Stroke(
+                        width = 1.5f * zoom,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f * zoom, 10f * zoom), 0f)
+                    )
+                )
+
+                // Winding deep river crossing the landscape
+                val riverPath = Path().apply {
+                    moveTo(0f, height * 0.25f * zoom + panY)
+                    cubicTo(
+                        width * 0.3f * zoom + panX, height * 0.15f * zoom + panY,
+                        width * 0.5f * zoom + panX, height * 0.55f * zoom + panY,
+                        width, height * 0.45f * zoom + panY
+                    )
+                }
+                // River water fill (dark cyan-blue)
+                drawPath(riverPath, color = Color(0xFF0F262F), style = Stroke(width = 18f * zoom))
+                // River shallow banks
+                drawPath(riverPath, color = Color(0xFF1E404E).copy(alpha = 0.4f), style = Stroke(width = 24f * zoom))
+
+                // Urban Infrastructure Grid (Concrete Grey)
+                val urbanCenter = Offset(width * 0.25f * zoom + panX, height * 0.25f * zoom + panY)
+                drawCircle(
+                    color = Color(0xFF2F3235).copy(alpha = 0.8f),
+                    radius = width * 0.18f * zoom,
+                    center = urbanCenter
+                )
+                // Draw mock streets within urban zone
+                val streetCol = Color(0xFF4A4E53)
+                for (i in -4..4) {
+                    val offset = i * 20f * zoom
+                    drawLine(
+                        color = streetCol,
+                        start = Offset(urbanCenter.x - width * 0.15f * zoom, urbanCenter.y + offset),
+                        end = Offset(urbanCenter.x + width * 0.15f * zoom, urbanCenter.y + offset),
+                        strokeWidth = 1.5f * zoom
+                    )
+                    drawLine(
+                        color = streetCol,
+                        start = Offset(urbanCenter.x + offset, urbanCenter.y - width * 0.15f * zoom),
+                        end = Offset(urbanCenter.x + offset, urbanCenter.y + width * 0.15f * zoom),
+                        strokeWidth = 1.5f * zoom
+                    )
+                }
+
+                // Tiny building Footprints in urban center
+                val buildColors = listOf(Color(0xFF5A6065), Color(0xFF6B7278), Color(0xFF7D848A))
+                for (r in -3..3) {
+                    for (c in -3..3) {
+                        if ((r + c) % 2 == 0) {
+                            val bX = urbanCenter.x + (c * 20f * zoom) - 4f * zoom
+                            val bY = urbanCenter.y + (r * 20f * zoom) - 4f * zoom
+                            val bCol = buildColors[java.lang.Math.abs(r * c) % buildColors.size]
+                            drawRect(
+                                color = bCol,
+                                topLeft = Offset(bX, bY),
+                                size = androidx.compose.ui.geometry.Size(8f * zoom, 8f * zoom)
+                            )
+                        }
+                    }
+                }
+
+                // National Highway (Orange-Yellow main line)
+                val highwayPath = Path().apply {
+                    moveTo(0f, height * 0.75f * zoom + panY)
+                    cubicTo(
+                        width * 0.4f * zoom + panX, height * 0.7f * zoom + panY,
+                        width * 0.6f * zoom + panX, height * 0.3f * zoom + panY,
+                        width, height * 0.15f * zoom + panY
+                    )
+                }
+                // Highway casing
+                drawPath(highwayPath, color = Color(0xFF1F1B18), style = Stroke(width = 8f * zoom))
+                // Highway center fill
+                drawPath(highwayPath, color = Color(0xFFFFA726), style = Stroke(width = 4f * zoom))
+
+                // High-Altitude Wispy Clouds (glowing semi-transparent white/cyan curves)
+                val cloudPath = Path().apply {
+                    moveTo(width * 0.05f * zoom + panX, height * 0.15f * zoom + panY)
+                    cubicTo(
+                        width * 0.3f * zoom + panX, height * 0.05f * zoom + panY,
+                        width * 0.4f * zoom + panX, height * 0.25f * zoom + panY,
+                        width * 0.7f * zoom + panX, height * 0.1f * zoom + panY
+                    )
+                }
+                drawPath(cloudPath, color = Color(0xFFFFFFFF).copy(alpha = 0.12f), style = Stroke(width = 45f * zoom))
+                val cloudPath2 = Path().apply {
+                    moveTo(width * 0.3f * zoom + panX, height * 0.85f * zoom + panY)
+                    cubicTo(
+                        width * 0.5f * zoom + panX, height * 0.9f * zoom + panY,
+                        width * 0.6f * zoom + panX, height * 0.75f * zoom + panY,
+                        width * 0.95f * zoom + panX, height * 0.8f * zoom + panY
+                    )
+                }
+                drawPath(cloudPath2, color = Color(0xFFE0F7FA).copy(alpha = 0.1f), style = Stroke(width = 60f * zoom))
+
+                // Coordinate Grid Overlay (Sentinel style HUD lines, very subtle)
+                val coordColor = Color(0xFF00E5FF).copy(alpha = 0.08f)
+                for (i in 0..10) {
+                    val x = (width * 0.12f * i * zoom) + panX
+                    drawLine(coordColor, Offset(x, 0f), Offset(x, height), strokeWidth = 0.8f)
+                    val y = (height * 0.12f * i * zoom) + panY
+                    drawLine(coordColor, Offset(0f, y), Offset(width, y), strokeWidth = 0.8f)
                 }
             }
 
