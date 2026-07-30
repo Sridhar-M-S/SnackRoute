@@ -988,6 +988,8 @@ object Exporter {
 
     private fun getBytesFromImagePath(context: Context, pathOrUri: String?): ByteArray? {
         if (pathOrUri.isNullOrBlank()) return null
+        
+        // Try exact path first
         try {
             val file = File(pathOrUri)
             if (file.exists() && file.isFile) {
@@ -996,6 +998,19 @@ object Exporter {
         } catch (e: Exception) {
             // Ignore
         }
+        
+        // Try fallback: check if file with the same name exists in the current app's filesDir
+        try {
+            val fileName = File(pathOrUri).name
+            val fallbackFile = File(context.filesDir, fileName)
+            if (fallbackFile.exists() && fallbackFile.isFile) {
+                return fallbackFile.readBytes()
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        
+        // Try URI
         try {
             val uri = Uri.parse(pathOrUri)
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -1083,6 +1098,38 @@ object Exporter {
         existingLocations: List<LocationMaster>, 
         existingShops: List<ShopMaster>
     ): ImportSummary {
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open file stream")
+            val workbook = XSSFWorkbook(inputStream)
+            val sheet = workbook.getSheetAt(0) ?: throw Exception("Workbook is empty")
+            val summary = importShopsFromSheet(context, workbook, sheet, existingLocations, existingShops, uri)
+            workbook.close()
+            return summary
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return ImportSummary(
+                type = ImportType.SHOPS,
+                totalRows = 0,
+                successfullyImported = 0,
+                skippedRows = 0,
+                failedRowsCount = 1,
+                errorReportFile = generateErrorReportGeneric(
+                    context, "Shop_Import",
+                    listOf("Row Number", "Shop No", "Store Name", "Reason", "Shop No Val", "Location No Val", "Store Val", "Image Val", "Rating Val", "Score Val", "Date Val", "Map Val", "Mobile Val"),
+                    listOf(listOf("1", "", "", e.message ?: "Invalid file format"))
+                )
+            )
+        }
+    }
+
+    fun importShopsFromSheet(
+        context: Context,
+        workbook: Workbook,
+        sheet: Sheet,
+        existingLocations: List<LocationMaster>,
+        existingShops: List<ShopMaster>,
+        sourceUri: Uri? = null
+    ): ImportSummary {
         val errorRows = mutableListOf<List<String>>()
         val successShops = mutableListOf<ShopMaster>()
         
@@ -1103,10 +1150,6 @@ object Exporter {
         val existingLocNumbersUpper = existingLocations.map { it.locationNumber.uppercase() }.toSet()
 
         try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open file stream")
-            val workbook = XSSFWorkbook(inputStream)
-            val sheet = workbook.getSheetAt(0) ?: throw Exception("Workbook is empty")
-            
             val headerRow = sheet.getRow(0) ?: throw Exception("Excel file header row is missing")
             val headerMap = mutableMapOf<String, Int>()
             for (c in 0 until headerRow.lastCellNum) {
@@ -1141,7 +1184,7 @@ object Exporter {
             val longitudeIdx = getHeaderIndex(headerMap, "Longitude", "Lng", "Long")
             val latLngIdx = getHeaderIndex(headerMap, "Latitude & Longitude", "Coordinates", "Lat & Lng", "Lat,Lng", "Lat, Lng", "Latitude/Longitude")
             
-            // Map embedded images in the first sheet
+            // Map embedded images in the sheet
             val embeddedImagesMap = mutableMapOf<Int, Pair<ByteArray, String>>()
             val imageColIdx = imageIdx
             try {
@@ -1259,7 +1302,7 @@ object Exporter {
                     }
                 } else if (imageVal.isNotEmpty()) {
                     totalImagesFound++
-                    val result = copyImportedImage(context, imageVal, uri)
+                    val result = copyImportedImage(context, imageVal, sourceUri)
                     if (result.first != null) {
                         storeImageLocalPath = result.first
                         imagesImportedSuccessfully++
@@ -1312,8 +1355,6 @@ object Exporter {
                 processedShopNumbers.add(shopNoUpper)
                 successfullyImported++
             }
-            
-            workbook.close()
         } catch (e: Exception) {
             e.printStackTrace()
             return ImportSummary(

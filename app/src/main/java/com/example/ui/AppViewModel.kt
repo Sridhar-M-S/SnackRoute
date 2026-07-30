@@ -4391,11 +4391,10 @@ User Question: $userQuestion
                 // 2. Shops
                 val shopSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Shops", "ShopMaster", "Shop Master"))
                 if (shopSheet != null) {
-                    val tempUri = com.example.utils.Exporter.extractSheetToTempUri(context, shopSheet, "temp_shops")
                     val currentLocations = repository.allLocations.first()
                     val currentShops = repository.allShops.first()
                     val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        com.example.utils.Exporter.importShops(context, tempUri, currentLocations, currentShops)
+                        com.example.utils.Exporter.importShopsFromSheet(context, workbook, shopSheet, currentLocations, currentShops, uri)
                     }
                     if (summary.parsedShops.isNotEmpty()) {
                         val resolvedShops = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
