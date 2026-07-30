@@ -52,6 +52,21 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.RoundCap
+import com.google.android.gms.maps.model.JointType
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapType
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapRoutePlannerScreen(
@@ -81,7 +96,8 @@ fun MapRoutePlannerScreen(
     var simulatedLongitude by remember { mutableStateOf(77.5946) }
 
     // Map style / Layer state
-    var mapLayerStyle by remember { mutableStateOf("Satellite") } // Standard, Satellite
+    var mapLayerStyle by remember { mutableStateOf("Satellite") } // Satellite, Normal, Terrain, Hybrid
+    var showMapStyleMenu by remember { mutableStateOf(false) }
     var isTrafficLayerEnabled by remember { mutableStateOf(false) }
 
     // Search and Filter States
@@ -546,28 +562,55 @@ fun MapRoutePlannerScreen(
                         }
                     }
 
-                    // Map View Style Controls (Standard / Satellite / Traffic Layer)
+                    // Map View Style Controls (Normal / Satellite / Terrain / Hybrid / Traffic Layer)
                     Column(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FloatingActionButton(
-                            onClick = {
-                                mapLayerStyle = if (mapLayerStyle == "Standard") "Satellite" else "Standard"
-                            },
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            contentColor = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .testTag("map_layer_toggle"),
-                            elevation = FloatingActionButtonDefaults.elevation(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (mapLayerStyle == "Standard") Icons.Default.Layers else Icons.Default.Map,
-                                contentDescription = "Map Style"
-                            )
+                        Box {
+                            FloatingActionButton(
+                                onClick = { showMapStyleMenu = true },
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("map_layer_toggle"),
+                                elevation = FloatingActionButtonDefaults.elevation(2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Layers,
+                                    contentDescription = "Map Style"
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showMapStyleMenu,
+                                onDismissRequest = { showMapStyleMenu = false }
+                            ) {
+                                listOf("Normal", "Satellite", "Terrain", "Hybrid").forEach { style ->
+                                    DropdownMenuItem(
+                                        text = { Text(style) },
+                                        onClick = {
+                                            mapLayerStyle = style
+                                            showMapStyleMenu = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = when (style) {
+                                                    "Satellite" -> Icons.Default.Satellite
+                                                    "Normal" -> Icons.Default.Map
+                                                    "Terrain" -> Icons.Default.Terrain
+                                                    "Hybrid" -> Icons.Default.Layers
+                                                    else -> Icons.Default.Map
+                                                },
+                                                contentDescription = null
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                         }
 
                         FloatingActionButton(
@@ -1267,7 +1310,7 @@ fun MobileRouteSummaryPanel(
     }
 }
 
-// Custom GIS Canvas-based Map
+// Custom Google Maps-based Map
 @Composable
 fun GisMapCanvas(
     activeLat: Double,
@@ -1278,7 +1321,7 @@ fun GisMapCanvas(
     searchedShops: List<ShopMaster>,
     isRouteStarted: Boolean,
     activeRouteIndex: Int,
-    mapStyle: String,
+    mapStyle: String, // Normal, Satellite, Terrain, Hybrid
     isTrafficEnabled: Boolean,
     zoom: Float,
     panX: Float,
@@ -1290,472 +1333,703 @@ fun GisMapCanvas(
     onZoomChange: (Float) -> Unit,
     onMarkerClick: (ShopMaster) -> Unit
 ) {
-    val points = remember(activeLat, activeLng, optimizedRoute, completedShops) {
-        val list = mutableListOf<Pair<Double, Double>>()
-        list.add(Pair(activeLat, activeLng))
-        optimizedRoute.forEach { s ->
-            val lat = s.latitude
-            val lng = s.longitude
-            if (lat != null && lng != null) list.add(Pair(lat, lng))
+    val isApiKeyConfigured = remember {
+        try {
+            val key = com.example.BuildConfig.MAPS_API_KEY
+            key.isNotBlank() && key != "MY_MAPS_API_KEY" && !key.contains("API_KEY")
+        } catch (e: Exception) {
+            false
         }
-        completedShops.forEach { s ->
-            val lat = s.latitude
-            val lng = s.longitude
-            if (lat != null && lng != null) list.add(Pair(lat, lng))
-        }
-        list
     }
 
-    val bounds = remember(points) {
-        var minL = 90.0
-        var maxL = -90.0
-        var minG = 180.0
-        var maxG = -180.0
-        points.forEach { (lat, lng) ->
-            minL = minOf(minL, lat)
-            maxL = maxOf(maxL, lat)
-            minG = minOf(minG, lng)
-            maxG = maxOf(maxG, lng)
+    if (isApiKeyConfigured) {
+        val cameraPositionState = rememberCameraPositionState {
+            position = CameraPosition.fromLatLngZoom(LatLng(activeLat, activeLng), 14f)
         }
-        val latDelta = maxOf(0.005, maxL - minL)
-        val lngDelta = maxOf(0.005, maxG - minG)
-        val mapMinLat = minL - latDelta * 0.15
-        val mapMaxLat = maxL + latDelta * 0.15
-        val mapMinLng = minG - lngDelta * 0.15
-        val mapMaxLng = maxG + lngDelta * 0.15
-        val mapWidthLng = mapMaxLng - mapMinLng
-        val mapHeightLat = mapMaxLat - mapMinLat
-        listOf(mapMinLat, mapMaxLat, mapMinLng, mapMaxLng, mapWidthLng, mapHeightLat)
-    }
 
-    val mapMinLat = bounds[0]
-    val mapMaxLat = bounds[1]
-    val mapMinLng = bounds[2]
-    val mapMaxLng = bounds[3]
-    val mapWidthLng = bounds[4]
-    val mapHeightLat = bounds[5]
+        // Automatically animate camera to active location when it changes
+        LaunchedEffect(activeLat, activeLng) {
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLng(LatLng(activeLat, activeLng))
+            )
+        }
 
-    val allPointsWithShops = remember(optimizedRoute, completedShops) {
-        optimizedRoute + completedShops
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    onPanChange(dragAmount.x, dragAmount.y)
+        // Animate camera to selected shop when it is set or changed
+        LaunchedEffect(selectedShop) {
+            if (selectedShop != null) {
+                val sLat = selectedShop.latitude
+                val sLng = selectedShop.longitude
+                if (sLat != null && sLng != null) {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(sLat, sLng), 16f)
+                    )
                 }
             }
-            .pointerInput(zoom, panX, panY, mapMinLat, mapMinLng, mapWidthLng, mapHeightLat, allPointsWithShops) {
-                detectTapGestures { tapOffset ->
-                    val clickedShop = allPointsWithShops.minByOrNull { shop ->
-                        val sLat = shop.latitude ?: 0.0
-                        val sLng = shop.longitude ?: 0.0
-                        val pctX = (sLng - mapMinLng) / mapWidthLng
-                        val pctY = 1.0 - (sLat - mapMinLat) / mapHeightLat
-                        val centerX = size.width / 2f
-                        val centerY = size.height / 2f
-                        val screenX = ((pctX * size.width - centerX) * zoom) + centerX + panX
-                        val screenY = ((pctY * size.height - centerY) * zoom) + centerY + panY
-                        val distSq = (tapOffset.x - screenX) * (tapOffset.x - screenX) + (tapOffset.y - screenY) * (tapOffset.y - screenY)
-                        distSq
+        }
+
+        // Configure the Map properties
+        val properties = remember(mapStyle, isTrafficEnabled) {
+            MapProperties(
+                mapType = when (mapStyle) {
+                    "Satellite" -> MapType.SATELLITE
+                    "Terrain" -> MapType.TERRAIN
+                    "Hybrid" -> MapType.HYBRID
+                    else -> MapType.NORMAL
+                },
+                isTrafficEnabled = isTrafficEnabled,
+                isMyLocationEnabled = false // We'll render our own accurate custom marker for user location so it works in both real and simulated GPS modes
+            )
+        }
+
+        // Configure UI Settings
+        val uiSettings = remember {
+            MapUiSettings(
+                zoomControlsEnabled = false, // We have our own Zoom FABs
+                myLocationButtonEnabled = false, // We have our own GPS location button
+                compassEnabled = true,
+                mapToolbarEnabled = false,
+                rotationGesturesEnabled = true,
+                scrollGesturesEnabled = true,
+                tiltGesturesEnabled = true,
+                zoomGesturesEnabled = true
+            )
+        }
+
+        // Connect parent zoom and reset/fit-all actions to Google Map camera!
+        LaunchedEffect(zoom, panX, panY) {
+            if (zoom == 1.0f && panX == 0f && panY == 0f) {
+                val builder = LatLngBounds.Builder()
+                builder.include(LatLng(activeLat, activeLng))
+                var hasAnyMarkers = false
+                optimizedRoute.forEach { s ->
+                    val lat = s.latitude
+                    val lng = s.longitude
+                    if (lat != null && lng != null) {
+                        builder.include(LatLng(lat, lng))
+                        hasAnyMarkers = true
                     }
-                    if (clickedShop != null) {
-                        val sLat = clickedShop.latitude ?: 0.0
-                        val sLng = clickedShop.longitude ?: 0.0
-                        val pctX = (sLng - mapMinLng) / mapWidthLng
-                        val pctY = 1.0 - (sLat - mapMinLat) / mapHeightLat
-                        val centerX = size.width / 2f
-                        val centerY = size.height / 2f
-                        val screenX = ((pctX * size.width - centerX) * zoom) + centerX + panX
-                        val screenY = ((pctY * size.height - centerY) * zoom) + centerY + panY
-                        val dist = java.lang.Math.sqrt(((tapOffset.x - screenX) * (tapOffset.x - screenX) + (tapOffset.y - screenY) * (tapOffset.y - screenY)).toDouble())
-                        if (dist < 30.0 * zoom) {
-                            onMarkerClick(clickedShop)
+                }
+                completedShops.forEach { s ->
+                    val lat = s.latitude
+                    val lng = s.longitude
+                    if (lat != null && lng != null) {
+                        builder.include(LatLng(lat, lng))
+                        hasAnyMarkers = true
+                    }
+                }
+                if (hasAnyMarkers) {
+                    try {
+                        val bounds = builder.build()
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngBounds(bounds, 120)
+                        )
+                    } catch (e: Exception) {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(LatLng(activeLat, activeLng), 14f)
+                        )
+                    }
+                } else {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(activeLat, activeLng), 14f)
+                    )
+                }
+            } else if (zoom != 1.0f) {
+                val targetZoom = 14f + (zoom - 1.0f) * 3f
+                cameraPositionState.animate(
+                    CameraUpdateFactory.zoomTo(targetZoom.coerceIn(2f, 21f))
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("gis_map_canvas")
+        ) {
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = properties,
+                uiSettings = uiSettings
+            ) {
+                // 1. Render User's Live/Simulated Location Dot with distinct color and marker info
+                Marker(
+                    state = MarkerState(position = LatLng(activeLat, activeLng)),
+                    title = "My Current Location",
+                    snippet = if (isRouteStarted) "Active route planning underway" else "Location Simulator Active",
+                    icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
+                        com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_AZURE
+                    )
+                )
+
+                // 2. Draw completed shops as GREEN markers
+                completedShops.forEach { shop ->
+                    val sLat = shop.latitude ?: return@forEach
+                    val sLng = shop.longitude ?: return@forEach
+                    Marker(
+                        state = MarkerState(position = LatLng(sLat, sLng)),
+                        title = shop.storeName,
+                        snippet = "Visit Completed",
+                        icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
+                            com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_GREEN
+                        ),
+                        onClick = {
+                            onMarkerClick(shop)
+                            true
+                        }
+                    )
+                }
+
+                // 3. Draw pending shops on route
+                optimizedRoute.forEach { shop ->
+                    val sLat = shop.latitude ?: return@forEach
+                    val sLng = shop.longitude ?: return@forEach
+                    val routeIndex = optimizedRoute.indexOf(shop)
+                    
+                    val pinHue = when {
+                        routeIndex < activeRouteIndex && isRouteStarted -> com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_GREEN
+                        routeIndex == activeRouteIndex && isRouteStarted -> com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_CYAN
+                        routeIndex % 3 == 0 -> com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_RED
+                        routeIndex % 3 == 1 -> com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE
+                        else -> com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_BLUE
+                    }
+
+                    val statusLabel = when {
+                        routeIndex < activeRouteIndex && isRouteStarted -> "Visited"
+                        routeIndex == activeRouteIndex && isRouteStarted -> "Next Stop"
+                        else -> "Pending (Stop #${routeIndex + 1})"
+                    }
+
+                    Marker(
+                        state = MarkerState(position = LatLng(sLat, sLng)),
+                        title = shop.storeName,
+                        snippet = statusLabel,
+                        icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(pinHue),
+                        onClick = {
+                            onMarkerClick(shop)
+                            true
+                        }
+                    )
+                }
+
+                // 4. Draw Navigation Route connecting current location and the shops on real streets
+                if (optimizedRoute.isNotEmpty()) {
+                    val routePoints = remember(activeLat, activeLng, optimizedRoute) {
+                        val list = mutableListOf<LatLng>()
+                        list.add(LatLng(activeLat, activeLng))
+                        optimizedRoute.forEach { s ->
+                            val lat = s.latitude
+                            val lng = s.longitude
+                            if (lat != null && lng != null) {
+                                list.add(LatLng(lat, lng))
+                            }
+                        }
+                        list
+                    }
+
+                    // Outer glowing path
+                    Polyline(
+                        points = routePoints,
+                        color = Color(0x771E88E5),
+                        width = 18f,
+                        geodesic = true,
+                        jointType = JointType.ROUND,
+                        startCap = RoundCap(),
+                        endCap = RoundCap()
+                    )
+
+                    // Inner high-contrast path
+                    Polyline(
+                        points = routePoints,
+                        color = Color(0xFF1E88E5),
+                        width = 8f,
+                        geodesic = true,
+                        jointType = JointType.ROUND,
+                        startCap = RoundCap(),
+                        endCap = RoundCap()
+                    )
+                }
+            }
+        }
+    } else {
+        val points = remember(activeLat, activeLng, optimizedRoute, completedShops) {
+            val list = mutableListOf<Pair<Double, Double>>()
+            list.add(Pair(activeLat, activeLng))
+            optimizedRoute.forEach { s ->
+                val lat = s.latitude
+                val lng = s.longitude
+                if (lat != null && lng != null) list.add(Pair(lat, lng))
+            }
+            completedShops.forEach { s ->
+                val lat = s.latitude
+                val lng = s.longitude
+                if (lat != null && lng != null) list.add(Pair(lat, lng))
+            }
+            list
+        }
+
+        val bounds = remember(points) {
+            var minL = 90.0
+            var maxL = -90.0
+            var minG = 180.0
+            var maxG = -180.0
+            points.forEach { (lat, lng) ->
+                minL = minOf(minL, lat)
+                maxL = maxOf(maxL, lat)
+                minG = minOf(minG, lng)
+                maxG = maxOf(maxG, lng)
+            }
+            val latDelta = maxOf(0.005, maxL - minL)
+            val lngDelta = maxOf(0.005, maxG - minG)
+            val mapMinLat = minL - latDelta * 0.15
+            val mapMaxLat = maxL + latDelta * 0.15
+            val mapMinLng = minG - lngDelta * 0.15
+            val mapMaxLng = maxG + lngDelta * 0.15
+            val mapWidthLng = mapMaxLng - mapMinLng
+            val mapHeightLat = mapMaxLat - mapMinLat
+            listOf(mapMinLat, mapMaxLat, mapMinLng, mapMaxLng, mapWidthLng, mapHeightLat)
+        }
+
+        val mapMinLat = bounds[0]
+        val mapMaxLat = bounds[1]
+        val mapMinLng = bounds[2]
+        val mapMaxLng = bounds[3]
+        val mapWidthLng = bounds[4]
+        val mapHeightLat = bounds[5]
+
+        val allPointsWithShops = remember(optimizedRoute, completedShops) {
+            optimizedRoute + completedShops
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        onPanChange(dragAmount.x, dragAmount.y)
+                    }
+                }
+                .pointerInput(zoom, panX, panY, mapMinLat, mapMinLng, mapWidthLng, mapHeightLat, allPointsWithShops) {
+                    detectTapGestures { tapOffset ->
+                        val clickedShop = allPointsWithShops.minByOrNull { shop ->
+                            val sLat = shop.latitude ?: 0.0
+                            val sLng = shop.longitude ?: 0.0
+                            val pctX = (sLng - mapMinLng) / mapWidthLng
+                            val pctY = 1.0 - (sLat - mapMinLat) / mapHeightLat
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            val screenX = ((pctX * size.width - centerX) * zoom) + centerX + panX
+                            val screenY = ((pctY * size.height - centerY) * zoom) + centerY + panY
+                            val distSq = (tapOffset.x - screenX) * (tapOffset.x - screenX) + (tapOffset.y - screenY) * (tapOffset.y - screenY)
+                            distSq
+                        }
+                        if (clickedShop != null) {
+                            val sLat = clickedShop.latitude ?: 0.0
+                            val sLng = clickedShop.longitude ?: 0.0
+                            val pctX = (sLng - mapMinLng) / mapWidthLng
+                            val pctY = 1.0 - (sLat - mapMinLat) / mapHeightLat
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            val screenX = ((pctX * size.width - centerX) * zoom) + centerX + panX
+                            val screenY = ((pctY * size.height - centerY) * zoom) + centerY + panY
+                            val dist = java.lang.Math.sqrt(((tapOffset.x - screenX) * (tapOffset.x - screenX) + (tapOffset.y - screenY) * (tapOffset.y - screenY)).toDouble())
+                            if (dist < 30.0 * zoom) {
+                                onMarkerClick(clickedShop)
+                            }
                         }
                     }
                 }
-            }
-            .background(
-                if (mapStyle == "Standard") Color(0xFFF2EFE9)
-                else Color(0xFF0A131A)
-            )
-            .testTag("gis_map_canvas")
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
+                .background(Color(0xFF0A131A))
+                .testTag("gis_map_canvas")
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
 
-            fun convertToScreenCoords(lat: Double, lng: Double): Offset {
-                val pctX = (lng - mapMinLng) / mapWidthLng
-                val pctY = 1.0 - (lat - mapMinLat) / mapHeightLat
-                val centerX = width / 2f
-                val centerY = height / 2f
-                val screenX = ((pctX * width - centerX) * zoom) + centerX + panX
-                val screenY = ((pctY * height - centerY) * zoom) + centerY + panY
-                return Offset(screenX.toFloat(), screenY.toFloat())
-            }
-
-            // Draw Background features
-            if (mapStyle == "Standard") {
-                val riverPath = Path().apply {
-                    moveTo(0f, height * 0.2f)
-                    cubicTo(width * 0.3f, height * 0.1f, width * 0.6f, height * 0.5f, width, height * 0.4f)
+                fun convertToScreenCoords(lat: Double, lng: Double): Offset {
+                    val pctX = (lng - mapMinLng) / mapWidthLng
+                    val pctY = 1.0 - (lat - mapMinLat) / mapHeightLat
+                    val centerX = width / 2f
+                    val centerY = height / 2f
+                    val screenX = ((pctX * width - centerX) * zoom) + centerX + panX
+                    val screenY = ((pctY * height - centerY) * zoom) + centerY + panY
+                    return Offset(screenX.toFloat(), screenY.toFloat())
                 }
-                drawPath(riverPath, color = Color(0xFFA5C9EB), style = Stroke(width = 30f * zoom))
 
-                drawRect(
-                    color = Color(0xFFCBE6A3),
-                    topLeft = Offset(width * 0.1f * zoom + panX, height * 0.6f * zoom + panY),
-                    size = androidx.compose.ui.geometry.Size(width * 0.25f * zoom, height * 0.2f * zoom)
-                )
+                if (mapStyle == "Normal" || mapStyle == "Terrain") {
+                    drawRect(color = Color(0xFFF2EFE9))
 
-                val streetColor = Color(0xFFE4E0D8)
-                for (i in 0..10) {
-                    val x = (width * 0.1f * i * zoom) + panX
-                    drawLine(streetColor, Offset(x, 0f), Offset(x, height), strokeWidth = 1.5f)
-                    val y = (height * 0.1f * i * zoom) + panY
-                    drawLine(streetColor, Offset(0f, y), Offset(width, y), strokeWidth = 1.5f)
-                }
-            } else {
-                // SATELLITE MAP MODE - High Fidelity Visuals
-                // Base background is deep dark ocean / water body
-                drawRect(color = Color(0xFF0A131A))
-
-                // Draw deep water contours / shallow coastal gradient
-                val waterCenter = Offset(width * 0.8f * zoom + panX, height * 0.8f * zoom + panY)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF123440), Color(0xFF0A131A)),
-                        center = waterCenter,
-                        radius = width * 0.8f * zoom
-                    ),
-                    radius = width * 0.8f * zoom,
-                    center = waterCenter
-                )
-
-                // Large landmasses/Islands (textured with green, forest, sand coastlines)
-                // Landmass 1: North-West hilly/forest area
-                val landCenter1 = Offset(width * 0.2f * zoom + panX, height * 0.3f * zoom + panY)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF22351E), Color(0xFF1D2F1B), Color(0xFF142012)),
-                        center = landCenter1,
-                        radius = width * 0.6f * zoom
-                    ),
-                    radius = width * 0.6f * zoom,
-                    center = landCenter1
-                )
-
-                // Landmass 2: South-East plain/agricultural area
-                val landCenter2 = Offset(width * 0.7f * zoom + panX, height * 0.6f * zoom + panY)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF2B3A1C), Color(0xFF223016), Color(0xFF10190C)),
-                        center = landCenter2,
-                        radius = width * 0.5f * zoom
-                    ),
-                    radius = width * 0.5f * zoom,
-                    center = landCenter2
-                )
-
-                // Sandy Coastlines / Beaches surrounding Landmasses (thin glowing borders)
-                drawCircle(
-                    color = Color(0xFFB0A483).copy(alpha = 0.25f),
-                    radius = width * 0.605f * zoom,
-                    center = landCenter1,
-                    style = Stroke(width = 8f * zoom)
-                )
-                drawCircle(
-                    color = Color(0xFFB0A483).copy(alpha = 0.2f),
-                    radius = width * 0.505f * zoom,
-                    center = landCenter2,
-                    style = Stroke(width = 6f * zoom)
-                )
-
-                // Draw Agricultural Field Patterns (Green-brown patchworks)
-                val fieldBaseX = width * 0.45f * zoom + panX
-                val fieldBaseY = height * 0.55f * zoom + panY
-                val fieldColors = listOf(
-                    Color(0xFF32462A), Color(0xFF454E2C), Color(0xFF5A5F3B), 
-                    Color(0xFF2D3C23), Color(0xFF4E4D31), Color(0xFF384323)
-                )
-                // Draw a grid of fields with different colors
-                for (r in 0..2) {
-                    for (c in 0..2) {
-                        val fX = fieldBaseX + (c * 60f * zoom)
-                        val fY = fieldBaseY + (r * 40f * zoom)
-                        val colorIdx = (r * 3 + c) % fieldColors.size
-                        drawRect(
-                            color = fieldColors[colorIdx],
-                            topLeft = Offset(fX, fY),
-                            size = androidx.compose.ui.geometry.Size(54f * zoom, 34f * zoom)
-                        )
-                        // Thin dirt track between fields
-                        drawRect(
-                            color = Color(0xFF524436).copy(alpha = 0.3f),
-                            topLeft = Offset(fX, fY),
-                            size = androidx.compose.ui.geometry.Size(54f * zoom, 34f * zoom),
-                            style = Stroke(width = 2f * zoom)
-                        )
+                    val riverPath = Path().apply {
+                        moveTo(0f, height * 0.2f)
+                        cubicTo(width * 0.3f, height * 0.1f, width * 0.6f, height * 0.5f, width, height * 0.4f)
                     }
-                }
+                    drawPath(riverPath, color = Color(0xFFA5C9EB), style = Stroke(width = 30f * zoom))
 
-                // Airport Runway strip
-                val runwayPath = Path().apply {
-                    moveTo(width * 0.1f * zoom + panX, height * 0.55f * zoom + panY)
-                    lineTo(width * 0.35f * zoom + panX, height * 0.45f * zoom + panY)
-                }
-                drawPath(
-                    runwayPath,
-                    color = Color(0xFF2C2F33),
-                    style = Stroke(width = 16f * zoom)
-                )
-                // Runway dash lines
-                drawPath(
-                    runwayPath,
-                    color = Color(0xFFE2E2E2),
-                    style = Stroke(
-                        width = 1.5f * zoom,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f * zoom, 10f * zoom), 0f)
+                    drawRect(
+                        color = Color(0xFFCBE6A3),
+                        topLeft = Offset(width * 0.1f * zoom + panX, height * 0.6f * zoom + panY),
+                        size = androidx.compose.ui.geometry.Size(width * 0.25f * zoom, height * 0.2f * zoom)
                     )
-                )
 
-                // Winding deep river crossing the landscape
-                val riverPath = Path().apply {
-                    moveTo(0f, height * 0.25f * zoom + panY)
-                    cubicTo(
-                        width * 0.3f * zoom + panX, height * 0.15f * zoom + panY,
-                        width * 0.5f * zoom + panX, height * 0.55f * zoom + panY,
-                        width, height * 0.45f * zoom + panY
-                    )
-                }
-                // River water fill (dark cyan-blue)
-                drawPath(riverPath, color = Color(0xFF0F262F), style = Stroke(width = 18f * zoom))
-                // River shallow banks
-                drawPath(riverPath, color = Color(0xFF1E404E).copy(alpha = 0.4f), style = Stroke(width = 24f * zoom))
+                    val streetColor = Color(0xFFE4E0D8)
+                    for (i in 0..10) {
+                        val x = (width * 0.1f * i * zoom) + panX
+                        drawLine(streetColor, Offset(x, 0f), Offset(x, height), strokeWidth = 1.5f)
+                        val y = (height * 0.1f * i * zoom) + panY
+                        drawLine(streetColor, Offset(0f, y), Offset(width, y), strokeWidth = 1.5f)
+                    }
+                } else {
+                    drawRect(color = Color(0xFF0A131A))
 
-                // Urban Infrastructure Grid (Concrete Grey)
-                val urbanCenter = Offset(width * 0.25f * zoom + panX, height * 0.25f * zoom + panY)
-                drawCircle(
-                    color = Color(0xFF2F3235).copy(alpha = 0.8f),
-                    radius = width * 0.18f * zoom,
-                    center = urbanCenter
-                )
-                // Draw mock streets within urban zone
-                val streetCol = Color(0xFF4A4E53)
-                for (i in -4..4) {
-                    val offset = i * 20f * zoom
-                    drawLine(
-                        color = streetCol,
-                        start = Offset(urbanCenter.x - width * 0.15f * zoom, urbanCenter.y + offset),
-                        end = Offset(urbanCenter.x + width * 0.15f * zoom, urbanCenter.y + offset),
-                        strokeWidth = 1.5f * zoom
+                    val waterCenter = Offset(width * 0.8f * zoom + panX, height * 0.8f * zoom + panY)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF123440), Color(0xFF0A131A)),
+                            center = waterCenter,
+                            radius = width * 0.8f * zoom
+                        ),
+                        radius = width * 0.8f * zoom,
+                        center = waterCenter
                     )
-                    drawLine(
-                        color = streetCol,
-                        start = Offset(urbanCenter.x + offset, urbanCenter.y - width * 0.15f * zoom),
-                        end = Offset(urbanCenter.x + offset, urbanCenter.y + width * 0.15f * zoom),
-                        strokeWidth = 1.5f * zoom
-                    )
-                }
 
-                // Tiny building Footprints in urban center
-                val buildColors = listOf(Color(0xFF5A6065), Color(0xFF6B7278), Color(0xFF7D848A))
-                for (r in -3..3) {
-                    for (c in -3..3) {
-                        if ((r + c) % 2 == 0) {
-                            val bX = urbanCenter.x + (c * 20f * zoom) - 4f * zoom
-                            val bY = urbanCenter.y + (r * 20f * zoom) - 4f * zoom
-                            val bCol = buildColors[java.lang.Math.abs(r * c) % buildColors.size]
+                    val landCenter1 = Offset(width * 0.2f * zoom + panX, height * 0.3f * zoom + panY)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF22351E), Color(0xFF1D2F1B), Color(0xFF142012)),
+                            center = landCenter1,
+                            radius = width * 0.6f * zoom
+                        ),
+                        radius = width * 0.6f * zoom,
+                        center = landCenter1
+                    )
+
+                    val landCenter2 = Offset(width * 0.7f * zoom + panX, height * 0.6f * zoom + panY)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF2B3A1C), Color(0xFF223016), Color(0xFF10190C)),
+                            center = landCenter2,
+                            radius = width * 0.5f * zoom
+                        ),
+                        radius = width * 0.5f * zoom,
+                        center = landCenter2
+                    )
+
+                    drawCircle(
+                        color = Color(0xFFB0A483).copy(alpha = 0.25f),
+                        radius = width * 0.605f * zoom,
+                        center = landCenter1,
+                        style = Stroke(width = 8f * zoom)
+                    )
+                    drawCircle(
+                        color = Color(0xFFB0A483).copy(alpha = 0.2f),
+                        radius = width * 0.505f * zoom,
+                        center = landCenter2,
+                        style = Stroke(width = 6f * zoom)
+                    )
+
+                    val fieldBaseX = width * 0.45f * zoom + panX
+                    val fieldBaseY = height * 0.55f * zoom + panY
+                    val fieldColors = listOf(
+                        Color(0xFF32462A), Color(0xFF454E2C), Color(0xFF5A5F3B), 
+                        Color(0xFF2D3C23), Color(0xFF4E4D31), Color(0xFF384323)
+                    )
+                    for (r in 0..2) {
+                        for (c in 0..2) {
+                            val fX = fieldBaseX + (c * 60f * zoom)
+                            val fY = fieldBaseY + (r * 40f * zoom)
+                            val colorIdx = (r * 3 + c) % fieldColors.size
                             drawRect(
-                                color = bCol,
-                                topLeft = Offset(bX, bY),
-                                size = androidx.compose.ui.geometry.Size(8f * zoom, 8f * zoom)
+                                color = fieldColors[colorIdx],
+                                topLeft = Offset(fX, fY),
+                                size = androidx.compose.ui.geometry.Size(54f * zoom, 34f * zoom)
+                            )
+                            drawRect(
+                                color = Color(0xFF524436).copy(alpha = 0.3f),
+                                topLeft = Offset(fX, fY),
+                                size = androidx.compose.ui.geometry.Size(54f * zoom, 34f * zoom),
+                                style = Stroke(width = 2f * zoom)
                             )
                         }
                     }
-                }
 
-                // National Highway (Orange-Yellow main line)
-                val highwayPath = Path().apply {
-                    moveTo(0f, height * 0.75f * zoom + panY)
-                    cubicTo(
-                        width * 0.4f * zoom + panX, height * 0.7f * zoom + panY,
-                        width * 0.6f * zoom + panX, height * 0.3f * zoom + panY,
-                        width, height * 0.15f * zoom + panY
+                    val runwayPath = Path().apply {
+                        moveTo(width * 0.1f * zoom + panX, height * 0.55f * zoom + panY)
+                        lineTo(width * 0.35f * zoom + panX, height * 0.45f * zoom + panY)
+                    }
+                    drawPath(runwayPath, color = Color(0xFF2C2F33), style = Stroke(width = 16f * zoom))
+                    drawPath(
+                        runwayPath,
+                        color = Color(0xFFE2E2E2),
+                        style = Stroke(
+                            width = 1.5f * zoom,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f * zoom, 10f * zoom), 0f)
+                        )
                     )
-                }
-                // Highway casing
-                drawPath(highwayPath, color = Color(0xFF1F1B18), style = Stroke(width = 8f * zoom))
-                // Highway center fill
-                drawPath(highwayPath, color = Color(0xFFFFA726), style = Stroke(width = 4f * zoom))
 
-                // High-Altitude Wispy Clouds (glowing semi-transparent white/cyan curves)
-                val cloudPath = Path().apply {
-                    moveTo(width * 0.05f * zoom + panX, height * 0.15f * zoom + panY)
-                    cubicTo(
-                        width * 0.3f * zoom + panX, height * 0.05f * zoom + panY,
-                        width * 0.4f * zoom + panX, height * 0.25f * zoom + panY,
-                        width * 0.7f * zoom + panX, height * 0.1f * zoom + panY
-                    )
-                }
-                drawPath(cloudPath, color = Color(0xFFFFFFFF).copy(alpha = 0.12f), style = Stroke(width = 45f * zoom))
-                val cloudPath2 = Path().apply {
-                    moveTo(width * 0.3f * zoom + panX, height * 0.85f * zoom + panY)
-                    cubicTo(
-                        width * 0.5f * zoom + panX, height * 0.9f * zoom + panY,
-                        width * 0.6f * zoom + panX, height * 0.75f * zoom + panY,
-                        width * 0.95f * zoom + panX, height * 0.8f * zoom + panY
-                    )
-                }
-                drawPath(cloudPath2, color = Color(0xFFE0F7FA).copy(alpha = 0.1f), style = Stroke(width = 60f * zoom))
+                    val riverPath = Path().apply {
+                        moveTo(0f, height * 0.25f * zoom + panY)
+                        cubicTo(
+                            width * 0.3f * zoom + panX, height * 0.15f * zoom + panY,
+                            width * 0.5f * zoom + panX, height * 0.55f * zoom + panY,
+                            width, height * 0.45f * zoom + panY
+                        )
+                    }
+                    drawPath(riverPath, color = Color(0xFF0F262F), style = Stroke(width = 18f * zoom))
+                    drawPath(riverPath, color = Color(0xFF1E404E).copy(alpha = 0.4f), style = Stroke(width = 24f * zoom))
 
-                // Coordinate Grid Overlay (Sentinel style HUD lines, very subtle)
-                val coordColor = Color(0xFF00E5FF).copy(alpha = 0.08f)
-                for (i in 0..10) {
-                    val x = (width * 0.12f * i * zoom) + panX
-                    drawLine(coordColor, Offset(x, 0f), Offset(x, height), strokeWidth = 0.8f)
-                    val y = (height * 0.12f * i * zoom) + panY
-                    drawLine(coordColor, Offset(0f, y), Offset(width, y), strokeWidth = 0.8f)
-                }
-            }
-
-            if (isTrafficEnabled) {
-                val path1 = Path().apply {
-                    moveTo(0f, height * 0.45f * zoom + panY)
-                    lineTo(width, height * 0.45f * zoom + panY)
-                }
-                val path2 = Path().apply {
-                    moveTo(width * 0.5f * zoom + panX, 0f)
-                    lineTo(width * 0.5f * zoom + panX, height)
-                }
-                drawPath(
-                    path1,
-                    color = Color(0xFF4CAF50),
-                    style = Stroke(
-                        width = 4f * zoom,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 10f), trafficDashPhase)
-                    )
-                )
-                drawPath(
-                    path2,
-                    color = Color(0xFFF44336),
-                    style = Stroke(
-                        width = 4f * zoom,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 10f), -trafficDashPhase)
-                    )
-                )
-            }
-
-            if (optimizedRoute.isNotEmpty()) {
-                val routePath = Path()
-                val startScreen = convertToScreenCoords(activeLat, activeLng)
-                routePath.moveTo(startScreen.x, startScreen.y)
-                optimizedRoute.forEach { shop ->
-                    val sLat = shop.latitude ?: 0.0
-                    val sLng = shop.longitude ?: 0.0
-                    val shopScreen = convertToScreenCoords(sLat, sLng)
-                    routePath.lineTo(shopScreen.x, shopScreen.y)
-                }
-
-                drawPath(
-                    routePath,
-                    color = Color(0x5500A2E8),
-                    style = Stroke(width = 10f * zoom, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                )
-                drawPath(
-                    routePath,
-                    color = Color(0xFF008CC9),
-                    style = Stroke(
-                        width = 4f * zoom,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(25f, 15f), trafficDashPhase)
-                    )
-                )
-            }
-
-            val userScreen = convertToScreenCoords(activeLat, activeLng)
-            drawCircle(
-                color = Color(0x661E88E5),
-                radius = pulseRadius * zoom,
-                center = userScreen,
-                style = Fill
-            )
-            drawCircle(
-                color = Color(0xFFFFFFFF),
-                radius = 9f * zoom,
-                center = userScreen,
-                style = Fill
-            )
-            drawCircle(
-                color = Color(0xFF1E88E5),
-                radius = 7f * zoom,
-                center = userScreen,
-                style = Fill
-            )
-
-            completedShops.forEach { shop ->
-                val sLat = shop.latitude ?: return@forEach
-                val sLng = shop.longitude ?: return@forEach
-                val screenPos = convertToScreenCoords(sLat, sLng)
-                drawCircle(
-                    color = Color(0x444CAF50),
-                    radius = 12f * zoom,
-                    center = screenPos
-                )
-                drawCircle(
-                    color = Color(0xFF4CAF50),
-                    radius = 6f * zoom,
-                    center = screenPos
-                )
-            }
-
-            optimizedRoute.forEach { shop ->
-                val sLat = shop.latitude ?: return@forEach
-                val sLng = shop.longitude ?: return@forEach
-                val screenPos = convertToScreenCoords(sLat, sLng)
-                val routeIndex = optimizedRoute.indexOf(shop)
-                val isSelected = selectedShop?.shopNumber == shop.shopNumber
-                val isSearched = searchedShops.any { it.shopNumber == shop.shopNumber }
-
-                val pinColor = when {
-                    routeIndex < activeRouteIndex && isRouteStarted -> Color(0xFF4CAF50)
-                    routeIndex == activeRouteIndex && isRouteStarted -> Color(0xFF00E676)
-                    routeIndex % 3 == 0 -> Color(0xFFE53935)
-                    routeIndex % 3 == 1 -> Color(0xFFFB8C00)
-                    else -> Color(0xFF1E88E5)
-                }
-
-                if (isSelected || isSearched) {
+                    val urbanCenter = Offset(width * 0.25f * zoom + panX, height * 0.25f * zoom + panY)
                     drawCircle(
-                        color = Color(0x66FFEB3B),
-                        radius = 24f * zoom,
-                        center = screenPos,
-                        style = Fill
+                        color = Color(0xFF2F3235).copy(alpha = 0.8f),
+                        radius = width * 0.18f * zoom,
+                        center = urbanCenter
+                    )
+                    val streetCol = Color(0xFF4A4E53)
+                    for (i in -4..4) {
+                        val offset = i * 20f * zoom
+                        drawLine(
+                            color = streetCol,
+                            start = Offset(urbanCenter.x - width * 0.15f * zoom, urbanCenter.y + offset),
+                            end = Offset(urbanCenter.x + width * 0.15f * zoom, urbanCenter.y + offset),
+                            strokeWidth = 1.5f * zoom
+                        )
+                        drawLine(
+                            color = streetCol,
+                            start = Offset(urbanCenter.x + offset, urbanCenter.y - width * 0.15f * zoom),
+                            end = Offset(urbanCenter.x + offset, urbanCenter.y + width * 0.15f * zoom),
+                            strokeWidth = 1.5f * zoom
+                        )
+                    }
+
+                    val buildColors = listOf(Color(0xFF5A6065), Color(0xFF6B7278), Color(0xFF7D848A))
+                    for (r in -3..3) {
+                        for (c in -3..3) {
+                            if ((r + c) % 2 == 0) {
+                                val bX = urbanCenter.x + (c * 20f * zoom) - 4f * zoom
+                                val bY = urbanCenter.y + (r * 20f * zoom) - 4f * zoom
+                                val bCol = buildColors[java.lang.Math.abs(r * c) % buildColors.size]
+                                drawRect(
+                                    color = bCol,
+                                    topLeft = Offset(bX, bY),
+                                    size = androidx.compose.ui.geometry.Size(8f * zoom, 8f * zoom)
+                                )
+                            }
+                        }
+                    }
+
+                    val highwayPath = Path().apply {
+                        moveTo(0f, height * 0.75f * zoom + panY)
+                        cubicTo(
+                            width * 0.4f * zoom + panX, height * 0.7f * zoom + panY,
+                            width * 0.6f * zoom + panX, height * 0.3f * zoom + panY,
+                            width, height * 0.15f * zoom + panY
+                        )
+                    }
+                    drawPath(highwayPath, color = Color(0xFF1F1B18), style = Stroke(width = 8f * zoom))
+                    drawPath(highwayPath, color = Color(0xFFFFA726), style = Stroke(width = 4f * zoom))
+
+                    val cloudPath = Path().apply {
+                        moveTo(width * 0.05f * zoom + panX, height * 0.15f * zoom + panY)
+                        cubicTo(
+                            width * 0.3f * zoom + panX, height * 0.05f * zoom + panY,
+                            width * 0.4f * zoom + panX, height * 0.25f * zoom + panY,
+                            width * 0.7f * zoom + panX, height * 0.1f * zoom + panY
+                        )
+                    }
+                    drawPath(cloudPath, color = Color(0xFFFFFFFF).copy(alpha = 0.12f), style = Stroke(width = 45f * zoom))
+                    val cloudPath2 = Path().apply {
+                        moveTo(width * 0.3f * zoom + panX, height * 0.85f * zoom + panY)
+                        cubicTo(
+                            width * 0.5f * zoom + panX, height * 0.9f * zoom + panY,
+                            width * 0.6f * zoom + panX, height * 0.75f * zoom + panY,
+                            width * 0.95f * zoom + panX, height * 0.8f * zoom + panY
+                        )
+                    }
+                    drawPath(cloudPath2, color = Color(0xFFE0F7FA).copy(alpha = 0.1f), style = Stroke(width = 60f * zoom))
+
+                    val coordColor = Color(0xFF00E5FF).copy(alpha = 0.08f)
+                    for (i in 0..10) {
+                        val x = (width * 0.12f * i * zoom) + panX
+                        drawLine(coordColor, Offset(x, 0f), Offset(x, height), strokeWidth = 0.8f)
+                        val y = (height * 0.12f * i * zoom) + panY
+                        drawLine(coordColor, Offset(0f, y), Offset(width, y), strokeWidth = 0.8f)
+                    }
+                }
+
+                if (isTrafficEnabled) {
+                    val path1 = Path().apply {
+                        moveTo(0f, height * 0.45f * zoom + panY)
+                        lineTo(width, height * 0.45f * zoom + panY)
+                    }
+                    val path2 = Path().apply {
+                        moveTo(width * 0.5f * zoom + panX, 0f)
+                        lineTo(width * 0.5f * zoom + panX, height)
+                    }
+                    drawPath(
+                        path1,
+                        color = Color(0xFF4CAF50),
+                        style = Stroke(
+                            width = 4f * zoom,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 10f), trafficDashPhase)
+                        )
+                    )
+                    drawPath(
+                        path2,
+                        color = Color(0xFFF44336),
+                        style = Stroke(
+                            width = 4f * zoom,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 10f), -trafficDashPhase)
+                        )
                     )
                 }
 
-                val markerCenter = Offset(screenPos.x, screenPos.y - 14f * zoom)
+                if (optimizedRoute.isNotEmpty()) {
+                    val routePath = Path()
+                    val startScreen = convertToScreenCoords(activeLat, activeLng)
+                    routePath.moveTo(startScreen.x, startScreen.y)
+                    optimizedRoute.forEach { shop ->
+                        val sLat = shop.latitude ?: 0.0
+                        val sLng = shop.longitude ?: 0.0
+                        val shopScreen = convertToScreenCoords(sLat, sLng)
+                        routePath.lineTo(shopScreen.x, shopScreen.y)
+                    }
+
+                    drawPath(
+                        routePath,
+                        color = Color(0x5500A2E8),
+                        style = Stroke(width = 10f * zoom, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                    drawPath(
+                        routePath,
+                        color = Color(0xFF008CC9),
+                        style = Stroke(
+                            width = 4f * zoom,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(25f, 15f), trafficDashPhase)
+                        )
+                    )
+                }
+
+                val userScreen = convertToScreenCoords(activeLat, activeLng)
                 drawCircle(
-                    color = pinColor,
-                    radius = 12f * zoom,
-                    center = markerCenter
+                    color = Color(0x661E88E5),
+                    radius = pulseRadius * zoom,
+                    center = userScreen,
+                    style = Fill
                 )
                 drawCircle(
-                    color = Color.White,
+                    color = Color(0xFFFFFFFF),
                     radius = 9f * zoom,
-                    center = markerCenter
+                    center = userScreen,
+                    style = Fill
                 )
                 drawCircle(
-                    color = pinColor,
+                    color = Color(0xFF1E88E5),
                     radius = 7f * zoom,
-                    center = markerCenter
+                    center = userScreen,
+                    style = Fill
                 )
+
+                completedShops.forEach { shop ->
+                    val sLat = shop.latitude ?: return@forEach
+                    val sLng = shop.longitude ?: return@forEach
+                    val screenPos = convertToScreenCoords(sLat, sLng)
+                    drawCircle(
+                        color = Color(0x444CAF50),
+                        radius = 12f * zoom,
+                        center = screenPos
+                    )
+                    drawCircle(
+                        color = Color(0xFF4CAF50),
+                        radius = 6f * zoom,
+                        center = screenPos
+                    )
+                }
+
+                optimizedRoute.forEach { shop ->
+                    val sLat = shop.latitude ?: return@forEach
+                    val sLng = shop.longitude ?: return@forEach
+                    val screenPos = convertToScreenCoords(sLat, sLng)
+                    val routeIndex = optimizedRoute.indexOf(shop)
+                    val isSelected = selectedShop?.shopNumber == shop.shopNumber
+                    val isSearched = searchedShops.any { it.shopNumber == shop.shopNumber }
+
+                    val pinColor = when {
+                        routeIndex < activeRouteIndex && isRouteStarted -> Color(0xFF4CAF50)
+                        routeIndex == activeRouteIndex && isRouteStarted -> Color(0xFF00E676)
+                        routeIndex % 3 == 0 -> Color(0xFFE53935)
+                        routeIndex % 3 == 1 -> Color(0xFFFB8C00)
+                        else -> Color(0xFF1E88E5)
+                    }
+
+                    if (isSelected || isSearched) {
+                        drawCircle(
+                            color = Color(0x66FFEB3B),
+                            radius = 24f * zoom,
+                            center = screenPos,
+                            style = Fill
+                        )
+                    }
+
+                    val markerCenter = Offset(screenPos.x, screenPos.y - 14f * zoom)
+                    drawCircle(
+                        color = pinColor,
+                        radius = 12f * zoom,
+                        center = markerCenter
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 9f * zoom,
+                        center = markerCenter
+                    )
+                    drawCircle(
+                        color = pinColor,
+                        radius = 7f * zoom,
+                        center = markerCenter
+                    )
+                }
+            }
+
+            Card(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(16.dp)
+                    .fillMaxWidth(0.9f)
+                    .shadow(4.dp, shape = RoundedCornerShape(8.dp)),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF1F2C3F).copy(alpha = 0.95f)
+                ),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "API Info",
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Interactive Satellite Simulation",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Add your MAPS_API_KEY in the AI Studio Secrets panel to load real-world Google Maps Satellite imagery.",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
             }
         }
     }
@@ -1775,3 +2049,4 @@ fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): D
     val c = 2 * java.lang.Math.atan2(java.lang.Math.sqrt(a), java.lang.Math.sqrt(1 - a))
     return r * c
 }
+

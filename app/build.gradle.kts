@@ -116,6 +116,8 @@ dependencies {
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   implementation(libs.play.services.location)
+  implementation(libs.play.services.maps)
+  implementation(libs.maps.compose)
   implementation(libs.places)
   // implementation(libs.androidx.camera.camera2)
   // implementation(libs.androidx.camera.core)
