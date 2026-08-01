@@ -171,6 +171,19 @@ object UnitSystem {
         "No Unit" to listOf("No Unit")
     )
 
+    fun getUnitCategory(defaultUnitType: String): String {
+        val trimmed = defaultUnitType.trim()
+        if (trimmed in listOf("Weight", "Volume", "Count", "Distance", "Electricity", "Fuel", "No Unit")) {
+            return trimmed
+        }
+        for ((catName, unitsList) in Categories) {
+            if (trimmed in unitsList) {
+                return catName
+            }
+        }
+        return "No Unit"
+    }
+
     val AllUnits = listOf(
         "Kilogram (kg)", "Gram (g)",
         "Liter (L)", "Milliliter (ml)",
@@ -627,7 +640,7 @@ fun IngredientsTab(
                                     ) {
                                         SuggestionChip(
                                             onClick = {},
-                                            label = { Text("Unit: ${ing.defaultUnitType}", fontSize = 11.sp) }
+                                            label = { Text("Unit Category: ${UnitSystem.getUnitCategory(ing.defaultUnitType)}", fontSize = 11.sp) }
                                         )
                                         if (!ing.category.isNullOrEmpty()) {
                                             Spacer(modifier = Modifier.width(8.dp))
@@ -691,7 +704,7 @@ fun IngredientFormScreen(
 ) {
     var name by remember { mutableStateOf(ingredient?.name ?: "") }
     var category by remember { mutableStateOf(ingredient?.category ?: "") }
-    var defaultUnit by remember { mutableStateOf(ingredient?.defaultUnitType ?: "Kilogram (kg)") }
+    var defaultUnit by remember { mutableStateOf(ingredient?.let { UnitSystem.getUnitCategory(it.defaultUnitType) } ?: "Weight") }
     var notes by remember { mutableStateOf(ingredient?.notes ?: "") }
 
     var expandedUnit by remember { mutableStateOf(false) }
@@ -722,10 +735,10 @@ fun IngredientFormScreen(
                 value = defaultUnit,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Default Unit Type *") },
+                label = { Text("Default Unit Category *") },
                 trailingIcon = {
                     IconButton(onClick = { expandedUnit = true }) {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select unit")
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select category")
                     }
                 },
                 modifier = Modifier.fillMaxWidth().testTag("tf_ing_unit")
@@ -735,23 +748,16 @@ fun IngredientFormScreen(
                 onDismissRequest = { expandedUnit = false },
                 modifier = Modifier.fillMaxWidth(0.9f)
             ) {
-                UnitSystem.Categories.forEach { (catName, unitsList) ->
+                val categoriesList = listOf("Weight", "Volume", "Count", "Distance", "Electricity", "Fuel", "No Unit")
+                categoriesList.forEach { catName ->
                     DropdownMenuItem(
-                        text = { Text(catName, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
-                        onClick = {},
-                        enabled = false
+                        text = { Text(catName) },
+                        onClick = {
+                            defaultUnit = catName
+                            expandedUnit = false
+                        },
+                        modifier = Modifier.testTag("unit_item_$catName")
                     )
-                    unitsList.forEach { unitVal ->
-                        DropdownMenuItem(
-                            text = { Text("  $unitVal") },
-                            onClick = {
-                                defaultUnit = unitVal
-                                expandedUnit = false
-                            },
-                            modifier = Modifier.testTag("unit_item_$unitVal")
-                        )
-                    }
-                    Divider()
                 }
             }
         }
@@ -1287,8 +1293,16 @@ fun AddIngredientUsageDialog(
     // Initialize units when selected
     LaunchedEffect(selectedIng) {
         if (selectedIng != null) {
-            unitUsed = selectedIng!!.defaultUnitType
-            purchaseUnit = selectedIng!!.defaultUnitType
+            val category = UnitSystem.getUnitCategory(selectedIng!!.defaultUnitType)
+            isNoUnit = (category == "No Unit")
+            val unitsList = UnitSystem.Categories[category] ?: emptyList()
+            if (unitsList.isNotEmpty()) {
+                unitUsed = unitsList.first()
+                purchaseUnit = unitsList.first()
+            } else {
+                unitUsed = "No Unit"
+                purchaseUnit = "No Unit"
+            }
         }
     }
 
@@ -1357,18 +1371,21 @@ fun AddIngredientUsageDialog(
                 }
 
                 if (selectedIng != null) {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Checkbox(
-                                checked = isNoUnit,
-                                onCheckedChange = { isNoUnit = it },
-                                modifier = Modifier.testTag("dialog_no_unit_checkbox")
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("No Unit / Fixed Cost", fontSize = 13.sp)
+                    val category = UnitSystem.getUnitCategory(selectedIng!!.defaultUnitType)
+                    if (category != "No Unit") {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Checkbox(
+                                    checked = isNoUnit,
+                                    onCheckedChange = { isNoUnit = it },
+                                    modifier = Modifier.testTag("dialog_no_unit_checkbox")
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("No Unit / Fixed Cost", fontSize = 13.sp)
+                            }
                         }
                     }
 
@@ -1404,7 +1421,8 @@ fun AddIngredientUsageDialog(
                                         expanded = expandedUnitUsed,
                                         onDismissRequest = { expandedUnitUsed = false }
                                     ) {
-                                        UnitSystem.AllUnits.forEach { unitVal ->
+                                        val availableUnits = UnitSystem.Categories[category] ?: emptyList()
+                                        availableUnits.forEach { unitVal ->
                                             DropdownMenuItem(
                                                 text = { Text(unitVal) },
                                                 onClick = {
@@ -1463,7 +1481,8 @@ fun AddIngredientUsageDialog(
                                         expanded = expandedPurchaseUnit,
                                         onDismissRequest = { expandedPurchaseUnit = false }
                                     ) {
-                                        UnitSystem.AllUnits.forEach { unitVal ->
+                                        val availableUnits = UnitSystem.Categories[category] ?: emptyList()
+                                        availableUnits.forEach { unitVal ->
                                             DropdownMenuItem(
                                                 text = { Text(unitVal) },
                                                 onClick = {
@@ -1479,10 +1498,11 @@ fun AddIngredientUsageDialog(
                     } else {
                         // No unit flow, user directly enters final cost as purchase price
                         item {
+                            val labelText = if (category == "No Unit") "Final Amount *" else "Direct Final Cost of Ingredient *"
                             OutlinedTextField(
                                 value = purchasePriceStr,
                                 onValueChange = { purchasePriceStr = it },
-                                label = { Text("Direct Final Cost of Ingredient *") },
+                                label = { Text(labelText) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth().testTag("dialog_tf_direct_cost"),
                                 prefix = { Text("₹") }
