@@ -840,7 +840,10 @@ fun CalculationFormScreen(
 
     // Modal forms states
     var showAddIngredientDialog by remember { mutableStateOf(false) }
+    var editingIngredientIndex by remember { mutableStateOf<Int?>(null) }
+
     var showAddExpenseDialog by remember { mutableStateOf(false) }
+    var editingExpenseIndex by remember { mutableStateOf<Int?>(null) }
 
     // Predefined Categories
     val categories = listOf("Bakery", "Popcorn", "Chips", "Drinks", "Other")
@@ -1018,6 +1021,9 @@ fun CalculationFormScreen(
                                             fontSize = 14.sp,
                                             modifier = Modifier.padding(horizontal = 8.dp)
                                         )
+                                        IconButton(onClick = { editingIngredientIndex = index }) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                        }
                                         IconButton(onClick = { ingredientsUsed.removeAt(index) }) {
                                             Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                                         }
@@ -1099,6 +1105,9 @@ fun CalculationFormScreen(
                                             fontSize = 14.sp,
                                             modifier = Modifier.padding(horizontal = 8.dp)
                                         )
+                                        IconButton(onClick = { editingExpenseIndex = index }) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                        }
                                         IconButton(onClick = { expensesUsed.removeAt(index) }) {
                                             Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                                         }
@@ -1257,6 +1266,23 @@ fun CalculationFormScreen(
         )
     }
 
+    if (editingIngredientIndex != null) {
+        val index = editingIngredientIndex!!
+        if (index in ingredientsUsed.indices) {
+            AddIngredientUsageDialog(
+                ingredientsList = ingredientMaster,
+                initialUsage = ingredientsUsed[index],
+                onDismiss = { editingIngredientIndex = null },
+                onConfirm = { updatedUsage ->
+                    ingredientsUsed[index] = updatedUsage
+                    editingIngredientIndex = null
+                }
+            )
+        } else {
+            editingIngredientIndex = null
+        }
+    }
+    
     if (showAddExpenseDialog) {
         AddExpenseUsageDialog(
             onDismiss = { showAddExpenseDialog = false },
@@ -1266,12 +1292,29 @@ fun CalculationFormScreen(
             }
         )
     }
+
+    if (editingExpenseIndex != null) {
+        val index = editingExpenseIndex!!
+        if (index in expensesUsed.indices) {
+            AddExpenseUsageDialog(
+                initialUsage = expensesUsed[index],
+                onDismiss = { editingExpenseIndex = null },
+                onConfirm = { updatedUsage ->
+                    expensesUsed[index] = updatedUsage
+                    editingExpenseIndex = null
+                }
+            )
+        } else {
+            editingExpenseIndex = null
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddIngredientUsageDialog(
     ingredientsList: List<ProductCostIngredient>,
+    initialUsage: IngredientUsage? = null,
     onDismiss: () -> Unit,
     onConfirm: (IngredientUsage) -> Unit
 ) {
@@ -1290,18 +1333,45 @@ fun AddIngredientUsageDialog(
     var expandedUnitUsed by remember { mutableStateOf(false) }
     var expandedPurchaseUnit by remember { mutableStateOf(false) }
 
+    // Prepopulate if initialUsage is provided
+    LaunchedEffect(initialUsage) {
+        if (initialUsage != null) {
+            val matched = ingredientsList.find { it.id == initialUsage.ingredientId }
+            selectedIng = matched ?: ProductCostIngredient(
+                id = initialUsage.ingredientId,
+                name = initialUsage.name,
+                category = initialUsage.category ?: "",
+                defaultUnitType = initialUsage.defaultUnitType,
+                notes = ""
+            )
+            quantityStr = if (initialUsage.isNoUnit) "" else initialUsage.quantityUsed.toString()
+            unitUsed = initialUsage.unitUsed
+            isNoUnit = initialUsage.isNoUnit
+            purchasePriceStr = initialUsage.purchasePrice.toString()
+            purchaseQtyStr = initialUsage.purchaseQuantity.toString()
+            purchaseUnit = initialUsage.purchaseUnit
+        }
+    }
+
     // Initialize units when selected
     LaunchedEffect(selectedIng) {
         if (selectedIng != null) {
             val category = UnitSystem.getUnitCategory(selectedIng!!.defaultUnitType)
-            isNoUnit = (category == "No Unit")
-            val unitsList = UnitSystem.Categories[category] ?: emptyList()
-            if (unitsList.isNotEmpty()) {
-                unitUsed = unitsList.first()
-                purchaseUnit = unitsList.first()
+            val isEditingMatchingIng = initialUsage?.ingredientId == selectedIng!!.id
+            if (isEditingMatchingIng) {
+                isNoUnit = initialUsage!!.isNoUnit
+                unitUsed = initialUsage.unitUsed
+                purchaseUnit = initialUsage.purchaseUnit
             } else {
-                unitUsed = "No Unit"
-                purchaseUnit = "No Unit"
+                isNoUnit = (category == "No Unit")
+                val unitsList = UnitSystem.Categories[category] ?: emptyList()
+                if (unitsList.isNotEmpty()) {
+                    unitUsed = unitsList.first()
+                    purchaseUnit = unitsList.first()
+                } else {
+                    unitUsed = "No Unit"
+                    purchaseUnit = "No Unit"
+                }
             }
         }
     }
@@ -1322,7 +1392,7 @@ fun AddIngredientUsageDialog(
             ) {
                 item {
                     Text(
-                        "Add Raw Ingredient",
+                        if (initialUsage != null) "Edit Raw Ingredient" else "Add Raw Ingredient",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.primary
@@ -1577,7 +1647,7 @@ fun AddIngredientUsageDialog(
                             enabled = selectedIng != null && (isNoUnit || quantityStr.trim().isNotEmpty()),
                             modifier = Modifier.weight(1.5f).testTag("dialog_btn_confirm")
                         ) {
-                            Text("Add to Recipe")
+                            Text(if (initialUsage != null) "Save Changes" else "Add to Recipe")
                         }
                     }
                 }
@@ -1589,6 +1659,7 @@ fun AddIngredientUsageDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddExpenseUsageDialog(
+    initialUsage: ExpenseUsage? = null,
     onDismiss: () -> Unit,
     onConfirm: (ExpenseUsage) -> Unit
 ) {
@@ -1604,6 +1675,18 @@ fun AddExpenseUsageDialog(
 
     var expandedUnitUsed by remember { mutableStateOf(false) }
     var expandedPurchaseUnit by remember { mutableStateOf(false) }
+
+    LaunchedEffect(initialUsage) {
+        if (initialUsage != null) {
+            name = initialUsage.name
+            quantityStr = if (initialUsage.isNoUnit) "" else initialUsage.quantityUsed.toString()
+            unitUsed = initialUsage.unitUsed
+            isNoUnit = initialUsage.isNoUnit
+            purchasePriceStr = initialUsage.purchasePrice.toString()
+            purchaseQtyStr = initialUsage.purchaseQuantity.toString()
+            purchaseUnit = initialUsage.purchaseUnit
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1621,7 +1704,7 @@ fun AddExpenseUsageDialog(
             ) {
                 item {
                     Text(
-                        "Add Overhead Expense",
+                        if (initialUsage != null) "Edit Overhead Expense" else "Add Overhead Expense",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.primary
@@ -1826,7 +1909,7 @@ fun AddExpenseUsageDialog(
                             enabled = name.trim().isNotEmpty() && (isNoUnit || quantityStr.trim().isNotEmpty()),
                             modifier = Modifier.weight(1.5f).testTag("dialog_exp_btn_confirm")
                         ) {
-                            Text("Add Expense")
+                            Text(if (initialUsage != null) "Save Changes" else "Add Expense")
                         }
                     }
                 }
