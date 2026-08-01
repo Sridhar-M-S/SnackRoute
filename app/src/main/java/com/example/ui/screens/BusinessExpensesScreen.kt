@@ -292,7 +292,7 @@ fun BusinessExpensesScreen(
                     "History" -> {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             // Summary Mini Dashboard
@@ -598,9 +598,11 @@ fun BusinessExpensesScreen(
             expense = null,
             viewModel = viewModel,
             onDismiss = { showAddDialog = false },
-            onConfirm = { expense ->
+            onConfirm = { expense, addAnother ->
                 viewModel.insertExpense(expense)
-                showAddDialog = false
+                if (!addAnother) {
+                    showAddDialog = false
+                }
             }
         )
     }
@@ -611,7 +613,7 @@ fun BusinessExpensesScreen(
             expense = showAddEditDialog,
             viewModel = viewModel,
             onDismiss = { showAddEditDialog = null },
-            onConfirm = { expense ->
+            onConfirm = { expense, _ ->
                 viewModel.updateExpense(expense)
                 showAddEditDialog = null
             }
@@ -1290,7 +1292,7 @@ fun AddEditExpenseDialog(
     expense: BusinessExpense?,
     viewModel: AppViewModel,
     onDismiss: () -> Unit,
-    onConfirm: (BusinessExpense) -> Unit
+    onConfirm: (BusinessExpense, Boolean) -> Unit
 ) {
     val context = LocalContext.current
 
@@ -1519,38 +1521,85 @@ fun AddEditExpenseDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val d = description.trim()
-                    val a = amountStr.toDoubleOrNull()
-                    
-                    var isValid = true
-                    if (d.isEmpty()) {
-                        descError = "Description is required"
-                        isValid = false
-                    }
-                    if (a == null || a <= 0) {
-                        amountError = "Please enter a valid amount greater than zero"
-                        isValid = false
-                    }
-
-                    if (isValid) {
-                        val updatedExpense = BusinessExpense(
-                            id = expense?.id ?: 0,
-                            expenseDate = selectedDate,
-                            category = selectedCategory,
-                            description = d,
-                            amount = a!!,
-                            notes = if (notes.trim().isEmpty()) null else notes,
-                            paymentMethod = selectedPaymentMethod,
-                            attachmentUri = attachmentPath
-                        )
-                        onConfirm(updatedExpense)
-                    }
-                },
-                modifier = Modifier.testTag("btn_save_expense")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Save")
+                if (expense == null) {
+                    OutlinedButton(
+                        onClick = {
+                            val d = description.trim()
+                            val a = amountStr.toDoubleOrNull()
+                            
+                            var isValid = true
+                            if (d.isEmpty()) {
+                                descError = "Description is required"
+                                isValid = false
+                            }
+                            if (a == null || a <= 0) {
+                                amountError = "Please enter a valid amount greater than zero"
+                                isValid = false
+                            }
+
+                            if (isValid) {
+                                val updatedExpense = BusinessExpense(
+                                    id = 0,
+                                    expenseDate = selectedDate,
+                                    category = selectedCategory,
+                                    description = d,
+                                    amount = a!!,
+                                    notes = if (notes.trim().isEmpty()) null else notes,
+                                    paymentMethod = selectedPaymentMethod,
+                                    attachmentUri = attachmentPath
+                                )
+                                onConfirm(updatedExpense, true)
+                                // Reset fields for next entry
+                                description = ""
+                                amountStr = ""
+                                notes = ""
+                                attachmentPath = null
+                                descError = null
+                                amountError = null
+                            }
+                        },
+                        modifier = Modifier.testTag("btn_save_and_add_another_expense")
+                    ) {
+                        Text("Save & Add Another")
+                    }
+                }
+                Button(
+                    onClick = {
+                        val d = description.trim()
+                        val a = amountStr.toDoubleOrNull()
+                        
+                        var isValid = true
+                        if (d.isEmpty()) {
+                            descError = "Description is required"
+                            isValid = false
+                        }
+                        if (a == null || a <= 0) {
+                            amountError = "Please enter a valid amount greater than zero"
+                            isValid = false
+                        }
+
+                        if (isValid) {
+                            val updatedExpense = BusinessExpense(
+                                id = expense?.id ?: 0,
+                                expenseDate = selectedDate,
+                                category = selectedCategory,
+                                description = d,
+                                amount = a!!,
+                                notes = if (notes.trim().isEmpty()) null else notes,
+                                paymentMethod = selectedPaymentMethod,
+                                attachmentUri = attachmentPath
+                            )
+                            onConfirm(updatedExpense, false)
+                        }
+                    },
+                    modifier = Modifier.testTag("btn_save_expense")
+                ) {
+                    Text("Save")
+                }
             }
         },
         dismissButton = {

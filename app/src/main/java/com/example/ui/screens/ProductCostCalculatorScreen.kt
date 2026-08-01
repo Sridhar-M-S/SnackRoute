@@ -361,7 +361,7 @@ fun ProductCostCalculatorScreen(
                 FormMode.IngredientForm -> {
                     IngredientFormScreen(
                         ingredient = editingIngredient,
-                        onSave = { name, category, defaultUnit, notes ->
+                        onSave = { name, category, defaultUnit, notes, addAnother ->
                             if (editingIngredient == null) {
                                 viewModel.insertProductCostIngredient(
                                     ProductCostIngredient(
@@ -383,7 +383,9 @@ fun ProductCostCalculatorScreen(
                                 )
                                 Toast.makeText(context, "Ingredient updated", Toast.LENGTH_SHORT).show()
                             }
-                            activeMode = FormMode.List
+                            if (!addAnother) {
+                                activeMode = FormMode.List
+                            }
                         },
                         onCancel = { activeMode = FormMode.List }
                     )
@@ -699,7 +701,7 @@ fun IngredientsTab(
 @Composable
 fun IngredientFormScreen(
     ingredient: ProductCostIngredient?,
-    onSave: (name: String, category: String?, defaultUnit: String, notes: String?) -> Unit,
+    onSave: (name: String, category: String?, defaultUnit: String, notes: String?, addAnother: Boolean) -> Unit,
     onCancel: () -> Unit
 ) {
     var name by remember { mutableStateOf(ingredient?.name ?: "") }
@@ -772,7 +774,7 @@ fun IngredientFormScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedButton(
@@ -781,12 +783,31 @@ fun IngredientFormScreen(
             ) {
                 Text("Cancel")
             }
+            if (ingredient == null) {
+                OutlinedButton(
+                    onClick = {
+                        if (name.trim().isEmpty()) {
+                            return@OutlinedButton
+                        }
+                        onSave(name.trim(), category.trim().ifEmpty { null }, defaultUnit, notes.trim().ifEmpty { null }, true)
+                        // Reset states for next input
+                        name = ""
+                        category = ""
+                        defaultUnit = "Weight"
+                        notes = ""
+                    },
+                    enabled = name.trim().isNotEmpty(),
+                    modifier = Modifier.weight(1.5f).testTag("btn_save_and_add_another_ing")
+                ) {
+                    Text("Save & Add Another")
+                }
+            }
             Button(
                 onClick = {
                     if (name.trim().isEmpty()) {
                         return@Button
                     }
-                    onSave(name.trim(), category.trim().ifEmpty { null }, defaultUnit, notes.trim().ifEmpty { null })
+                    onSave(name.trim(), category.trim().ifEmpty { null }, defaultUnit, notes.trim().ifEmpty { null }, false)
                 },
                 enabled = name.trim().isNotEmpty(),
                 modifier = Modifier.weight(1.5f).testTag("btn_save_ing")

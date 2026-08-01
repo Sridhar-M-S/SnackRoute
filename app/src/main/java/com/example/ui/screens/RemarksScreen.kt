@@ -309,6 +309,7 @@ fun RemarksScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
+                    contentPadding = PaddingValues(bottom = 88.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(filteredRemarks, key = { it.id }) { remark ->
