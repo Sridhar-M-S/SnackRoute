@@ -211,7 +211,7 @@ fun SalesScreen(
             matchStart && matchEnd
         }.sumOf { it.amount }
     }
-    val summaryNetProfit = remember(summaryGrossProfit, summaryBusinessExpenses) { summaryGrossProfit - summaryBusinessExpenses }
+    val summaryNetProfit = remember(summaryTotalSales, summaryBusinessExpenses) { summaryTotalSales - summaryBusinessExpenses }
 
     // --- Excel Import Summary Dialog ---
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
