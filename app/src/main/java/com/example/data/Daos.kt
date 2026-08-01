@@ -388,6 +388,49 @@ interface BusinessExpenseDao {
     suspend fun deleteAllExpenses()
 }
 
+@Dao
+interface ProductCostDao {
+    @Query("SELECT * FROM product_cost_ingredients ORDER BY name ASC")
+    fun getAllIngredients(): Flow<List<ProductCostIngredient>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIngredient(ingredient: ProductCostIngredient): Long
+
+    @Update
+    suspend fun updateIngredient(ingredient: ProductCostIngredient)
+
+    @Delete
+    suspend fun deleteIngredient(ingredient: ProductCostIngredient)
+
+    @Query("SELECT * FROM product_cost_calculations ORDER BY date DESC")
+    fun getAllCalculations(): Flow<List<ProductCostCalculation>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCalculation(calculation: ProductCostCalculation): Long
+
+    @Delete
+    suspend fun deleteCalculation(calculation: ProductCostCalculation)
+
+    // Direct methods for Export/Import
+    @Query("SELECT * FROM product_cost_ingredients")
+    suspend fun getAllIngredientsDirect(): List<ProductCostIngredient>
+
+    @Query("SELECT * FROM product_cost_calculations")
+    suspend fun getAllCalculationsDirect(): List<ProductCostCalculation>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIngredients(ingredients: List<ProductCostIngredient>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCalculations(calculations: List<ProductCostCalculation>)
+
+    @Query("DELETE FROM product_cost_ingredients")
+    suspend fun deleteAllIngredients()
+
+    @Query("DELETE FROM product_cost_calculations")
+    suspend fun deleteAllCalculations()
+}
+
 
 
 

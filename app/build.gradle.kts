@@ -47,6 +47,7 @@ android {
     buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${configMap["PROJECT_ID"] ?: ""}\"")
     buildConfigField("String", "FIREBASE_API_KEY", "\"${configMap["API_KEY"] ?: ""}\"")
     buildConfigField("String", "FIREBASE_APP_ID", "\"${configMap["APP_ID"] ?: ""}\"")
+    manifestPlaceholders["MAPS_API_KEY"] = "MY_MAPS_API_KEY"
   }
 
   signingConfigs {

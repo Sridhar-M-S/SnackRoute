@@ -22,8 +22,26 @@ class AppRepository(
     private val dailyTaskDao: DailyTaskDao,
     private val dynamicCostDao: DynamicCostDao,
     private val shopRemarkDao: ShopRemarkDao,
-    private val businessExpenseDao: BusinessExpenseDao
+    private val businessExpenseDao: BusinessExpenseDao,
+    private val productCostDao: ProductCostDao
 ) {
+    // --- Product Cost Calculator Queries ---
+    val allProductCostIngredients: Flow<List<ProductCostIngredient>> = productCostDao.getAllIngredients()
+    suspend fun insertProductCostIngredient(ingredient: ProductCostIngredient): Long = productCostDao.insertIngredient(ingredient)
+    suspend fun updateProductCostIngredient(ingredient: ProductCostIngredient) = productCostDao.updateIngredient(ingredient)
+    suspend fun deleteProductCostIngredient(ingredient: ProductCostIngredient) = productCostDao.deleteIngredient(ingredient)
+
+    val allProductCostCalculations: Flow<List<ProductCostCalculation>> = productCostDao.getAllCalculations()
+    suspend fun insertProductCostCalculation(calculation: ProductCostCalculation): Long = productCostDao.insertCalculation(calculation)
+    suspend fun deleteProductCostCalculation(calculation: ProductCostCalculation) = productCostDao.deleteCalculation(calculation)
+
+    suspend fun getAllProductCostIngredientsDirect(): List<ProductCostIngredient> = productCostDao.getAllIngredientsDirect()
+    suspend fun getAllProductCostCalculationsDirect(): List<ProductCostCalculation> = productCostDao.getAllCalculationsDirect()
+    suspend fun insertProductCostIngredients(ingredients: List<ProductCostIngredient>) = productCostDao.insertIngredients(ingredients)
+    suspend fun insertProductCostCalculations(calculations: List<ProductCostCalculation>) = productCostDao.insertCalculations(calculations)
+    suspend fun deleteAllProductCostIngredients() = productCostDao.deleteAllIngredients()
+    suspend fun deleteAllProductCostCalculations() = productCostDao.deleteAllCalculations()
+
     // --- Business Expense Queries ---
     val allExpenses: Flow<List<BusinessExpense>> = businessExpenseDao.getAllExpenses()
     suspend fun insertExpense(expense: BusinessExpense): Long = businessExpenseDao.insertExpense(expense)

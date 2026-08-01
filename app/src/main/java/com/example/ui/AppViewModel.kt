@@ -111,7 +111,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         db.dailyTaskDao(),
         db.dynamicCostDao(),
         db.shopRemarkDao(),
-        db.businessExpenseDao()
+        db.businessExpenseDao(),
+        db.productCostDao()
     )
 
     // --- Centralized Error States ---
@@ -709,6 +710,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    val allProductCostIngredients: StateFlow<List<ProductCostIngredient>> = repository.allProductCostIngredients
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val allProductCostCalculations: StateFlow<List<ProductCostCalculation>> = repository.allProductCostCalculations
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun insertProductCostIngredient(ingredient: ProductCostIngredient) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertProductCostIngredient(ingredient)
+        }
+    }
+
+    fun updateProductCostIngredient(ingredient: ProductCostIngredient) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateProductCostIngredient(ingredient)
+        }
+    }
+
+    fun deleteProductCostIngredient(ingredient: ProductCostIngredient) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteProductCostIngredient(ingredient)
+        }
+    }
+
+    fun insertProductCostCalculation(calculation: ProductCostCalculation) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertProductCostCalculation(calculation)
+        }
+    }
+
+    fun deleteProductCostCalculation(calculation: ProductCostCalculation) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteProductCostCalculation(calculation)
+        }
+    }
 
     fun setGoogleAccount(account: GoogleSignInAccount?) {
         _googleSignInAccount.value = account
@@ -4334,6 +4379,8 @@ User Question: $userQuestion
                 val calculationItems = repository.getAllCalculationItemsDirect()
                 val remarksList = repository.getAllRemarksDirect()
                 val isEnabled = isDynamicProfitEnabled.value
+                val pCostIngredients = repository.getAllProductCostIngredientsDirect()
+                val pCostCalculations = repository.getAllProductCostCalculationsDirect()
 
                 com.example.utils.Exporter.exportAllUnified(
                     context = context,
@@ -4349,7 +4396,9 @@ User Question: $userQuestion
                     calculations = calculations,
                     calculationItems = calculationItems,
                     remarksList = remarksList,
-                    isDynamicProfitEnabled = isEnabled
+                    isDynamicProfitEnabled = isEnabled,
+                    productCostIngredients = pCostIngredients,
+                    productCostCalculations = pCostCalculations
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -4576,6 +4625,36 @@ User Question: $userQuestion
                     skippedRowCounter += summary.skippedRows
                     failedRowCounter += summary.failedRowsCount
                     sheetMessages.add("Shop Remarks: Imported ${summary.successfullyImported}/${summary.totalRows}")
+                }
+
+                // 8b. Product Cost Ingredients Sheet
+                val pCostIngredientsSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Product Cost Ingredients", "Product_Cost_Ingredients", "ProductCostIngredients"))
+                if (pCostIngredientsSheet != null) {
+                    val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importProductCostIngredients(context, workbook, pCostIngredientsSheet)
+                    }
+                    if (list.isNotEmpty()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            repository.deleteAllProductCostIngredients()
+                            repository.insertProductCostIngredients(list)
+                        }
+                        sheetMessages.add("Product Cost Ingredients: Imported ${list.size}")
+                    }
+                }
+
+                // 8c. Product Cost Calculations Sheet
+                val pCostCalculationsSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Product Cost Calculations", "Product_Cost_Calculations", "ProductCostCalculations"))
+                if (pCostCalculationsSheet != null) {
+                    val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importProductCostCalculations(context, workbook, pCostCalculationsSheet)
+                    }
+                    if (list.isNotEmpty()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            repository.deleteAllProductCostCalculations()
+                            repository.insertProductCostCalculations(list)
+                        }
+                        sheetMessages.add("Product Cost Calculations: Imported ${list.size}")
+                    }
                 }
 
                 workbook.close()

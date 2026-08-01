@@ -142,7 +142,8 @@ fun SettingsScreen(
     onOpenDebug: () -> Unit,
     onOpenCostEngine: () -> Unit,
     onOpenRemarks: () -> Unit = {},
-    onOpenExpenses: () -> Unit = {}
+    onOpenExpenses: () -> Unit = {},
+    onOpenProductCostCalculator: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
@@ -389,6 +390,57 @@ fun SettingsScreen(
                             Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Configure", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            Text("Product Costing", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("product_cost_calculator_settings_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Calculate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Product Cost Calculator", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Calculate production costs, selling prices, profit margins, and manage reusable ingredient masters.", fontSize = 11.sp, color = Color.Gray)
+                        }
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Create ingredients once and reuse them in multiple product recipe and costing sheets with real-time margins.",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        )
+                        Button(
+                            onClick = onOpenProductCostCalculator,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.testTag("btn_settings_open_product_cost")
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open", fontSize = 12.sp)
                         }
                     }
                 }

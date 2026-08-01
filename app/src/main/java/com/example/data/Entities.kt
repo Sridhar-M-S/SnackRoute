@@ -224,6 +224,35 @@ data class BusinessExpense(
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(expenseDate))
 }
 
+@Entity(tableName = "product_cost_ingredients")
+data class ProductCostIngredient(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val category: String? = null,
+    val defaultUnitType: String,
+    val notes: String? = null
+)
+
+@Entity(tableName = "product_cost_calculations")
+data class ProductCostCalculation(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val productName: String,
+    val category: String,
+    val sellingPrice: Double,
+    val packetsProduced: Int,
+    val labourCost: Double,
+    val totalIngredientCost: Double,
+    val totalOtherExpensesCost: Double,
+    val totalProductionCost: Double,
+    val costPerPacket: Double,
+    val profitPerPacket: Double,
+    val profitPercentage: Double,
+    val totalExpectedProfit: Double,
+    val date: Long = System.currentTimeMillis(),
+    val ingredientsJson: String, // Contains JSON details of ingredients used
+    val otherExpensesJson: String // Contains JSON details of other expenses used
+)
+
 
 
 

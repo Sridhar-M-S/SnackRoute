@@ -250,7 +250,8 @@ class MainActivity : ComponentActivity() {
                                             onOpenDebug = { isDebugOpen = true },
                                             onOpenCostEngine = { navigateToChildTab("CostEngine") },
                                             onOpenRemarks = { navigateToChildTab("Remarks") },
-                                            onOpenExpenses = { navigateToChildTab("BusinessExpenses") }
+                                            onOpenExpenses = { navigateToChildTab("BusinessExpenses") },
+                                            onOpenProductCostCalculator = { navigateToChildTab("ProductCostCalculator") }
                                         )
                                     }
                                 }
@@ -310,6 +311,14 @@ class MainActivity : ComponentActivity() {
                                             viewModel = viewModel,
                                             onBack = { navigateBack() },
                                             showBackButton = true
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("ProductCostCalculator")) {
+                                    Box(modifier = if (currentTab == "ProductCostCalculator") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        com.example.ui.screens.ProductCostCalculatorScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
                                         )
                                     }
                                 }

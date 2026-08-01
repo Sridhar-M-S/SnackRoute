@@ -2823,7 +2823,9 @@ object Exporter {
         calculations: List<com.example.data.CostCalculation>,
         calculationItems: List<com.example.data.CostCalculationItem>,
         remarksList: List<ShopRemark>,
-        isDynamicProfitEnabled: Boolean
+        isDynamicProfitEnabled: Boolean,
+        productCostIngredients: List<com.example.data.ProductCostIngredient> = emptyList(),
+        productCostCalculations: List<com.example.data.ProductCostCalculation> = emptyList()
     ) {
         val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
         val file = File(context.cacheDir, fileName)
@@ -3203,6 +3205,65 @@ object Exporter {
                 remarksSheet.setColumnWidth(i, 5000)
             }
 
+            // --- 11b. Product Cost Ingredients Sheet ---
+            val pCostIngredientsSheet = workbook.createSheet("Product Cost Ingredients")
+            val pCostIngredientsHeaders = listOf("ID", "Name", "Category", "Default Unit Type", "Notes")
+            val pCostIngredientsHeaderRow = pCostIngredientsSheet.createRow(0)
+            for (i in pCostIngredientsHeaders.indices) {
+                val cell = pCostIngredientsHeaderRow.createCell(i)
+                cell.setCellValue(pCostIngredientsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in productCostIngredients) {
+                val row = pCostIngredientsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.id.toDouble())
+                row.createCell(1).setCellValue(item.name)
+                row.createCell(2).setCellValue(item.category ?: "")
+                row.createCell(3).setCellValue(item.defaultUnitType)
+                row.createCell(4).setCellValue(item.notes ?: "")
+            }
+            for (i in pCostIngredientsHeaders.indices) {
+                pCostIngredientsSheet.setColumnWidth(i, 5000)
+            }
+
+            // --- 11c. Product Cost Calculations Sheet ---
+            val pCostCalcsSheet = workbook.createSheet("Product Cost Calculations")
+            val pCostCalcsHeaders = listOf(
+                "ID", "Product Name", "Category", "Selling Price", "Packets Produced", "Labour Cost",
+                "Total Ingredient Cost", "Total Other Expenses Cost", "Total Production Cost", "Cost Per Packet",
+                "Profit Per Packet", "Profit Percentage", "Total Expected Profit", "Date", "Ingredients JSON", "Other Expenses JSON"
+            )
+            val pCostCalcsHeaderRow = pCostCalcsSheet.createRow(0)
+            for (i in pCostCalcsHeaders.indices) {
+                val cell = pCostCalcsHeaderRow.createCell(i)
+                cell.setCellValue(pCostCalcsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in productCostCalculations) {
+                val row = pCostCalcsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.id.toDouble())
+                row.createCell(1).setCellValue(item.productName)
+                row.createCell(2).setCellValue(item.category)
+                row.createCell(3).setCellValue(item.sellingPrice)
+                row.createCell(4).setCellValue(item.packetsProduced.toDouble())
+                row.createCell(5).setCellValue(item.labourCost)
+                row.createCell(6).setCellValue(item.totalIngredientCost)
+                row.createCell(7).setCellValue(item.totalOtherExpensesCost)
+                row.createCell(8).setCellValue(item.totalProductionCost)
+                row.createCell(9).setCellValue(item.costPerPacket)
+                row.createCell(10).setCellValue(item.profitPerPacket)
+                row.createCell(11).setCellValue(item.profitPercentage)
+                row.createCell(12).setCellValue(item.totalExpectedProfit)
+                row.createCell(13).setCellValue(item.date.toDouble())
+                row.createCell(14).setCellValue(item.ingredientsJson)
+                row.createCell(15).setCellValue(item.otherExpensesJson)
+            }
+            for (i in pCostCalcsHeaders.indices) {
+                pCostCalcsSheet.setColumnWidth(i, 5000)
+            }
+
             // --- 12. Settings Sheet ---
             val settingsSheet = workbook.createSheet("Settings")
             val settingsHeaders = listOf("Setting Key", "Setting Value")
@@ -3392,5 +3453,126 @@ object Exporter {
         }
         tempWorkbook.close()
         return FileProvider.getUriForFile(context, "com.example.snackroutepro.fileprovider", tempFile)
+    }
+
+    fun importProductCostIngredients(context: Context, workbook: Workbook, sheet: Sheet): List<com.example.data.ProductCostIngredient> {
+        val list = mutableListOf<com.example.data.ProductCostIngredient>()
+        try {
+            val headerRow = sheet.getRow(0) ?: return emptyList()
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
+                }
+            }
+            
+            val nameIdx = headerMap["name"] ?: headerMap["ingredient name"]
+            val categoryIdx = headerMap["category"]
+            val unitTypeIdx = headerMap["default unit type"] ?: headerMap["unit type"] ?: headerMap["defaultunittype"]
+            val notesIdx = headerMap["notes"]
+
+            if (nameIdx == null || unitTypeIdx == null) return emptyList()
+
+            for (r in 1..sheet.lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                val name = getCellValueAsString(row, nameIdx)?.trim() ?: ""
+                val category = categoryIdx?.let { getCellValueAsString(row, it)?.trim() }
+                val unitType = getCellValueAsString(row, unitTypeIdx)?.trim() ?: "No Unit"
+                val notes = notesIdx?.let { getCellValueAsString(row, notesIdx)?.trim() }
+
+                if (name.isNotEmpty()) {
+                    list.add(
+                        com.example.data.ProductCostIngredient(
+                            name = name,
+                            category = if (category.isNullOrEmpty()) null else category,
+                            defaultUnitType = unitType,
+                            notes = if (notes.isNullOrEmpty()) null else notes
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun importProductCostCalculations(context: Context, workbook: Workbook, sheet: Sheet): List<com.example.data.ProductCostCalculation> {
+        val list = mutableListOf<com.example.data.ProductCostCalculation>()
+        try {
+            val headerRow = sheet.getRow(0) ?: return emptyList()
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
+                }
+            }
+            
+            val prodNameIdx = headerMap["product name"] ?: headerMap["productname"]
+            val categoryIdx = headerMap["category"]
+            val sellingPriceIdx = headerMap["selling price"] ?: headerMap["sellingprice"]
+            val packetsIdx = headerMap["packets produced"] ?: headerMap["packetsproduced"]
+            val labourIdx = headerMap["labour cost"] ?: headerMap["labourcost"]
+            val ingCostIdx = headerMap["total ingredient cost"] ?: headerMap["totalingredientcost"]
+            val otherCostIdx = headerMap["total other expenses cost"] ?: headerMap["totalotherexpensescost"]
+            val prodCostIdx = headerMap["total production cost"] ?: headerMap["totalproductioncost"]
+            val costPerPacketIdx = headerMap["cost per packet"] ?: headerMap["costperpacket"]
+            val profitPerPacketIdx = headerMap["profit per packet"] ?: headerMap["profitperpacket"]
+            val profitPctIdx = headerMap["profit percentage"] ?: headerMap["profitpercentage"]
+            val expectedProfitIdx = headerMap["total expected profit"] ?: headerMap["totalexpectedprofit"]
+            val dateIdx = headerMap["date"] ?: headerMap["timestamp"]
+            val ingJsonIdx = headerMap["ingredients json"] ?: headerMap["ingredientsjson"]
+            val otherJsonIdx = headerMap["other expenses json"] ?: headerMap["otherexpensesjson"]
+
+            if (prodNameIdx == null || ingJsonIdx == null || otherJsonIdx == null) return emptyList()
+
+            for (r in 1..sheet.lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                val productName = getCellValueAsString(row, prodNameIdx)?.trim() ?: ""
+                val category = categoryIdx?.let { getCellValueAsString(row, it)?.trim() } ?: "Other"
+                val sellingPrice = getCellValueAsString(row, sellingPriceIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val packetsProduced = getCellValueAsString(row, packetsIdx ?: -1)?.toDoubleOrNull()?.toInt() ?: 1
+                val labourCost = getCellValueAsString(row, labourIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val totalIngredientCost = getCellValueAsString(row, ingCostIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val totalOtherExpensesCost = getCellValueAsString(row, otherCostIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val totalProductionCost = getCellValueAsString(row, prodCostIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val costPerPacket = getCellValueAsString(row, costPerPacketIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val profitPerPacket = getCellValueAsString(row, profitPerPacketIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val profitPercentage = getCellValueAsString(row, profitPctIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val totalExpectedProfit = getCellValueAsString(row, expectedProfitIdx ?: -1)?.toDoubleOrNull() ?: 0.0
+                val dateLong = getCellValueAsString(row, dateIdx ?: -1)?.toDoubleOrNull()?.toLong() ?: System.currentTimeMillis()
+                val ingredientsJson = getCellValueAsString(row, ingJsonIdx)?.trim() ?: "[]"
+                val otherExpensesJson = getCellValueAsString(row, otherJsonIdx)?.trim() ?: "[]"
+
+                if (productName.isNotEmpty()) {
+                    list.add(
+                        com.example.data.ProductCostCalculation(
+                            productName = productName,
+                            category = category,
+                            sellingPrice = sellingPrice,
+                            packetsProduced = packetsProduced,
+                            labourCost = labourCost,
+                            totalIngredientCost = totalIngredientCost,
+                            totalOtherExpensesCost = totalOtherExpensesCost,
+                            totalProductionCost = totalProductionCost,
+                            costPerPacket = costPerPacket,
+                            profitPerPacket = profitPerPacket,
+                            profitPercentage = profitPercentage,
+                            totalExpectedProfit = totalExpectedProfit,
+                            date = dateLong,
+                            ingredientsJson = ingredientsJson,
+                            otherExpensesJson = otherExpensesJson
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
     }
 }
