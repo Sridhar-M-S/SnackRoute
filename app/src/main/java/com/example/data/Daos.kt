@@ -359,6 +359,9 @@ interface ShopRemarkDao {
 
     @Query("DELETE FROM shop_remarks WHERE salesEntryId = :salesId")
     suspend fun deleteRemarkBySalesId(salesId: Int)
+
+    @Query("DELETE FROM shop_remarks WHERE shopNumber = :shopNumber")
+    suspend fun deleteRemarksByShopNumber(shopNumber: String)
 }
 
 @Dao
@@ -430,6 +433,40 @@ interface ProductCostDao {
     @Query("DELETE FROM product_cost_calculations")
     suspend fun deleteAllCalculations()
 }
+
+@Dao
+interface SalesTargetDao {
+    @Query("SELECT * FROM sales_target_items WHERE targetDate = :date ORDER BY id ASC")
+    fun getTargetsForDate(date: String): Flow<List<SalesTargetItem>>
+
+    @Query("SELECT * FROM sales_target_items ORDER BY id ASC")
+    fun getAllTargets(): Flow<List<SalesTargetItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTargetItem(item: SalesTargetItem): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTargetItems(items: List<SalesTargetItem>)
+
+    @Update
+    suspend fun updateTargetItem(item: SalesTargetItem)
+
+    @Delete
+    suspend fun deleteTargetItem(item: SalesTargetItem)
+
+    @Query("DELETE FROM sales_target_items WHERE id = :id")
+    suspend fun deleteTargetItemById(id: Int)
+
+    @Query("DELETE FROM sales_target_items WHERE targetDate = :date")
+    suspend fun deleteTargetsForDate(date: String)
+
+    @Query("DELETE FROM sales_target_items")
+    suspend fun deleteAllTargets()
+
+    @Query("SELECT * FROM sales_target_items")
+    suspend fun getAllTargetsDirect(): List<SalesTargetItem>
+}
+
 
 
 

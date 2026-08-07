@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -61,7 +63,8 @@ fun DashboardScreen(
     onQuickAddSales: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenTimetable: () -> Unit,
-    onOpenDailyTasks: () -> Unit
+    onOpenDailyTasks: () -> Unit,
+    isCurrentTab: Boolean = true
 ) {
     val context = LocalContext.current
     val locations by viewModel.locations.collectAsStateWithLifecycle()
@@ -105,6 +108,8 @@ fun DashboardScreen(
 
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
+    val allRemarks by viewModel.allRemarks.collectAsStateWithLifecycle()
+    val todayTargets by viewModel.todaySalesTargets.collectAsStateWithLifecycle()
     val reminderCount = dueReminders.size + inAppNotifications.count { !it.isRead }
 
     val infiniteTransition = rememberInfiniteTransition(label = "bellPulse")
@@ -226,134 +231,295 @@ fun DashboardScreen(
     val productProfits = stats.productProfits
     val shopProfits = stats.shopProfits
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-        topBar = {
-            LargeTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "SnackRoute Pro",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Smart Store & Sales Management",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onOpenTimetable,
-                        modifier = Modifier.testTag("open_timetable_button")
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(isCurrentTab) {
+        drawerState.snapTo(DrawerValue.Closed)
+    }
+
+    BackHandler(enabled = drawerState.isOpen) {
+        coroutineScope.launch { drawerState.close() }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                drawerContentColor = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.width(310.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .clickable {
+                            coroutineScope.launch { drawerState.close() }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Storefront,
+                                    contentDescription = "Close Menu",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "SnackRoute Pro",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Navigation Menu",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch { drawerState.close() }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Menu",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NavigationDrawerItem(
+                    label = { Text("Weekly Timetable", fontWeight = FontWeight.Medium) },
+                    icon = {
                         Icon(
                             imageVector = Icons.Default.DateRange,
                             contentDescription = "Weekly Timetable",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            tint = MaterialTheme.colorScheme.primary
                         )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { onNavigateToTab("SalesPlanning") },
-                        modifier = Modifier.testTag("notification_bell_button")
-                    ) {
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            Icon(
-                                imageVector = Icons.Default.Notifications,
-                                contentDescription = "Sales Planning Reminders",
-                                tint = if (reminderCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .graphicsLayer(
-                                        scaleX = bellScale,
-                                        scaleY = bellScale
-                                    )
-                            )
-                            if (reminderCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .background(Color.Red, shape = CircleShape)
-                                        .align(Alignment.TopEnd)
-                                        .offset(x = 4.dp, y = (-4).dp),
-                                    contentAlignment = Alignment.Center
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        onOpenTimetable()
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_timetable")
+                )
+
+                NavigationDrawerItem(
+                    label = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Remarks", fontWeight = FontWeight.Medium)
+                            if (allRemarks.isNotEmpty()) {
+                                Badge(
+                                    containerColor = Color(0xFFFF9800),
+                                    contentColor = Color.White
                                 ) {
-                                    Text(
-                                        text = reminderCount.toString(),
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Text(allRemarks.size.toString())
                                 }
                             }
                         }
-                    }
-                    IconButton(
-                        onClick = { onNavigateToTab("MapRoutePlanner") },
-                        modifier = Modifier.testTag("open_route_planner_button")
-                    ) {
+                    },
+                    icon = {
                         Icon(
-                            imageVector = Icons.Default.Navigation,
-                            contentDescription = "Map Route Planner",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            imageVector = Icons.Default.Comment,
+                            contentDescription = "Remarks",
+                            tint = Color(0xFFFF9800)
                         )
-                    }
-                    IconButton(
-                        onClick = onOpenDailyTasks,
-                        modifier = Modifier.testTag("open_daily_tasks_button")
-                    ) {
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        onNavigateToTab("Remarks")
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_remarks")
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("Checklist", fontWeight = FontWeight.Medium) },
+                    icon = {
                         Icon(
                             imageVector = Icons.Default.PlaylistAddCheck,
-                            contentDescription = "Daily Tasks",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            contentDescription = "Checklist",
+                            tint = MaterialTheme.colorScheme.primary
                         )
-                    }
-                    IconButton(
-                        onClick = { unifiedImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
-                        modifier = Modifier.testTag("btn_unified_import")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CloudUpload,
-                            contentDescription = "Restore All Data (Excel)",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { viewModel.exportAllUnifiedToExcel(context) },
-                        modifier = Modifier.testTag("btn_unified_export")
-                    ) {
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        onOpenDailyTasks()
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_checklist")
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("Export", fontWeight = FontWeight.Medium) },
+                    icon = {
                         Icon(
                             imageVector = Icons.Default.CloudDownload,
-                            contentDescription = "Backup All Data (Excel)",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            contentDescription = "Export",
+                            tint = MaterialTheme.colorScheme.primary
                         )
-                    }
-                    IconButton(
-                        onClick = onOpenChat,
-                        modifier = Modifier.testTag("open_ai_chat_button")
-                    ) {
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        viewModel.exportAllUnifiedToExcel(context)
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_export")
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("Import", fontWeight = FontWeight.Medium) },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = "Import",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        unifiedImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_import")
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("AI Assistant", fontWeight = FontWeight.Medium) },
+                    icon = {
                         Icon(
                             imageVector = Icons.Default.Psychology,
                             contentDescription = "AI Assistant",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            tint = MaterialTheme.colorScheme.primary
                         )
-                    }
-                },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        onOpenChat()
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_ai_chat")
                 )
-            )
-        },
+            }
+        }
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+            topBar = {
+                LargeTopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "SnackRoute Pro",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Smart Store & Sales Management",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    if (drawerState.isOpen) drawerState.close() else drawerState.open()
+                                }
+                            },
+                            modifier = Modifier.testTag("hamburger_menu_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Navigation Menu",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { onNavigateToTab("SalesPlanning") },
+                            modifier = Modifier.testTag("notification_bell_button")
+                        ) {
+                            Box(contentAlignment = Alignment.TopEnd) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = "Sales Planning Reminders",
+                                    tint = if (reminderCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .graphicsLayer(
+                                            scaleX = bellScale,
+                                            scaleY = bellScale
+                                        )
+                                )
+                                if (reminderCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .background(Color.Red, shape = CircleShape)
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 4.dp, y = (-4).dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = reminderCount.toString(),
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.largeTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background
+                    )
+                )
+            },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onQuickAddSales,
@@ -477,7 +643,10 @@ fun DashboardScreen(
                     BentoSalesCard(
                         salesCount = todaySalesCount,
                         revenue = todayRevenue,
-                        onClick = { onNavigateToTab("Sales") }
+                        todayTargets = todayTargets,
+                        onClick = {
+                            onNavigateToTab("TodaySalesTarget")
+                        }
                     )
 
                     // Row 2: Today's Profit & Pending Collections (2 Columns)
@@ -487,6 +656,10 @@ fun DashboardScreen(
                     ) {
                         BentoProfitCard(
                             profit = todayProfit,
+                            onClick = {
+                                viewModel.setSalesDateFilterToToday()
+                                onNavigateToTab("Sales")
+                            },
                             modifier = Modifier.weight(1f)
                         )
                         BentoPendingCard(
@@ -527,14 +700,7 @@ fun DashboardScreen(
                                 iconBgColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
                                 onClick = { onNavigateToTab("Shops") }
                             )
-                            BentoMiniStatCard(
-                                label = "Route Planner",
-                                value = "${dueReminders.size} Due",
-                                icon = Icons.Default.Navigation,
-                                iconColor = MaterialTheme.colorScheme.tertiary,
-                                iconBgColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f),
-                                onClick = { onNavigateToTab("MapRoutePlanner") }
-                            )
+
                         }
                     }
                 }
@@ -545,6 +711,14 @@ fun DashboardScreen(
                 BentoExpensesCard(
                     thisMonthExpense = thisMonthExpense,
                     onClick = { onNavigateToTab("BusinessExpenses") }
+                )
+            }
+
+            // --- Store Observations & Remarks Section ---
+            item {
+                BentoRemarksCard(
+                    remarksCount = allRemarks.size,
+                    onClick = { onNavigateToTab("Remarks") }
                 )
             }
 
@@ -882,6 +1056,7 @@ fun DashboardScreen(
         }
     }
 }
+}
 
 @Composable
 fun SuggestionCard(suggestion: BusinessSuggestion) {
@@ -1121,13 +1296,19 @@ fun RecentSaleRow(sale: SalesEntry) {
 fun BentoSalesCard(
     salesCount: Int,
     revenue: Double,
+    todayTargets: List<com.example.data.SalesTargetItem>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val targetPackets = todayTargets.sumOf { it.targetPackets }
+    val targetAmount = todayTargets.sumOf { it.targetAmount }
+    val hasTarget = todayTargets.isNotEmpty()
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .testTag("dashboard_bento_sales_card"),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primary,
@@ -1139,7 +1320,7 @@ fun BentoSalesCard(
                 .fillMaxWidth()
                 .padding(24.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = "TODAY'S SALES",
                     fontSize = 11.sp,
@@ -1175,7 +1356,76 @@ fun BentoSalesCard(
                         color = Color.White.copy(alpha = 0.7f)
                     )
                 }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.2f), modifier = Modifier.padding(vertical = 2.dp))
+
+                if (hasTarget) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Today's Target",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = "$targetPackets Packets • ₹${"%,.2f".format(targetAmount)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                modifier = Modifier.testTag("dashboard_target_summary")
+                            )
+                        }
+
+                        val amountDiff = Math.abs(revenue - targetAmount)
+                        val packetDiff = Math.abs(salesCount - targetPackets)
+                        val isExceeded = revenue >= targetAmount
+                        val diffText = if (isExceeded) {
+                            if (salesCount >= targetPackets) {
+                                "Exceeded Target: $packetDiff Packets • ₹${"%,.2f".format(amountDiff)}"
+                            } else {
+                                "Exceeded Target: ₹${"%,.2f".format(amountDiff)}"
+                            }
+                        } else {
+                            if (targetPackets > salesCount) {
+                                "Remaining: $packetDiff Packets • ₹${"%,.2f".format(amountDiff)}"
+                            } else {
+                                "Remaining: ₹${"%,.2f".format(amountDiff)}"
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isExceeded) Color(0xFF2E7D32) else Color(0xFFE65100),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = diffText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.testTag("dashboard_target_live_progress")
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "No sales target has been set for today.",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.testTag("empty_sales_target_banner")
+                    )
+                }
             }
+
             Icon(
                 imageVector = Icons.Default.TrendingUp,
                 contentDescription = null,
@@ -1189,13 +1439,15 @@ fun BentoSalesCard(
     }
 }
 
+
 @Composable
 fun BentoProfitCard(
     profit: Double,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier.height(140.dp),
+        modifier = if (onClick != null) modifier.height(140.dp).clickable(onClick = onClick) else modifier.height(140.dp),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -2591,6 +2843,106 @@ fun BentoExpensesCard(
                     tint = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.size(24.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun BentoRemarksCard(
+    remarksCount: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Store Observations & Remarks",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFFF9800)
+        )
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .testTag("dashboard_bento_remarks_card"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
+            border = CardDefaults.outlinedCardBorder()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(Color(0xFFFF9800), shape = RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Comment,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Store Remarks & Observations",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "View, sort, filter, and reply to customer feedback, follow-up remarks, or observations from store visits.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = onClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("btn_open_remarks_manager"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFF9800),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Open Remarks Manager",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
     }

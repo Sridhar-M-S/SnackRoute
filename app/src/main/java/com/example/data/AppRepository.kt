@@ -23,8 +23,21 @@ class AppRepository(
     private val dynamicCostDao: DynamicCostDao,
     private val shopRemarkDao: ShopRemarkDao,
     private val businessExpenseDao: BusinessExpenseDao,
-    private val productCostDao: ProductCostDao
+    private val productCostDao: ProductCostDao,
+    private val salesTargetDao: SalesTargetDao = database.salesTargetDao()
 ) {
+    // --- Sales Target Queries ---
+    fun getSalesTargetsForDate(date: String): Flow<List<SalesTargetItem>> = salesTargetDao.getTargetsForDate(date)
+    fun getAllSalesTargets(): Flow<List<SalesTargetItem>> = salesTargetDao.getAllTargets()
+    suspend fun insertSalesTargetItem(item: SalesTargetItem): Long = salesTargetDao.insertTargetItem(item)
+    suspend fun updateSalesTargetItem(item: SalesTargetItem) = salesTargetDao.updateTargetItem(item)
+    suspend fun deleteSalesTargetItem(item: SalesTargetItem) = salesTargetDao.deleteTargetItem(item)
+    suspend fun deleteSalesTargetItemById(id: Int) = salesTargetDao.deleteTargetItemById(id)
+    suspend fun saveTodaySalesTargets(targetDate: String, items: List<SalesTargetItem>) {
+        salesTargetDao.deleteTargetsForDate(targetDate)
+        salesTargetDao.insertTargetItems(items)
+    }
+
     // --- Product Cost Calculator Queries ---
     val allProductCostIngredients: Flow<List<ProductCostIngredient>> = productCostDao.getAllIngredients()
     suspend fun insertProductCostIngredient(ingredient: ProductCostIngredient): Long = productCostDao.insertIngredient(ingredient)
@@ -63,6 +76,7 @@ class AppRepository(
     suspend fun deleteRemarkById(id: Int) = shopRemarkDao.deleteRemarkById(id)
     suspend fun getRemarkBySalesId(salesId: Int): ShopRemark? = shopRemarkDao.getRemarkBySalesId(salesId)
     suspend fun deleteRemarkBySalesId(salesId: Int) = shopRemarkDao.deleteRemarkBySalesId(salesId)
+    suspend fun deleteRemarksByShopNumber(shopNumber: String) = shopRemarkDao.deleteRemarksByShopNumber(shopNumber)
 
     // --- Error Log Queries ---
     val allErrorLogs: Flow<List<ErrorLog>> = errorLogDao.getAllErrorLogs()
@@ -84,6 +98,16 @@ class AppRepository(
     suspend fun insertDailyTarget(target: DailyTarget) = dailyTargetDao.insertDailyTarget(target)
 
     suspend fun updateTimetableEntry(entry: TimetableEntry) = timetableDao.updateTimetableEntry(entry)
+    suspend fun getDirectTimetableEntries(): List<TimetableEntry> = timetableDao.getDirectTimetableEntries()
+    suspend fun insertTimetableEntries(entries: List<TimetableEntry>) = timetableDao.insertTimetableEntries(entries)
+
+    suspend fun resetAllTimetableEntries() {
+        val days = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        val resetEntries = days.map { day ->
+            TimetableEntry(dayOfWeek = day, locationNumbers = emptyList(), notes = "")
+        }
+        timetableDao.insertTimetableEntries(resetEntries)
+    }
 
     suspend fun initializeTimetableIfNeeded() {
         val existing = timetableDao.getDirectTimetableEntries()

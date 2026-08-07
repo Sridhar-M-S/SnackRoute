@@ -65,6 +65,20 @@ fun LocationsScreen(
     var locNumError by remember { mutableStateOf<String?>(null) }
     var locNameError by remember { mutableStateOf<String?>(null) }
 
+    val openAddLocationForm by viewModel.openAddLocationForm.collectAsStateWithLifecycle()
+
+    LaunchedEffect(openAddLocationForm) {
+        if (openAddLocationForm) {
+            selectedLocationForEdit = null
+            locNumField = ""
+            locNameField = ""
+            locNumError = null
+            locNameError = null
+            showAddEditDialog = true
+            viewModel.clearOpenAddLocation()
+        }
+    }
+
     // --- Search & Filtering Logic ---
     LaunchedEffect(searchQuery, sortBy, sortAscending) {
         listState.scrollToItem(0)
@@ -93,17 +107,6 @@ fun LocationsScreen(
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    } else {
-                        IconButton(
-                            onClick = onOpenTimetable,
-                            modifier = Modifier.testTag("open_timetable_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DateRange,
-                                contentDescription = "Weekly Timetable",
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }

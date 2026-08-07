@@ -253,6 +253,17 @@ data class ProductCostCalculation(
     val otherExpensesJson: String // Contains JSON details of other expenses used
 )
 
+@Entity(tableName = "sales_target_items")
+data class SalesTargetItem(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val targetDate: String, // "yyyy-MM-dd"
+    val productName: String,
+    val productCategory: String,
+    val sellingPrice: Double,
+    val targetPackets: Int,
+    val targetAmount: Double = sellingPrice * targetPackets
+)
+
 
 
 

@@ -50,11 +50,12 @@ fun RemarksScreen(
     var selectedLocationFilter by remember { mutableStateOf<String?>(null) }
     var selectedStatusFilter by remember { mutableStateOf<String?>(null) }
 
-    // Dialogue State for Add/Edit/Reply
+    // Dialogue State for Add/Edit/Reply/Delete
     var isAddRemarkDialogOpen by remember { mutableStateOf(false) }
     var isEditRemarkDialogOpen by remember { mutableStateOf(false) }
     var isReplyDialogOpen by remember { mutableStateOf(false) }
     var selectedRemarkForAction by remember { mutableStateOf<ShopRemark?>(null) }
+    var remarkToDelete by remember { mutableStateOf<ShopRemark?>(null) }
 
     // Dropdown States for filters
     var isShopDropdownExpanded by remember { mutableStateOf(false) }
@@ -519,7 +520,7 @@ fun RemarksScreen(
 
                                     // Delete Button
                                     IconButton(
-                                        onClick = { viewModel.deleteRemark(remark) },
+                                        onClick = { remarkToDelete = remark },
                                         modifier = Modifier.testTag("btn_delete_${remark.id}").size(32.dp)
                                     ) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete Remark", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
@@ -823,4 +824,34 @@ fun RemarksScreen(
             }
         )
     }
+
+    // 4. Delete Confirmation Dialog
+    if (remarkToDelete != null) {
+        val targetRemark = remarkToDelete!!
+        AlertDialog(
+            onDismissRequest = { remarkToDelete = null },
+            title = { Text("Delete Shop Remark", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Are you sure you want to permanently delete this remark for \"${targetRemark.shopName}\"? This action cannot be undone.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteRemark(targetRemark)
+                        remarkToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("btn_confirm_delete_remark")
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { remarkToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
+

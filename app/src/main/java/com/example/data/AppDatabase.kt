@@ -26,9 +26,10 @@ import androidx.room.TypeConverters
         ShopRemark::class,
         BusinessExpense::class,
         ProductCostIngredient::class,
-        ProductCostCalculation::class
+        ProductCostCalculation::class,
+        SalesTargetItem::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -47,6 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun shopRemarkDao(): ShopRemarkDao
     abstract fun businessExpenseDao(): BusinessExpenseDao
     abstract fun productCostDao(): ProductCostDao
+    abstract fun salesTargetDao(): SalesTargetDao
 
     companion object {
         @Volatile

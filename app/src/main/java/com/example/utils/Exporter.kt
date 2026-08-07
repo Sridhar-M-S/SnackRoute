@@ -2825,7 +2825,8 @@ object Exporter {
         remarksList: List<ShopRemark>,
         isDynamicProfitEnabled: Boolean,
         productCostIngredients: List<com.example.data.ProductCostIngredient> = emptyList(),
-        productCostCalculations: List<com.example.data.ProductCostCalculation> = emptyList()
+        productCostCalculations: List<com.example.data.ProductCostCalculation> = emptyList(),
+        timetableEntries: List<com.example.data.TimetableEntry> = emptyList()
     ) {
         val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
         val file = File(context.cacheDir, fileName)
@@ -3264,6 +3265,26 @@ object Exporter {
                 pCostCalcsSheet.setColumnWidth(i, 5000)
             }
 
+            // --- 11d. Weekly Timetable Sheet ---
+            val timetableSheet = workbook.createSheet("Weekly Timetable")
+            val timetableHeaders = listOf("Day of Week", "Location Numbers", "Notes")
+            val timetableHeaderRow = timetableSheet.createRow(0)
+            for (i in timetableHeaders.indices) {
+                val cell = timetableHeaderRow.createCell(i)
+                cell.setCellValue(timetableHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in timetableEntries) {
+                val row = timetableSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.dayOfWeek)
+                row.createCell(1).setCellValue(item.locationNumbers.joinToString(","))
+                row.createCell(2).setCellValue(item.notes)
+            }
+            for (i in timetableHeaders.indices) {
+                timetableSheet.setColumnWidth(i, 6000)
+            }
+
             // --- 12. Settings Sheet ---
             val settingsSheet = workbook.createSheet("Settings")
             val settingsHeaders = listOf("Setting Key", "Setting Value")
@@ -3569,6 +3590,45 @@ object Exporter {
                         )
                     )
                 }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun importWeeklyTimetable(context: Context, workbook: Workbook, sheet: Sheet): List<com.example.data.TimetableEntry> {
+        val list = mutableListOf<com.example.data.TimetableEntry>()
+        try {
+            val headerRow = sheet.getRow(0) ?: return emptyList()
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum.toInt()) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
+                }
+            }
+            val dayIdx = headerMap["day of week"] ?: headerMap["day"] ?: headerMap["dayofweek"] ?: 0
+            val locIdx = headerMap["location numbers"] ?: headerMap["locations"] ?: headerMap["locationnumbers"] ?: 1
+            val notesIdx = headerMap["notes"] ?: headerMap["remark"] ?: headerMap["remarks"] ?: 2
+
+            for (r in 1..sheet.lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                val dayOfWeek = getCellValueAsString(row, dayIdx)?.trim() ?: ""
+                if (dayOfWeek.isEmpty()) continue
+
+                val locsStr = getCellValueAsString(row, locIdx)?.trim() ?: ""
+                val locList = locsStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                val notes = getCellValueAsString(row, notesIdx)?.trim() ?: ""
+
+                list.add(
+                    com.example.data.TimetableEntry(
+                        dayOfWeek = dayOfWeek,
+                        locationNumbers = locList,
+                        notes = notes
+                    )
+                )
             }
         } catch (e: Exception) {
             e.printStackTrace()

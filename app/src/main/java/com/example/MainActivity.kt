@@ -172,8 +172,12 @@ class MainActivity : ComponentActivity() {
                                     Box(modifier = if (currentTab == "Dashboard") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         DashboardScreen(
                                             viewModel = viewModel,
+                                            isCurrentTab = (currentTab == "Dashboard"),
                                             onNavigateToTab = { navigateToChildTab(it) },
-                                            onQuickAddSales = { navigateToChildTab("Sales") },
+                                            onQuickAddSales = {
+                                                viewModel.triggerOpenAddSales()
+                                                navigateToChildTab("Sales")
+                                            },
                                             onOpenChat = { isAiChatOpen = true },
                                             onOpenTimetable = { isTimetableOpen = true },
                                             onOpenDailyTasks = { isDailyTasksOpen = true }
@@ -255,6 +259,14 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 }
+                                if (navigationHistory.contains("TodaySalesTarget")) {
+                                    Box(modifier = if (currentTab == "TodaySalesTarget") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        TodaySalesTargetScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
+                                        )
+                                    }
+                                }
                                 if (navigationHistory.contains("BusinessExpenses")) {
                                     Box(modifier = if (currentTab == "BusinessExpenses") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         BusinessExpensesScreen(
@@ -284,7 +296,7 @@ class MainActivity : ComponentActivity() {
                                         SalesPlanningScreen(
                                             viewModel = viewModel,
                                             onBack = { navigateBack() },
-                                            onOpenMapRoutePlanner = { navigateToChildTab("MapRoutePlanner") }
+                                            onNavigateToTab = { navigateToChildTab(it) }
                                         )
                                     }
                                 }
@@ -305,15 +317,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 }
-                                if (navigationHistory.contains("MapRoutePlanner")) {
-                                    Box(modifier = if (currentTab == "MapRoutePlanner") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
-                                        MapRoutePlannerScreen(
-                                            viewModel = viewModel,
-                                            onBack = { navigateBack() },
-                                            showBackButton = true
-                                        )
-                                    }
-                                }
+
                                 if (navigationHistory.contains("ProductCostCalculator")) {
                                     Box(modifier = if (currentTab == "ProductCostCalculator") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         com.example.ui.screens.ProductCostCalculatorScreen(
@@ -340,7 +344,14 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize(),
                             color = MaterialTheme.colorScheme.background
                         ) {
-                            WeeklyTimetableScreen(viewModel = viewModel, onClose = { isTimetableOpen = false })
+                            WeeklyTimetableScreen(
+                                viewModel = viewModel,
+                                onClose = { isTimetableOpen = false },
+                                onNavigateToTab = { tab ->
+                                    isTimetableOpen = false
+                                    navigateToChildTab(tab)
+                                }
+                            )
                         }
                     }
 

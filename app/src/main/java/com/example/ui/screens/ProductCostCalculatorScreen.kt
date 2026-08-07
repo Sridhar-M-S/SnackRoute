@@ -197,8 +197,8 @@ object UnitSystem {
         return when {
             u.contains("kilogram") || u.contains("kg") -> "kg"
             u.contains("gram") || u.contains("g") -> "g"
-            u.contains("liter") || u.contains("l") -> "l"
             u.contains("milliliter") || u.contains("ml") -> "ml"
+            u.contains("liter") || u.contains("l") -> "l"
             u.contains("kilometer") || u.contains("km") -> "km"
             u.contains("meter") || u.contains("m") -> "m"
             u.contains("kilowatt hour") || u.contains("kwh") -> "kwh"

@@ -113,12 +113,34 @@ fun SalesScreen(
     val extCategory by viewModel.salesFilterCategory.collectAsStateWithLifecycle()
     val extProductName by viewModel.salesFilterProductName.collectAsStateWithLifecycle()
     val extSellingPrice by viewModel.salesFilterSellingPrice.collectAsStateWithLifecycle()
+    val extStartDate by viewModel.salesFilterStartDate.collectAsStateWithLifecycle()
+    val extEndDate by viewModel.salesFilterEndDate.collectAsStateWithLifecycle()
+    val salesFilterTodayTrigger by viewModel.salesFilterTodayTrigger.collectAsStateWithLifecycle()
 
     LaunchedEffect(extCategory, extProductName, extSellingPrice) {
         if (extCategory != null || extProductName != null || extSellingPrice != null) {
             filterCategory = extCategory
             filterProductName = extProductName
             filterSellingPrice = extSellingPrice
+            filterExpanded = true
+        }
+    }
+
+    LaunchedEffect(salesFilterTodayTrigger, extStartDate, extEndDate) {
+        if (salesFilterTodayTrigger) {
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            filterStartDate = extStartDate ?: cal.timeInMillis
+            filterEndDate = extEndDate ?: cal.timeInMillis
+            filterExpanded = true
+            viewModel.clearSalesTodayTrigger()
+        } else if (extStartDate != null || extEndDate != null) {
+            if (extStartDate != null) filterStartDate = extStartDate
+            if (extEndDate != null) filterEndDate = extEndDate
             filterExpanded = true
         }
     }
@@ -217,6 +239,31 @@ fun SalesScreen(
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val prefilledSaleData by viewModel.prefilledSaleData.collectAsStateWithLifecycle()
+    val openAddSalesForm by viewModel.openAddSalesForm.collectAsStateWithLifecycle()
+
+    LaunchedEffect(openAddSalesForm) {
+        if (openAddSalesForm) {
+            selectedSalesForEdit = null
+            isShopLocked = false
+            entryDateMillis = System.currentTimeMillis()
+            selectedShopNumber = ""
+            val defaultProdName = products.filter { it.status == "Active" }.firstOrNull()?.productName 
+                ?: products.firstOrNull()?.productName 
+                ?: ""
+            
+            saleItems = listOf(
+                SaleItemState(
+                    productName = defaultProdName
+                )
+            )
+            payStatus = "Paid"
+            remarks = ""
+            shopError = null
+            showAddEditScreen = true
+            
+            viewModel.clearOpenAddSales()
+        }
+    }
 
     LaunchedEffect(prefilledSaleData) {
         if (prefilledSaleData != null) {
@@ -337,17 +384,6 @@ fun SalesScreen(
                                 Icon(
                                     imageVector = Icons.Default.ArrowBack,
                                     contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        } else {
-                            IconButton(
-                                onClick = onOpenTimetable,
-                                modifier = Modifier.testTag("open_timetable_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DateRange,
-                                    contentDescription = "Weekly Timetable",
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
@@ -615,6 +651,7 @@ fun SalesScreen(
                                     viewModel.setSalesFilterShopNumber(null)
                                     viewModel.setSalesSearchQuery("")
                                     viewModel.clearSalesBreakdownFilters()
+                                    viewModel.clearSalesDateFilter()
                                     filterLocationNumber = null
                                     filterProductName = null
                                     filterCategory = null
@@ -848,11 +885,7 @@ fun SalesScreen(
                                     shopError = null
                                     isShopLocked = false
 
-                                    val sessionSales = if (!sale.sessionId.isNullOrEmpty()) {
-                                        sales.filter { it.sessionId == sale.sessionId }
-                                    } else {
-                                        listOf(sale)
-                                    }
+                                    val sessionSales = listOf(sale)
 
                                     saleItems = sessionSales.map { s ->
                                         android.util.Log.d("SalesEdit", "Profit value loaded into the Edit Sales screen: id=${s.id}, productName=${s.productName}, profitPerPacket=${s.profitPerPacket}")
@@ -976,106 +1009,160 @@ fun SalesScreen(
                             }
                         }
 
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            OutlinedTextField(
-                                value = if (selectedShopNumber.isEmpty()) "Select Store" else "$activeShopName (${selectedShopNumber})",
-                                onValueChange = {},
-                                label = { Text("Shop Master Store*") },
-                                readOnly = true,
-                                trailingIcon = {
-                                    if (isShopLocked) {
-                                        IconButton(onClick = { isShopLocked = false }) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Change Shop")
-                                        }
-                                    } else {
-                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                    }
-                                },
-                                isError = shopError != null,
-                                supportingText = shopError?.let { { Text(it) } },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            if (!isShopLocked) {
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .clickable { 
-                                            shopSearchQuery = ""
-                                            shopExpanded = true 
-                                        }
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = shopExpanded,
-                                onDismissRequest = { 
-                                    shopExpanded = false 
-                                    shopSearchQuery = ""
-                                },
-                                properties = PopupProperties(focusable = true),
-                                modifier = Modifier
-                                    .fillMaxWidth(0.9f)
-                                    .heightIn(max = 400.dp)
-                            ) {
-                                // Search field inside dropdown
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
                                 OutlinedTextField(
-                                    value = shopSearchQuery,
-                                    onValueChange = { shopSearchQuery = it },
-                                    label = { Text("Search shop by name or number...") },
-                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    value = if (selectedShopNumber.isEmpty()) "Select Store" else "$activeShopName (${selectedShopNumber})",
+                                    onValueChange = {},
+                                    label = { Text("Shop Master Store*") },
+                                    readOnly = true,
                                     trailingIcon = {
-                                        if (shopSearchQuery.isNotEmpty()) {
-                                            IconButton(onClick = { shopSearchQuery = "" }) {
-                                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                        if (isShopLocked) {
+                                            IconButton(onClick = { isShopLocked = false }) {
+                                                Icon(Icons.Default.Edit, contentDescription = "Change Shop")
                                             }
+                                        } else {
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                                         }
                                     },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                                        .testTag("shop_dropdown_search_input"),
-                                    singleLine = true
+                                    isError = shopError != null,
+                                    supportingText = shopError?.let { { Text(it) } },
+                                    modifier = Modifier.fillMaxWidth()
                                 )
-                                
-                                HorizontalDivider(modifier = Modifier.padding(bottom = 4.dp))
-                                
-                                if (filteredShops.isEmpty()) {
+                                if (!isShopLocked) {
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .clickable { 
+                                                shopSearchQuery = ""
+                                                shopExpanded = true 
+                                            }
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = shopExpanded,
+                                    onDismissRequest = { 
+                                        shopExpanded = false 
+                                        shopSearchQuery = ""
+                                    },
+                                    properties = PopupProperties(focusable = true),
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.9f)
+                                        .heightIn(max = 400.dp)
+                                ) {
+                                    // "+ Add New Store" option at the top of dropdown
                                     DropdownMenuItem(
                                         text = {
-                                            Text(
-                                                text = "No shops found",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    text = "Add New Store",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                )
+                                            }
                                         },
-                                        onClick = {},
-                                        enabled = false
+                                        onClick = {
+                                            shopExpanded = false
+                                            viewModel.triggerOpenAddShop()
+                                            onNavigateToTab("Shops")
+                                        },
+                                        modifier = Modifier.testTag("dropdown_add_new_store_item")
                                     )
-                                } else {
-                                    filteredShops.forEach { s ->
-                                        val isSelected = s.shopNumber == selectedShopNumber
+
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                    // Search field inside dropdown
+                                    OutlinedTextField(
+                                        value = shopSearchQuery,
+                                        onValueChange = { shopSearchQuery = it },
+                                        label = { Text("Search shop by name or number...") },
+                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        trailingIcon = {
+                                            if (shopSearchQuery.isNotEmpty()) {
+                                                IconButton(onClick = { shopSearchQuery = "" }) {
+                                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            .testTag("shop_dropdown_search_input"),
+                                        singleLine = true
+                                    )
+                                    
+                                    HorizontalDivider(modifier = Modifier.padding(bottom = 4.dp))
+                                    
+                                    if (filteredShops.isEmpty()) {
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
-                                                    text = "${s.storeName} (${s.shopNumber})",
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                    text = "No shops found",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             },
-                                            onClick = {
-                                                selectedShopNumber = s.shopNumber
-                                                shopExpanded = false
-                                                shopError = null
-                                                shopSearchQuery = ""
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(
-                                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                                                    else Color.Transparent
-                                                )
+                                            onClick = {},
+                                            enabled = false
                                         )
+                                    } else {
+                                        filteredShops.forEach { s ->
+                                            val isSelected = s.shopNumber == selectedShopNumber
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "${s.storeName} (${s.shopNumber})",
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                },
+                                                onClick = {
+                                                    selectedShopNumber = s.shopNumber
+                                                    shopExpanded = false
+                                                    shopError = null
+                                                    shopSearchQuery = ""
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(
+                                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                        else Color.Transparent
+                                                    )
+                                            )
+                                        }
                                     }
                                 }
+                            }
+
+                            // Location icon button to quickly find nearest shops in Shop Master
+                            FilledTonalIconButton(
+                                onClick = {
+                                    viewModel.triggerOpenNearestShopTab()
+                                    onNavigateToTab("Shops")
+                                },
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .testTag("find_nearest_shop_icon_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = "Find Nearest Shop",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }

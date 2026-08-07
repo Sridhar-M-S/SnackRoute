@@ -198,18 +198,7 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Settings & Tools", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onOpenTimetable,
-                        modifier = Modifier.testTag("open_timetable_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DateRange,
-                            contentDescription = "Weekly Timetable",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                },
+                navigationIcon = {},
                 actions = {
                     IconButton(
                         onClick = onOpenChat,

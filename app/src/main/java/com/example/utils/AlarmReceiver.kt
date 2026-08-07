@@ -130,6 +130,9 @@ class AlarmReceiver : BroadcastReceiver() {
                         }
                     }
 
+                    // 3. Weekly Timetable Auto-Reset (Sunday 11:00 PM)
+                    checkWeeklyTimetableReset(context, db)
+
                     Log.d(TAG, "Finished daily alarm task. Generated $generatedCount tasks, notified $reminderNotifiedCount overdue sales.")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in AlarmReceiver: ${e.message}", e)
@@ -166,5 +169,46 @@ class AlarmReceiver : BroadcastReceiver() {
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         return cal.timeInMillis
+    }
+
+    private suspend fun checkWeeklyTimetableReset(context: Context, db: AppDatabase) {
+        try {
+            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+            val lastResetTimestamp = prefs.getLong("last_timetable_sunday_reset_timestamp", 0L)
+            val now = System.currentTimeMillis()
+
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = now
+                set(Calendar.HOUR_OF_DAY, 23)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
+                cal.add(Calendar.DAY_OF_MONTH, -1)
+            }
+            if (now < cal.timeInMillis) {
+                cal.add(Calendar.DAY_OF_MONTH, -7)
+            }
+            val latestSunday11PM = cal.timeInMillis
+
+            if (lastResetTimestamp == 0L) {
+                prefs.edit().putLong("last_timetable_sunday_reset_timestamp", latestSunday11PM).apply()
+            } else if (latestSunday11PM > lastResetTimestamp) {
+                val days = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+                val resetEntries = days.map { day ->
+                    com.example.data.TimetableEntry(dayOfWeek = day, locationNumbers = emptyList(), notes = "")
+                }
+                db.timetableDao().insertTimetableEntries(resetEntries)
+                prefs.edit().putLong("last_timetable_sunday_reset_timestamp", latestSunday11PM).apply()
+
+                val title = "Weekly Timetable Reset"
+                val body = "Weekly timetable schedule was automatically reset for the new week (Sunday 11:00 PM)."
+                NotificationHelper.showNotification(context, title, body)
+                saveInAppNotification(context, title, body)
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmReceiver", "Failed weekly timetable reset check: ${e.message}", e)
+        }
     }
 }

@@ -39,14 +39,16 @@ import java.util.Locale
 fun SalesPlanningScreen(
     viewModel: AppViewModel,
     onBack: () -> Unit,
-    onOpenMapRoutePlanner: (() -> Unit)? = null
+    onNavigateToTab: (String) -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val products by viewModel.products.collectAsStateWithLifecycle()
     val productPrices by viewModel.allPrices.collectAsStateWithLifecycle()
     val allRemarks by viewModel.allRemarks.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
+    val sales by viewModel.sales.collectAsStateWithLifecycle()
 
     // Map location number to location name for easy lookup
     val locationMap = remember(locations) {
@@ -65,12 +67,51 @@ fun SalesPlanningScreen(
     var collapsedTodayLocations by remember { mutableStateOf(setOf<String>()) }
     var expandedMissedLocations by remember { mutableStateOf(setOf<String>()) }
 
-    // Partition reminders
-    val todayReminders = remember(dueReminders) {
-        dueReminders.filter { it.daysSince == it.interval }
+    // Multi-Filter State
+    var filterExpanded by remember { mutableStateOf(true) }
+    var filterStartDate by remember { mutableStateOf<Long?>(null) }
+    var filterEndDate by remember { mutableStateOf<Long?>(null) }
+    var filterLocationNumber by remember { mutableStateOf<String?>(null) }
+    var filterPaymentStatus by remember { mutableStateOf<String?>(null) } // "Paid", "Pending", "Partially Paid"
+
+    val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+
+    val filteredDueReminders = remember(dueReminders, sales, filterStartDate, filterEndDate, filterLocationNumber, filterPaymentStatus) {
+        dueReminders.filter { reminder ->
+            val matchLocation = filterLocationNumber == null || reminder.shop.locationNumber == filterLocationNumber
+            
+            val matchDate = if (filterStartDate == null && filterEndDate == null) {
+                true
+            } else {
+                val start = filterStartDate ?: 0L
+                val end = (filterEndDate ?: Long.MAX_VALUE) + 86399999L
+                val shopSales = sales.filter { it.shopNumber == reminder.shop.shopNumber }
+                (reminder.lastSaleDate in start..end) || shopSales.any { it.entryDate in start..end }
+            }
+
+            val matchPaymentStatus = if (filterPaymentStatus == null) {
+                true
+            } else {
+                val shopSales = sales.filter { it.shopNumber == reminder.shop.shopNumber }
+                val latestSale = shopSales.maxByOrNull { it.entryDate }
+                if (shopSales.isEmpty()) {
+                    filterPaymentStatus.equals("Pending", ignoreCase = true)
+                } else {
+                    shopSales.any { it.status.equals(filterPaymentStatus, ignoreCase = true) } ||
+                            (latestSale != null && latestSale.status.equals(filterPaymentStatus, ignoreCase = true))
+                }
+            }
+
+            matchLocation && matchDate && matchPaymentStatus
+        }
     }
-    val missedReminders = remember(dueReminders) {
-        dueReminders.filter { it.daysSince > it.interval }
+
+    // Partition reminders using filtered reminders
+    val todayReminders = remember(filteredDueReminders) {
+        filteredDueReminders.filter { it.daysSince == it.interval }
+    }
+    val missedReminders = remember(filteredDueReminders) {
+        filteredDueReminders.filter { it.daysSince > it.interval }
     }
 
     // Group by location
@@ -100,16 +141,7 @@ fun SalesPlanningScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                actions = {
-                    if (onOpenMapRoutePlanner != null) {
-                        IconButton(
-                            onClick = onOpenMapRoutePlanner,
-                            modifier = Modifier.testTag("sales_planning_map_button")
-                        ) {
-                            Icon(Icons.Default.Map, contentDescription = "Map Planner")
-                        }
-                    }
-                },
+                actions = {},
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -183,6 +215,245 @@ fun SalesPlanningScreen(
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
                                 )
+                            }
+                        }
+                    }
+                }
+
+                // Multi-Filter Card Item
+                item(key = "sales_planning_filter_card_item") {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("sales_planning_filter_card"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val activeFilterCount = (if (filterStartDate != null || filterEndDate != null) 1 else 0) +
+                                    (if (filterLocationNumber != null) 1 else 0) +
+                                    (if (filterPaymentStatus != null) 1 else 0)
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { filterExpanded = !filterExpanded },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FilterList,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Filter Preparation & Reminders",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (activeFilterCount > 0) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                            Text("$activeFilterCount", color = Color.White, modifier = Modifier.padding(2.dp))
+                                        }
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (activeFilterCount > 0) {
+                                        TextButton(
+                                            onClick = {
+                                                filterStartDate = null
+                                                filterEndDate = null
+                                                filterLocationNumber = null
+                                                filterPaymentStatus = null
+                                            },
+                                            modifier = Modifier.testTag("clear_sales_planning_filters")
+                                        ) {
+                                            Text("Clear All", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = if (filterExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(visible = filterExpanded) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    HorizontalDivider()
+
+                                    // 1. Date Range Filter
+                                    Text(
+                                        text = "Date Range Filter (From Date to Date):",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val cal = Calendar.getInstance()
+                                                filterStartDate?.let { cal.timeInMillis = it }
+                                                android.app.DatePickerDialog(
+                                                    context,
+                                                    { _, year, month, dayOfMonth ->
+                                                        val c = Calendar.getInstance()
+                                                        c.set(year, month, dayOfMonth, 0, 0, 0)
+                                                        c.set(Calendar.MILLISECOND, 0)
+                                                        filterStartDate = c.timeInMillis
+                                                    },
+                                                    cal.get(Calendar.YEAR),
+                                                    cal.get(Calendar.MONTH),
+                                                    cal.get(Calendar.DAY_OF_MONTH)
+                                                ).show()
+                                            },
+                                            modifier = Modifier.weight(1f).testTag("filter_from_date_button"),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = filterStartDate?.let { "From: ${dateFormat.format(Date(it))}" } ?: "From Date",
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                val cal = Calendar.getInstance()
+                                                filterEndDate?.let { cal.timeInMillis = it }
+                                                android.app.DatePickerDialog(
+                                                    context,
+                                                    { _, year, month, dayOfMonth ->
+                                                        val c = Calendar.getInstance()
+                                                        c.set(year, month, dayOfMonth, 23, 59, 59)
+                                                        c.set(Calendar.MILLISECOND, 999)
+                                                        filterEndDate = c.timeInMillis
+                                                    },
+                                                    cal.get(Calendar.YEAR),
+                                                    cal.get(Calendar.MONTH),
+                                                    cal.get(Calendar.DAY_OF_MONTH)
+                                                ).show()
+                                            },
+                                            modifier = Modifier.weight(1f).testTag("filter_to_date_button"),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = filterEndDate?.let { "To: ${dateFormat.format(Date(it))}" } ?: "To Date",
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    // 2. Location & Payment Status Filters
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        // Location Dropdown
+                                        var locMenuExpanded by remember { mutableStateOf(false) }
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            OutlinedButton(
+                                                onClick = { locMenuExpanded = true },
+                                                modifier = Modifier.fillMaxWidth().testTag("filter_location_button"),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                val currentLocName = locations.find { it.locationNumber == filterLocationNumber }?.locationName
+                                                Text(
+                                                    text = currentLocName ?: "All Locations",
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = locMenuExpanded,
+                                                onDismissRequest = { locMenuExpanded = false }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("All Locations", fontWeight = if (filterLocationNumber == null) FontWeight.Bold else FontWeight.Normal) },
+                                                    onClick = {
+                                                        filterLocationNumber = null
+                                                        locMenuExpanded = false
+                                                    }
+                                                )
+                                                locations.forEach { loc ->
+                                                    DropdownMenuItem(
+                                                        text = { Text("${loc.locationNumber} - ${loc.locationName}", fontWeight = if (filterLocationNumber == loc.locationNumber) FontWeight.Bold else FontWeight.Normal) },
+                                                        onClick = {
+                                                            filterLocationNumber = loc.locationNumber
+                                                            locMenuExpanded = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Payment Status Dropdown
+                                        var statusMenuExpanded by remember { mutableStateOf(false) }
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            OutlinedButton(
+                                                onClick = { statusMenuExpanded = true },
+                                                modifier = Modifier.fillMaxWidth().testTag("filter_payment_status_button"),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = filterPaymentStatus ?: "All Statuses",
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = statusMenuExpanded,
+                                                onDismissRequest = { statusMenuExpanded = false }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("All Statuses", fontWeight = if (filterPaymentStatus == null) FontWeight.Bold else FontWeight.Normal) },
+                                                    onClick = {
+                                                        filterPaymentStatus = null
+                                                        statusMenuExpanded = false
+                                                    }
+                                                )
+                                                listOf("Paid", "Pending", "Partially Paid").forEach { statusOption ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(statusOption, fontWeight = if (filterPaymentStatus == statusOption) FontWeight.Bold else FontWeight.Normal) },
+                                                        onClick = {
+                                                            filterPaymentStatus = statusOption
+                                                            statusMenuExpanded = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -384,7 +655,11 @@ fun SalesPlanningScreen(
                                         },
                                         locName = locName,
                                         allRemarks = allRemarks,
-                                        onMarkCompleted = { viewModel.markReminderCompleted(reminder.shop.shopNumber) }
+                                        onMarkCompleted = { viewModel.markReminderCompleted(reminder.shop.shopNumber) },
+                                        onOpenInShopMaster = {
+                                            viewModel.setPrefilledShopSearchQuery(reminder.shop.storeName)
+                                            onNavigateToTab("Shops")
+                                        }
                                     )
                                 }
                             }
@@ -525,7 +800,11 @@ fun SalesPlanningScreen(
                                         },
                                         locName = locName,
                                         allRemarks = allRemarks,
-                                        onMarkCompleted = { viewModel.markReminderCompleted(reminder.shop.shopNumber) }
+                                        onMarkCompleted = { viewModel.markReminderCompleted(reminder.shop.shopNumber) },
+                                        onOpenInShopMaster = {
+                                            viewModel.setPrefilledShopSearchQuery(reminder.shop.storeName)
+                                            onNavigateToTab("Shops")
+                                        }
                                     )
                                 }
                             }
@@ -721,7 +1000,8 @@ fun ReminderCard(
     onToggleExpand: () -> Unit,
     locName: String,
     allRemarks: List<ShopRemark>,
-    onMarkCompleted: () -> Unit
+    onMarkCompleted: () -> Unit,
+    onOpenInShopMaster: () -> Unit = {}
 ) {
     val shop = reminder.shop
     Card(
@@ -780,7 +1060,24 @@ fun ReminderCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Shop Master Shortcut Icon Button
+                IconButton(
+                    onClick = onOpenInShopMaster,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("open_shop_master_${shop.shopNumber}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Storefront,
+                        contentDescription = "Open ${shop.storeName} in Shop Master",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
 
                 // Done button for individual dismissal
                 IconButton(

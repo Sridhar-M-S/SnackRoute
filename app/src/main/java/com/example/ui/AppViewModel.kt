@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.widget.Toast
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
@@ -543,6 +544,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val allExpensesList: StateFlow<List<com.example.data.BusinessExpense>> = repository.allExpenses
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // --- Today's Sales Target State & Flows ---
+    val todayDateFormattedStr: String
+        get() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    val todaySalesTargets: StateFlow<List<com.example.data.SalesTargetItem>> = repository.getSalesTargetsForDate(todayDateFormattedStr)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSalesTargets: StateFlow<List<com.example.data.SalesTargetItem>> = repository.getAllSalesTargets()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun saveTodaySalesTargets(targetDate: String, items: List<com.example.data.SalesTargetItem>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.saveTodaySalesTargets(targetDate, items)
+        }
+    }
+
+    fun deleteSalesTargetItem(item: com.example.data.SalesTargetItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteSalesTargetItem(item)
+        }
+    }
+
     // --- Shop Remarks State & Flows ---
     val allRemarks: StateFlow<List<ShopRemark>> = repository.allRemarks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -585,12 +608,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun editRemarkText(remark: ShopRemark, newText: String) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateRemark(remark.copy(remark = newText))
+            if (remark.salesEntryId != null) {
+                val salesList = repository.allSales.first()
+                val linkedSale = salesList.find { it.id == remark.salesEntryId }
+                if (linkedSale != null) {
+                    repository.updateSales(linkedSale.copy(remarks = newText.ifBlank { null }))
+                }
+            }
         }
     }
 
     fun deleteRemark(remark: ShopRemark) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteRemark(remark)
+            if (remark.salesEntryId != null) {
+                val salesList = repository.allSales.first()
+                val linkedSale = salesList.find { it.id == remark.salesEntryId }
+                if (linkedSale != null && !linkedSale.remarks.isNullOrEmpty()) {
+                    repository.updateSales(linkedSale.copy(remarks = null))
+                }
+            }
         }
     }
 
@@ -1687,6 +1724,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val salesFilterCategory = MutableStateFlow<String?>(null)
     val salesFilterProductName = MutableStateFlow<String?>(null)
     val salesFilterSellingPrice = MutableStateFlow<Double?>(null)
+    val salesFilterStartDate = MutableStateFlow<Long?>(null)
+    val salesFilterEndDate = MutableStateFlow<Long?>(null)
+    private val _salesFilterTodayTrigger = MutableStateFlow(false)
+    val salesFilterTodayTrigger: StateFlow<Boolean> = _salesFilterTodayTrigger.asStateFlow()
+
+    fun setSalesDateFilterToToday() {
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val todayStart = cal.timeInMillis
+        salesFilterStartDate.value = todayStart
+        salesFilterEndDate.value = todayStart
+        _salesFilterTodayTrigger.value = true
+    }
+
+    fun clearSalesTodayTrigger() {
+        _salesFilterTodayTrigger.value = false
+    }
+
+    fun clearSalesDateFilter() {
+        salesFilterStartDate.value = null
+        salesFilterEndDate.value = null
+        _salesFilterTodayTrigger.value = false
+    }
 
     private val _filteredSalesList = MutableStateFlow<List<SalesEntry>>(emptyList())
     val filteredSalesList: StateFlow<List<SalesEntry>> = _filteredSalesList.asStateFlow()
@@ -2234,11 +2298,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     ) { allShops, allSales ->
         allShops.map { shop ->
             val salesForShop = allSales.filter { it.shopNumber == shop.shopNumber }
-            val firstPurchaseDate = salesForShop.minOfOrNull { it.entryDate }
-            val finalStartingDate = firstPurchaseDate ?: shop.startingDate
             val analytics = com.example.utils.RatingCalculator.calculateAnalytics(salesForShop)
             shop.copy(
-                startingDate = finalStartingDate,
                 rating = analytics.currentRating,
                 score = (analytics.currentRating * 20).toInt()
             )
@@ -2262,6 +2323,54 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // Pre-filled search query for Shop Master (Shops screen)
     private val _prefilledShopSearchQuery = MutableStateFlow<String?>(null)
     val prefilledShopSearchQuery: StateFlow<String?> = _prefilledShopSearchQuery.asStateFlow()
+
+    // Open Add Sales Form trigger
+    private val _openAddSalesForm = MutableStateFlow(false)
+    val openAddSalesForm: StateFlow<Boolean> = _openAddSalesForm.asStateFlow()
+
+    fun triggerOpenAddSales() {
+        _openAddSalesForm.value = true
+    }
+
+    fun clearOpenAddSales() {
+        _openAddSalesForm.value = false
+    }
+
+    // Open Add Shop Form trigger
+    private val _openAddShopForm = MutableStateFlow(false)
+    val openAddShopForm: StateFlow<Boolean> = _openAddShopForm.asStateFlow()
+
+    fun triggerOpenAddShop() {
+        _openAddShopForm.value = true
+    }
+
+    fun clearOpenAddShop() {
+        _openAddShopForm.value = false
+    }
+
+    // Open Add Location Form trigger
+    private val _openAddLocationForm = MutableStateFlow(false)
+    val openAddLocationForm: StateFlow<Boolean> = _openAddLocationForm.asStateFlow()
+
+    fun triggerOpenAddLocation() {
+        _openAddLocationForm.value = true
+    }
+
+    fun clearOpenAddLocation() {
+        _openAddLocationForm.value = false
+    }
+
+    // Open Nearest Shop Tab trigger
+    private val _openNearestShopTab = MutableStateFlow(false)
+    val openNearestShopTab: StateFlow<Boolean> = _openNearestShopTab.asStateFlow()
+
+    fun triggerOpenNearestShopTab() {
+        _openNearestShopTab.value = true
+    }
+
+    fun clearOpenNearestShopTab() {
+        _openNearestShopTab.value = false
+    }
 
     fun setShopLocationFilter(locationNumber: String?) {
         _shopLocationFilter.value = locationNumber
@@ -2352,6 +2461,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshNextShopNumber()
         viewModelScope.launch(Dispatchers.IO) {
             repository.initializeTimetableIfNeeded()
+            checkAndPerformSundayTimetableReset(getApplication())
             
             // Populate badges if empty
             if (repository.allBadges.first().isEmpty()) {
@@ -2577,6 +2687,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 oldShop.shopNumber != shop.shopNumber ||
                 oldShop.locationNumber != shop.locationNumber ||
                 oldShop.storeName != shop.storeName ||
+                oldShop.startingDate != shop.startingDate ||
                 oldShop.storeImage != shop.storeImage ||
                 oldShop.rating != shop.rating ||
                 oldShop.googleMapLink != shop.googleMapLink ||
@@ -2607,6 +2718,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
             }
             repository.updateShop(oldShopNumber, resolvedShop)
+
+            if (oldShop != null && oldShop.startingDate != resolvedShop.startingDate) {
+                try {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                    val oldShopDateStr = sdf.format(java.util.Date(oldShop.startingDate))
+                    val newStartingDate = resolvedShop.startingDate
+                    val newCal = java.util.Calendar.getInstance().apply { timeInMillis = newStartingDate }
+
+                    val allSalesList = repository.allSales.first()
+                    val matchingSales = allSalesList.filter { sale ->
+                        sale.shopNumber == resolvedShop.shopNumber &&
+                        sdf.format(java.util.Date(sale.entryDate)) == oldShopDateStr
+                    }
+
+                    for (sale in matchingSales) {
+                        val saleCal = java.util.Calendar.getInstance().apply { timeInMillis = sale.entryDate }
+                        saleCal.set(java.util.Calendar.YEAR, newCal.get(java.util.Calendar.YEAR))
+                        saleCal.set(java.util.Calendar.MONTH, newCal.get(java.util.Calendar.MONTH))
+                        saleCal.set(java.util.Calendar.DAY_OF_MONTH, newCal.get(java.util.Calendar.DAY_OF_MONTH))
+                        val updatedSale = sale.copy(entryDate = saleCal.timeInMillis)
+                        repository.updateSales(updatedSale)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
             refreshNextShopNumber()
             // Run background image cleanup
             com.example.utils.BackupHelper.cleanupUnusedImages(getApplication())
@@ -2636,6 +2774,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.deleteShop(shop)
+            repository.deleteRemarksByShopNumber(shop.shopNumber)
             if (!shop.storeImage.isNullOrEmpty()) {
                 try {
                     val file = File(shop.storeImage)
@@ -3236,6 +3375,64 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun syncShopStartingDateOnSalesChange(
+        shopNumber: String,
+        oldSalesDate: Long?,
+        newSalesDate: Long,
+        excludeSalesIds: List<Int>,
+        excludeSessionId: String?
+    ) {
+        try {
+            val shop = repository.allShops.first().firstOrNull { it.shopNumber == shopNumber } ?: return
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            val shopStartDateStr = sdf.format(java.util.Date(shop.startingDate))
+
+            if (oldSalesDate != null) {
+                val oldSalesDateStr = sdf.format(java.util.Date(oldSalesDate))
+                val newSalesDateStr = sdf.format(java.util.Date(newSalesDate))
+
+                if (shopStartDateStr == oldSalesDateStr && oldSalesDateStr != newSalesDateStr) {
+                    val allSales = repository.allSales.first()
+                    val otherSalesOnOldDate = allSales.filter { sale ->
+                        sale.shopNumber == shopNumber &&
+                        !excludeSalesIds.contains(sale.id) &&
+                        (excludeSessionId.isNullOrEmpty() || sale.sessionId != excludeSessionId) &&
+                        sdf.format(java.util.Date(sale.entryDate)) == oldSalesDateStr
+                    }
+                    if (otherSalesOnOldDate.isEmpty()) {
+                        repository.updateShop(shop.shopNumber, shop.copy(startingDate = newSalesDate))
+                        return
+                    }
+                }
+            }
+
+            if (newSalesDate < shop.startingDate) {
+                repository.updateShop(shop.shopNumber, shop.copy(startingDate = newSalesDate))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private suspend fun syncShopStartingDateOnSalesDelete(shopNumber: String) {
+        try {
+            val shop = repository.allShops.first().firstOrNull { it.shopNumber == shopNumber } ?: return
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            val shopStartDateStr = sdf.format(java.util.Date(shop.startingDate))
+
+            val remainingSales = repository.allSales.first().filter { it.shopNumber == shopNumber }
+            if (remainingSales.isNotEmpty()) {
+                val matchesOldDate = remainingSales.any { sdf.format(java.util.Date(it.entryDate)) == shopStartDateStr }
+                if (!matchesOldDate) {
+                    val minDate = remainingSales.minOf { it.entryDate }
+                    repository.updateShop(shop.shopNumber, shop.copy(startingDate = minDate))
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun addSales(salesEntry: SalesEntry) = viewModelScope.launch(Dispatchers.IO) {
         try {
             val salesBefore = repository.allSales.first()
@@ -3244,6 +3441,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.insertSales(salesEntry)
+            syncShopStartingDateOnSalesChange(salesEntry.shopNumber, null, salesEntry.entryDate, emptyList(), null)
+
             if (!salesEntry.remarks.isNullOrBlank()) {
                 val insertedSale = repository.allSales.first().firstOrNull { 
                     it.shopNumber == salesEntry.shopNumber && it.entryDate == salesEntry.entryDate 
@@ -3287,7 +3486,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val badgesBefore = repository.unlockedBadges.first()
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
+            val oldSale = salesBefore.find { it.id == salesEntry.id }
+            val oldSalesDate = oldSale?.entryDate
+
             repository.updateSales(salesEntry)
+            syncShopStartingDateOnSalesChange(
+                salesEntry.shopNumber,
+                oldSalesDate,
+                salesEntry.entryDate,
+                listOf(salesEntry.id),
+                salesEntry.sessionId
+            )
+
             val existingRemark = repository.getRemarkBySalesId(salesEntry.id)
             if (existingRemark != null) {
                 if (salesEntry.remarks.isNullOrBlank()) {
@@ -3534,6 +3744,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.deleteSales(salesEntry)
+            syncShopStartingDateOnSalesDelete(salesEntry.shopNumber)
+
             val linkedRemark = repository.getRemarkBySalesId(salesEntry.id)
             if (linkedRemark != null) {
                 repository.deleteRemark(linkedRemark)
@@ -3565,7 +3777,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val badgesBefore = repository.unlockedBadges.first()
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
+            val affectedShopNumber = salesBefore.firstOrNull { it.sessionId == sessionId }?.shopNumber
             repository.deleteSalesBySessionId(sessionId)
+            if (affectedShopNumber != null) {
+                syncShopStartingDateOnSalesDelete(affectedShopNumber)
+            }
 
             val salesAfter = repository.allSales.first()
             val shopsAfter = repository.allShops.first()
@@ -3589,13 +3805,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSalesSession(salesList: List<SalesEntry>, oldSessionId: String?, legacyIdToDelete: Int?) = viewModelScope.launch(Dispatchers.IO) {
         try {
             val isEdit = !oldSessionId.isNullOrEmpty() || (legacyIdToDelete != null && legacyIdToDelete != 0)
+            val salesBefore = repository.allSales.first()
+            val oldSalesOfSession = if (isEdit) {
+                if (!oldSessionId.isNullOrEmpty()) {
+                    salesBefore.filter { it.sessionId == oldSessionId }
+                } else {
+                    salesBefore.filter { it.id == legacyIdToDelete }
+                }
+            } else emptyList()
+
             var isChanged = true
             if (isEdit) {
-                val oldSalesOfSession = if (!oldSessionId.isNullOrEmpty()) {
-                    repository.allSales.first().filter { it.sessionId == oldSessionId }
-                } else {
-                    repository.allSales.first().filter { it.id == legacyIdToDelete }
-                }
                 isChanged = !salesListEquals(oldSalesOfSession, salesList)
             }
 
@@ -3604,13 +3824,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val salesBefore = repository.allSales.first()
             val shopsBefore = repository.allShops.first()
             val badgesBefore = repository.unlockedBadges.first()
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.saveSalesSession(salesList, oldSessionId, legacyIdToDelete)
             incrementSessionCombo()
+
+            if (salesList.isNotEmpty()) {
+                val shopNumber = salesList.first().shopNumber
+                val newSalesDate = salesList.first().entryDate
+                val oldSalesDate = oldSalesOfSession.firstOrNull()?.entryDate
+                val excludeSalesIds = oldSalesOfSession.map { it.id }
+                syncShopStartingDateOnSalesChange(
+                    shopNumber,
+                    oldSalesDate,
+                    newSalesDate,
+                    excludeSalesIds,
+                    oldSessionId
+                )
+            }
 
             val salesAfter = repository.allSales.first()
             val shopsAfter = repository.allShops.first()
@@ -4381,6 +4614,7 @@ User Question: $userQuestion
                 val isEnabled = isDynamicProfitEnabled.value
                 val pCostIngredients = repository.getAllProductCostIngredientsDirect()
                 val pCostCalculations = repository.getAllProductCostCalculationsDirect()
+                val timetableList = repository.getDirectTimetableEntries()
 
                 com.example.utils.Exporter.exportAllUnified(
                     context = context,
@@ -4398,7 +4632,8 @@ User Question: $userQuestion
                     remarksList = remarksList,
                     isDynamicProfitEnabled = isEnabled,
                     productCostIngredients = pCostIngredients,
-                    productCostCalculations = pCostCalculations
+                    productCostCalculations = pCostCalculations,
+                    timetableEntries = timetableList
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -4654,6 +4889,20 @@ User Question: $userQuestion
                             repository.insertProductCostCalculations(list)
                         }
                         sheetMessages.add("Product Cost Calculations: Imported ${list.size}")
+                    }
+                }
+
+                // 8d. Weekly Timetable Sheet
+                val timetableSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Weekly Timetable", "Weekly_Timetable", "WeeklyTimetable", "Timetable"))
+                if (timetableSheet != null) {
+                    val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importWeeklyTimetable(context, workbook, timetableSheet)
+                    }
+                    if (list.isNotEmpty()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            repository.insertTimetableEntries(list)
+                        }
+                        sheetMessages.add("Weekly Timetable: Imported ${list.size} days")
                     }
                 }
 
@@ -4932,6 +5181,47 @@ User Question: $userQuestion
             repository.insertSales(updated)
         } catch (e: Exception) {
             triggerError("Validation", "recalculateSalesRecord", "RecalculationError", e.message ?: "", "", e)
+        }
+    }
+
+    fun resetWeeklyTimetable() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.resetAllTimetableEntries()
+        }
+    }
+
+    fun checkAndPerformSundayTimetableReset(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+                val lastResetTimestamp = prefs.getLong("last_timetable_sunday_reset_timestamp", 0L)
+                val now = System.currentTimeMillis()
+
+                val cal = Calendar.getInstance().apply {
+                    timeInMillis = now
+                    set(Calendar.HOUR_OF_DAY, 23)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
+                    cal.add(Calendar.DAY_OF_MONTH, -1)
+                }
+                if (now < cal.timeInMillis) {
+                    cal.add(Calendar.DAY_OF_MONTH, -7)
+                }
+                val latestSunday11PM = cal.timeInMillis
+
+                if (lastResetTimestamp == 0L) {
+                    prefs.edit().putLong("last_timetable_sunday_reset_timestamp", latestSunday11PM).apply()
+                } else if (latestSunday11PM > lastResetTimestamp) {
+                    repository.resetAllTimetableEntries()
+                    prefs.edit().putLong("last_timetable_sunday_reset_timestamp", latestSunday11PM).apply()
+                    Log.d("AppViewModel", "Sunday 11:00 PM auto-reset executed for weekly timetable")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 

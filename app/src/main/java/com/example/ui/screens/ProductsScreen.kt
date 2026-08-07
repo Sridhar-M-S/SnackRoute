@@ -121,17 +121,6 @@ fun ProductsScreen(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
-                    } else {
-                        IconButton(
-                            onClick = onOpenTimetable,
-                            modifier = Modifier.testTag("open_timetable_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DateRange,
-                                contentDescription = "Weekly Timetable",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
                     }
                 },
                 actions = {

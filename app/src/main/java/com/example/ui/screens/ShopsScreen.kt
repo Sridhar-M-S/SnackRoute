@@ -169,6 +169,14 @@ fun ShopsScreen(
         }
     }
 
+    val openNearestShopTab by viewModel.openNearestShopTab.collectAsStateWithLifecycle()
+    LaunchedEffect(openNearestShopTab) {
+        if (openNearestShopTab) {
+            activeSubTab = "Nearest Search"
+            viewModel.clearOpenNearestShopTab()
+        }
+    }
+
     val selectedLocationFilter by viewModel.shopLocationFilter.collectAsStateWithLifecycle()
     var sortBy by remember { mutableStateOf("Name") } // Name, Number, Rating, Date
     var sortAscending by remember { mutableStateOf(true) }
@@ -438,6 +446,31 @@ fun ShopsScreen(
     var locationError by remember { mutableStateOf<String?>(null) }
     var mobileError by remember { mutableStateOf<String?>(null) }
 
+    val openAddShopForm by viewModel.openAddShopForm.collectAsStateWithLifecycle()
+
+    LaunchedEffect(openAddShopForm) {
+        if (openAddShopForm) {
+            selectedShopForEdit = null
+            selectedShopForDetail = null
+            formShopNumber = viewModel.nextShopNumber.value
+            storeName = ""
+            selectedLocationCode = locations.firstOrNull()?.locationNumber ?: ""
+            storeImageUri = null
+            rating = 5f
+            startingDateMillis = System.currentTimeMillis()
+            mobileNumber = ""
+            notes = ""
+            formLatitude = null
+            formLongitude = null
+            shopNumberError = null
+            storeNameError = null
+            locationError = null
+            mobileError = null
+            showAddEditScreen = true
+            viewModel.clearOpenAddShop()
+        }
+    }
+
     // Image selector launcher
     val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -531,17 +564,6 @@ fun ShopsScreen(
                                 Icon(
                                     imageVector = Icons.Default.ArrowBack,
                                     contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        } else {
-                            IconButton(
-                                onClick = onOpenTimetable,
-                                modifier = Modifier.testTag("open_timetable_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DateRange,
-                                    contentDescription = "Weekly Timetable",
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
@@ -1366,6 +1388,8 @@ fun ShopsScreen(
                                 trailingIcon = {
                                     Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                                 },
+                                isError = locationError != null,
+                                supportingText = locationError?.let { { Text(it) } },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Box(
@@ -1378,14 +1402,58 @@ fun ShopsScreen(
                                 onDismissRequest = { locationExpanded = false },
                                 modifier = Modifier.fillMaxWidth(0.9f)
                             ) {
+                                // "+ Add New Location" option in dropdown
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "Add New Location",
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        locationExpanded = false
+                                        viewModel.triggerOpenAddLocation()
+                                        onNavigateToTab("Locations")
+                                    },
+                                    modifier = Modifier.testTag("dropdown_add_new_location_item")
+                                )
+
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
                                 locations.forEach { loc ->
+                                    val isSelected = loc.locationNumber == selectedLocationCode
                                     DropdownMenuItem(
-                                        text = { Text("${loc.locationNumber} - ${loc.locationName}") },
+                                        text = {
+                                            Text(
+                                                text = "${loc.locationNumber} - ${loc.locationName}",
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        },
                                         onClick = {
                                             selectedLocationCode = loc.locationNumber
                                             locationExpanded = false
                                             locationError = null
-                                        }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                else Color.Transparent
+                                            )
                                     )
                                 }
                             }
