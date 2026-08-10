@@ -1515,7 +1515,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 2. Process database Sales Entries
         rawSales.forEach { sale ->
             // --- Validation 2: Profit Greater Than Selling Amount ---
-            if (sale.totalProfit > sale.totalAmount) {
+            if (sale.packetsSold >= 0 && sale.totalProfit > sale.totalAmount) {
                 val issueType = "Profit Greater Than Selling Amount"
                 val issueKey = "sale_${sale.id}_profit_gt"
                 if (issueKey !in dismissedIds) {
@@ -1540,7 +1540,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // --- Validation 3: Negative Profit ---
-            if (sale.totalProfit < 0.0) {
+            if (sale.packetsSold >= 0 && sale.totalProfit < 0.0) {
                 val issueType = "Negative Profit"
                 val issueKey = "sale_${sale.id}_negative"
                 if (issueKey !in dismissedIds) {
@@ -4626,6 +4626,7 @@ User Question: $userQuestion
                 val pCostIngredients = repository.getAllProductCostIngredientsDirect()
                 val pCostCalculations = repository.getAllProductCostCalculationsDirect()
                 val timetableList = repository.getDirectTimetableEntries()
+                val salesTargetsList = repository.getAllSalesTargetsDirect()
 
                 com.example.utils.Exporter.exportAllUnified(
                     context = context,
@@ -4644,7 +4645,8 @@ User Question: $userQuestion
                     isDynamicProfitEnabled = isEnabled,
                     productCostIngredients = pCostIngredients,
                     productCostCalculations = pCostCalculations,
-                    timetableEntries = timetableList
+                    timetableEntries = timetableList,
+                    salesTargets = salesTargetsList
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -4914,6 +4916,20 @@ User Question: $userQuestion
                             repository.insertTimetableEntries(list)
                         }
                         sheetMessages.add("Weekly Timetable: Imported ${list.size} days")
+                    }
+                }
+
+                // 8e. Sales Targets Sheet
+                val salesTargetsSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Sales Targets", "Sales_Targets", "SalesTargets", "Sales Target"))
+                if (salesTargetsSheet != null) {
+                    val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importSalesTargets(context, workbook, salesTargetsSheet)
+                    }
+                    if (list.isNotEmpty()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            repository.insertSalesTargets(list)
+                        }
+                        sheetMessages.add("Sales Targets: Imported ${list.size}")
                     }
                 }
 

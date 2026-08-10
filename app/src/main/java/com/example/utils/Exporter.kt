@@ -2820,7 +2820,8 @@ object Exporter {
         isDynamicProfitEnabled: Boolean,
         productCostIngredients: List<com.example.data.ProductCostIngredient> = emptyList(),
         productCostCalculations: List<com.example.data.ProductCostCalculation> = emptyList(),
-        timetableEntries: List<com.example.data.TimetableEntry> = emptyList()
+        timetableEntries: List<com.example.data.TimetableEntry> = emptyList(),
+        salesTargets: List<com.example.data.SalesTargetItem> = emptyList()
     ) {
         val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
         val file = File(context.cacheDir, fileName)
@@ -3250,6 +3251,29 @@ object Exporter {
                 timetableSheet.setColumnWidth(i, 6000)
             }
 
+            // --- 11e. Sales Targets Sheet ---
+            val salesTargetsSheet = workbook.createSheet("Sales Targets")
+            val salesTargetsHeaders = listOf("Target Date", "Product Name", "Category", "Selling Price", "Target Packets", "Target Amount")
+            val salesTargetsHeaderRow = salesTargetsSheet.createRow(0)
+            for (i in salesTargetsHeaders.indices) {
+                val cell = salesTargetsHeaderRow.createCell(i)
+                cell.setCellValue(salesTargetsHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (item in salesTargets) {
+                val row = salesTargetsSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(item.targetDate)
+                row.createCell(1).setCellValue(item.productName)
+                row.createCell(2).setCellValue(item.productCategory)
+                row.createCell(3).setCellValue(item.sellingPrice)
+                row.createCell(4).setCellValue(item.targetPackets.toDouble())
+                row.createCell(5).setCellValue(item.targetAmount)
+            }
+            for (i in salesTargetsHeaders.indices) {
+                salesTargetsSheet.setColumnWidth(i, 5000)
+            }
+
             // --- 12. Settings Sheet ---
             val settingsSheet = workbook.createSheet("Settings")
             val settingsHeaders = listOf("Setting Key", "Setting Value")
@@ -3592,6 +3616,53 @@ object Exporter {
                         dayOfWeek = dayOfWeek,
                         locationNumbers = locList,
                         notes = notes
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun importSalesTargets(context: Context, workbook: Workbook, sheet: Sheet): List<com.example.data.SalesTargetItem> {
+        val list = mutableListOf<com.example.data.SalesTargetItem>()
+        try {
+            val headerRow = sheet.getRow(0) ?: return emptyList()
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum.toInt()) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
+                }
+            }
+            val dateIdx = headerMap["target date"] ?: headerMap["date"] ?: headerMap["targetdate"] ?: 0
+            val nameIdx = headerMap["product name"] ?: headerMap["productname"] ?: 1
+            val catIdx = headerMap["category"] ?: headerMap["product category"] ?: headerMap["productcategory"] ?: 2
+            val priceIdx = headerMap["selling price"] ?: headerMap["sellingprice"] ?: 3
+            val packetsIdx = headerMap["target packets"] ?: headerMap["targetpackets"] ?: 4
+            val amountIdx = headerMap["target amount"] ?: headerMap["targetamount"] ?: 5
+
+            for (r in 1..sheet.lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                val targetDate = getCellValueAsString(row, dateIdx)?.trim() ?: ""
+                val productName = getCellValueAsString(row, nameIdx)?.trim() ?: ""
+                if (targetDate.isEmpty() || productName.isEmpty()) continue
+
+                val productCategory = getCellValueAsString(row, catIdx)?.trim() ?: "Other"
+                val sellingPrice = getCellValueAsString(row, priceIdx)?.toDoubleOrNull() ?: 0.0
+                val targetPackets = getCellValueAsString(row, packetsIdx)?.toDoubleOrNull()?.toInt() ?: 0
+                val targetAmount = getCellValueAsString(row, amountIdx)?.toDoubleOrNull() ?: (sellingPrice * targetPackets)
+
+                list.add(
+                    com.example.data.SalesTargetItem(
+                        targetDate = targetDate,
+                        productName = productName,
+                        productCategory = productCategory,
+                        sellingPrice = sellingPrice,
+                        targetPackets = targetPackets,
+                        targetAmount = targetAmount
                     )
                 )
             }

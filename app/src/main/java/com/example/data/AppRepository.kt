@@ -37,6 +37,9 @@ class AppRepository(
         salesTargetDao.deleteTargetsForDate(targetDate)
         salesTargetDao.insertTargetItems(items)
     }
+    suspend fun getAllSalesTargetsDirect(): List<SalesTargetItem> = salesTargetDao.getAllTargetsDirect()
+    suspend fun insertSalesTargets(items: List<SalesTargetItem>) = salesTargetDao.insertTargetItems(items)
+    suspend fun deleteAllSalesTargets() = salesTargetDao.deleteAllTargets()
 
     // --- Product Cost Calculator Queries ---
     val allProductCostIngredients: Flow<List<ProductCostIngredient>> = productCostDao.getAllIngredients()

@@ -1439,17 +1439,21 @@ fun BentoSalesCard(
                             )
                         }
 
-                        val amountDiff = Math.abs(revenue - targetAmount)
-                        val packetDiff = Math.abs(salesCount - targetPackets)
-                        val isExceeded = revenue >= targetAmount
+                        val adjustedTargetAmount = targetAmount - customPriceReduction
+                        val effectiveRevenue = revenue + returnReduction
+                        val effectiveSoldPackets = salesCount + packetsReturned
+
+                        val amountDiff = Math.abs(effectiveRevenue - adjustedTargetAmount)
+                        val packetDiff = Math.abs(effectiveSoldPackets - targetPackets)
+                        val isExceeded = effectiveRevenue >= adjustedTargetAmount
                         val diffText = if (isExceeded) {
-                            if (salesCount >= targetPackets) {
+                            if (effectiveSoldPackets >= targetPackets) {
                                 "Exceeded Target: $packetDiff Packets • ₹${"%,.2f".format(amountDiff)}"
                             } else {
                                 "Exceeded Target: ₹${"%,.2f".format(amountDiff)}"
                             }
                         } else {
-                            if (targetPackets > salesCount) {
+                            if (targetPackets > effectiveSoldPackets) {
                                 "Remaining: $packetDiff Packets • ₹${"%,.2f".format(amountDiff)}"
                             } else {
                                 "Remaining: ₹${"%,.2f".format(amountDiff)}"
