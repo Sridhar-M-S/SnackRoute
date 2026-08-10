@@ -150,6 +150,15 @@ fun DashboardScreen(
         val todaySalesCountVal = todaySalesEntries.sumOf { it.packetsSold }
         val todayRevenueVal = todaySalesEntries.sumOf { it.totalAmount }
         val todayProfitValCalc = todaySalesEntries.sumOf { it.totalProfit }
+        val todayPacketsReturnedVal = todaySalesEntries.sumOf { it.packetsReturned }
+        val todayReturnReductionVal = todaySalesEntries.sumOf { it.packetsReturned * it.ratePerPacket }
+        val todayCustomPriceReductionVal = todaySalesEntries.sumOf { sale ->
+            if (sale.originalPacketRate != null && sale.ratePerPacket < sale.originalPacketRate) {
+                (sale.originalPacketRate - sale.ratePerPacket) * maxOf(0, sale.packetsSold)
+            } else {
+                0.0
+            }
+        }
 
         // Monthly Profit
         val currentMonthFormat = SimpleDateFormat("yyyyMM", Locale.getDefault())
@@ -210,7 +219,10 @@ fun DashboardScreen(
             totalProfit = totalProfitVal,
             averageProfit = averageProfitVal,
             productProfits = productProfitsVal,
-            shopProfits = shopProfitsVal
+            shopProfits = shopProfitsVal,
+            todayPacketsReturned = todayPacketsReturnedVal,
+            todayReturnReduction = todayReturnReductionVal,
+            todayCustomPriceReduction = todayCustomPriceReductionVal
         )
     }
 
@@ -219,6 +231,9 @@ fun DashboardScreen(
     val totalProducts = stats.totalProducts
     val todaySalesCount = stats.todaySalesCount
     val todayRevenue = stats.todayRevenue
+    val todayPacketsReturned = stats.todayPacketsReturned
+    val todayReturnReduction = stats.todayReturnReduction
+    val todayCustomPriceReduction = stats.todayCustomPriceReduction
     val todayProfit = stats.todayProfit
     val monthlyProfit = stats.monthlyProfit
     val pendingCollections = stats.pendingCollections
@@ -643,6 +658,9 @@ fun DashboardScreen(
                     BentoSalesCard(
                         salesCount = todaySalesCount,
                         revenue = todayRevenue,
+                        packetsReturned = todayPacketsReturned,
+                        returnReduction = todayReturnReduction,
+                        customPriceReduction = todayCustomPriceReduction,
                         todayTargets = todayTargets,
                         onClick = {
                             onNavigateToTab("TodaySalesTarget")
@@ -665,7 +683,10 @@ fun DashboardScreen(
                         BentoPendingCard(
                             pending = pendingCollections,
                             shopCount = totalShops,
-                            onClick = { onNavigateToTab("Sales") },
+                            onClick = {
+                                viewModel.setSalesPendingTodayFilter()
+                                onNavigateToTab("Sales")
+                            },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -1296,6 +1317,9 @@ fun RecentSaleRow(sale: SalesEntry) {
 fun BentoSalesCard(
     salesCount: Int,
     revenue: Double,
+    packetsReturned: Int,
+    returnReduction: Double,
+    customPriceReduction: Double,
     todayTargets: List<com.example.data.SalesTargetItem>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -1334,27 +1358,61 @@ fun BentoSalesCard(
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White
                 )
+
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
+                            .weight(1f)
                             .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Text(
-                            text = "$salesCount Packets",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Column {
+                            Text(text = "Packets Sold", fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text(text = "$salesCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
-                    Text(
-                        text = "Distributed Live Today",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Column {
+                            Text(text = "Packets Returned", fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text(text = "$packetsReturned", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Column {
+                            Text(text = "Reduced by Returns", fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text(text = "₹${"%,.2f".format(returnReduction)}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Column {
+                            Text(text = "Reduced by Custom Price", fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text(text = "₹${"%,.2f".format(customPriceReduction)}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.2f), modifier = Modifier.padding(vertical = 2.dp))
@@ -2783,7 +2841,10 @@ data class DashboardStats(
     val totalProfit: Double,
     val averageProfit: Double,
     val productProfits: Map<String, Double>,
-    val shopProfits: Map<String, Double>
+    val shopProfits: Map<String, Double>,
+    val todayPacketsReturned: Int,
+    val todayReturnReduction: Double,
+    val todayCustomPriceReduction: Double
 )
 
 @Composable

@@ -25,6 +25,25 @@ import java.util.Locale
 
 object Exporter {
 
+    private fun safeDouble(value: Double?): Double {
+        if (value == null) return 0.0
+        return if (value.isNaN() || value.isInfinite()) 0.0 else value
+    }
+
+    private fun safeDouble(value: Float?): Double {
+        if (value == null) return 0.0
+        val v = value.toDouble()
+        return if (v.isNaN() || v.isInfinite()) 0.0 else v
+    }
+
+    private fun safeDouble(value: Int?): Double {
+        return (value ?: 0).toDouble()
+    }
+
+    private fun safeDouble(value: Long?): Double {
+        return (value ?: 0L).toDouble()
+    }
+
     data class ErrorReportRow(
         val rowNum: Int,
         val shopNo: String,
@@ -308,8 +327,8 @@ object Exporter {
                 row.createCell(2).setCellValue(shop.storeName)
                 
                 // Numeric Rating & Score
-                row.createCell(3).setCellValue(shop.rating.toDouble())
-                row.createCell(4).setCellValue(shop.score.toDouble())
+                row.createCell(3).setCellValue(safeDouble(shop.rating))
+                row.createCell(4).setCellValue(safeDouble(shop.score))
                 
                 row.createCell(5).setCellValue(shop.startingDateFormatted)
                 row.createCell(6).setCellValue(shop.googleMapLink ?: "")
@@ -324,32 +343,7 @@ object Exporter {
                 
                 row.createCell(8).setCellValue(shop.mobileNumber ?: "")
                 row.createCell(9).setCellValue(shop.notes ?: "")
-                
-                // Embed the actual image
-                val bytes = getBytesFromImagePath(context, shop.storeImage)
-                if (bytes != null) {
-                    try {
-                        val anchor = helper.createClientAnchor().apply {
-                            setCol1(10)
-                            setRow1(row.rowNum)
-                            setCol2(11)
-                            setRow2(row.rowNum + 1)
-                        }
-                        val type = if (shop.storeImage?.endsWith(".png", ignoreCase = true) == true) {
-                            Workbook.PICTURE_TYPE_PNG
-                        } else {
-                            Workbook.PICTURE_TYPE_JPEG
-                        }
-                        val pictureIdx = workbook.addPicture(bytes, type)
-                        drawing.createPicture(anchor, pictureIdx)
-                        row.createCell(10).setCellValue("")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        row.createCell(10).setCellValue(shop.storeImage ?: "")
-                    }
-                } else {
-                    row.createCell(10).setCellValue("")
-                }
+                row.createCell(10).setCellValue(shop.storeImage ?: "")
             }
             
             // Set fixed column widths
@@ -410,7 +404,7 @@ object Exporter {
             var rowIdx = 1
             for (prod in products) {
                 val row = sheet.createRow(rowIdx++)
-                row.createCell(0).setCellValue(prod.id.toDouble())
+                row.createCell(0).setCellValue(safeDouble(prod.id))
                 row.createCell(1).setCellValue(prod.productName)
                 row.createCell(2).setCellValue(prod.productCategory)
                 
@@ -484,24 +478,24 @@ object Exporter {
                 row.createCell(3).setCellValue(sales.locationNumber)
                 row.createCell(4).setCellValue(sales.productName)
                 
-                row.createCell(5).setCellValue(sales.packetsGiven.toDouble())
-                row.createCell(6).setCellValue(sales.packetsReturned.toDouble())
-                row.createCell(7).setCellValue(sales.packetsSold.toDouble())
-                row.createCell(8).setCellValue(sales.ratePerPacket)
-                row.createCell(9).setCellValue(sales.totalAmount)
-                row.createCell(10).setCellValue(sales.profitPerPacket)
-                row.createCell(11).setCellValue(sales.totalProfit)
+                row.createCell(5).setCellValue(safeDouble(sales.packetsGiven))
+                row.createCell(6).setCellValue(safeDouble(sales.packetsReturned))
+                row.createCell(7).setCellValue(safeDouble(sales.packetsSold))
+                row.createCell(8).setCellValue(safeDouble(sales.ratePerPacket))
+                row.createCell(9).setCellValue(safeDouble(sales.totalAmount))
+                row.createCell(10).setCellValue(safeDouble(sales.profitPerPacket))
+                row.createCell(11).setCellValue(safeDouble(sales.totalProfit))
                 row.createCell(12).setCellValue(sales.status)
                 row.createCell(13).setCellValue(sales.remarks ?: "")
                 
                 if (sales.originalPacketRate != null) {
-                    row.createCell(14).setCellValue(sales.originalPacketRate)
+                    row.createCell(14).setCellValue(safeDouble(sales.originalPacketRate))
                 }
                 if (sales.customSellingPrice != null) {
-                    row.createCell(15).setCellValue(sales.customSellingPrice)
+                    row.createCell(15).setCellValue(safeDouble(sales.customSellingPrice))
                 }
                 if (sales.productionCostUsed != null) {
-                    row.createCell(16).setCellValue(sales.productionCostUsed)
+                    row.createCell(16).setCellValue(safeDouble(sales.productionCostUsed))
                 }
             }
             
@@ -574,11 +568,11 @@ object Exporter {
                 row.createCell(0).setCellValue(expense.expenseDateFormatted)
                 row.createCell(1).setCellValue(expense.category)
                 row.createCell(2).setCellValue(expense.description)
-                row.createCell(3).setCellValue(expense.amount)
+                row.createCell(3).setCellValue(safeDouble(expense.amount))
                 row.createCell(4).setCellValue(expense.notes ?: "")
                 row.createCell(5).setCellValue(expense.paymentMethod)
                 row.createCell(6).setCellValue(expense.attachmentUri ?: "")
-                row.createCell(7).setCellValue(expense.expenseDate.toDouble())
+                row.createCell(7).setCellValue(safeDouble(expense.expenseDate))
             }
             
             // Set column widths
@@ -1704,9 +1698,9 @@ object Exporter {
                 }
                 
                 val packetsReturned = packetsReturnStr.toIntOrNull() ?: 0
-                if (packetsReturned < 0 || packetsReturned > packetsGiven) {
+                if (packetsReturned < 0) {
                     failedRowsCount++
-                    errorRows.add(listOf("${r + 1}", shopNo, prodType, "Packets Returned must be >= 0 and <= Packets Given") + originalRowData)
+                    errorRows.add(listOf("${r + 1}", shopNo, prodType, "Packets Returned must be >= 0") + originalRowData)
                     continue
                 }
                 
@@ -1878,9 +1872,9 @@ object Exporter {
                 val row = sheet.createRow(rowIdx++)
                 row.createCell(0).setCellValue(item.productName)
                 row.createCell(1).setCellValue("₹" + item.sellingPrice.toString())
-                row.createCell(2).setCellValue(item.packetsSold.toDouble())
-                row.createCell(3).setCellValue(item.revenue)
-                row.createCell(4).setCellValue(item.estimatedProfit)
+                row.createCell(2).setCellValue(safeDouble(item.packetsSold))
+                row.createCell(3).setCellValue(safeDouble(item.revenue))
+                row.createCell(4).setCellValue(safeDouble(item.estimatedProfit))
             }
             
             // Column widths
@@ -1943,9 +1937,9 @@ object Exporter {
             for (item in items) {
                 val row = sheet.createRow(rowIdx++)
                 row.createCell(0).setCellValue(item.month)
-                row.createCell(1).setCellValue(item.packetsDistributed.toDouble())
-                row.createCell(2).setCellValue(item.salesAmount)
-                row.createCell(3).setCellValue(item.estimatedProfit)
+                row.createCell(1).setCellValue(safeDouble(item.packetsDistributed))
+                row.createCell(2).setCellValue(safeDouble(item.salesAmount))
+                row.createCell(3).setCellValue(safeDouble(item.estimatedProfit))
             }
             
             // Column widths
@@ -2000,7 +1994,7 @@ object Exporter {
             var rowIdx = 1
             for (task in tasks) {
                 val row = sheet.createRow(rowIdx++)
-                row.createCell(0).setCellValue(task.id.toDouble())
+                row.createCell(0).setCellValue(safeDouble(task.id))
                 row.createCell(1).setCellValue(task.title)
                 row.createCell(2).setCellValue(task.description)
                 row.createCell(3).setCellValue(if (task.isCompleted) "Yes" else "No")
@@ -2342,7 +2336,7 @@ object Exporter {
             var rowIdx = 1
             for (item in ingredients) {
                 val row = ingredientsSheet.createRow(rowIdx++)
-                row.createCell(0).setCellValue(item.id.toDouble())
+                row.createCell(0).setCellValue(safeDouble(item.id))
                 row.createCell(1).setCellValue(item.name)
                 row.createCell(2).setCellValue(item.variety)
                 row.createCell(3).setCellValue(item.category)
@@ -2369,24 +2363,24 @@ object Exporter {
             rowIdx = 1
             for (item in purchases) {
                 val row = purchasesSheet.createRow(rowIdx++)
-                row.createCell(0).setCellValue(item.purchaseId.toDouble())
-                row.createCell(1).setCellValue(item.ingredientId.toDouble())
-                row.createCell(2).setCellValue(item.purchaseQuantity)
+                row.createCell(0).setCellValue(safeDouble(item.purchaseId))
+                row.createCell(1).setCellValue(safeDouble(item.ingredientId))
+                row.createCell(2).setCellValue(safeDouble(item.purchaseQuantity))
                 row.createCell(3).setCellValue(item.unit)
-                row.createCell(4).setCellValue(item.purchasePrice)
+                row.createCell(4).setCellValue(safeDouble(item.purchasePrice))
                 row.createCell(5).setCellValue(item.purchaseDate)
                 row.createCell(6).setCellValue(item.supplier ?: "")
                 row.createCell(7).setCellValue(item.remarks ?: "")
-                row.createCell(8).setCellValue(item.sealCost)
-                row.createCell(9).setCellValue(item.printingCost)
-                row.createCell(10).setCellValue(item.largeCoverDistribution.toDouble())
-                row.createCell(11).setCellValue(item.largeCoverDistribution.toDouble())
+                row.createCell(8).setCellValue(safeDouble(item.sealCost))
+                row.createCell(9).setCellValue(safeDouble(item.printingCost))
+                row.createCell(10).setCellValue(safeDouble(item.largeCoverDistribution))
+                row.createCell(11).setCellValue(safeDouble(item.largeCoverDistribution))
                 val calculatedCostPerFilled = if (item.largeCoverDistribution > 0 && item.purchaseQuantity > 0.0) {
                     item.purchasePrice / (item.purchaseQuantity * item.largeCoverDistribution.toDouble())
                 } else {
                     0.0
                 }
-                row.createCell(12).setCellValue(calculatedCostPerFilled)
+                row.createCell(12).setCellValue(safeDouble(calculatedCostPerFilled))
             }
             for (i in purchasesHeaders.indices) {
                 purchasesSheet.setColumnWidth(i, 5000)
@@ -2407,13 +2401,13 @@ object Exporter {
             rowIdx = 1
             for (item in calculations) {
                 val row = calcsSheet.createRow(rowIdx++)
-                row.createCell(0).setCellValue(item.calculationId.toDouble())
-                row.createCell(1).setCellValue(item.productPriceId.toDouble())
-                row.createCell(2).setCellValue(item.version.toDouble())
+                row.createCell(0).setCellValue(safeDouble(item.calculationId))
+                row.createCell(1).setCellValue(safeDouble(item.productPriceId))
+                row.createCell(2).setCellValue(safeDouble(item.version))
                 row.createCell(3).setCellValue(item.calculationDate)
-                row.createCell(4).setCellValue(item.totalProductionCost)
-                row.createCell(5).setCellValue(item.sellingPriceSnapshot)
-                row.createCell(6).setCellValue(item.profitSnapshot)
+                row.createCell(4).setCellValue(safeDouble(item.totalProductionCost))
+                row.createCell(5).setCellValue(safeDouble(item.sellingPriceSnapshot))
+                row.createCell(6).setCellValue(safeDouble(item.profitSnapshot))
                 row.createCell(7).setCellValue(item.remarks ?: "")
             }
             for (i in calcsHeaders.indices) {
@@ -2436,15 +2430,15 @@ object Exporter {
             rowIdx = 1
             for (item in calculationItems) {
                 val row = itemsSheet.createRow(rowIdx++)
-                row.createCell(0).setCellValue(item.itemId.toDouble())
-                row.createCell(1).setCellValue(item.costCalculationId.toDouble())
-                row.createCell(2).setCellValue(item.ingredientId.toDouble())
+                row.createCell(0).setCellValue(safeDouble(item.itemId))
+                row.createCell(1).setCellValue(safeDouble(item.costCalculationId))
+                row.createCell(2).setCellValue(safeDouble(item.ingredientId))
                 row.createCell(3).setCellValue(item.ingredientName)
                 row.createCell(4).setCellValue(item.ingredientVariety)
-                row.createCell(5).setCellValue(item.usageQuantity)
+                row.createCell(5).setCellValue(safeDouble(item.usageQuantity))
                 row.createCell(6).setCellValue(item.usageUnit)
-                row.createCell(7).setCellValue(item.costPerUnitSnapshot)
-                row.createCell(8).setCellValue(item.calculatedCost)
+                row.createCell(7).setCellValue(safeDouble(item.costPerUnitSnapshot))
+                row.createCell(8).setCellValue(safeDouble(item.calculatedCost))
                 row.createCell(9).setCellValue(item.purchaseUnitSnapshot)
             }
             for (i in itemsHeaders.indices) {
@@ -2898,32 +2892,7 @@ object Exporter {
                 row.createCell(7).setCellValue(latLngStr)
                 row.createCell(8).setCellValue(shop.mobileNumber ?: "")
                 row.createCell(9).setCellValue(shop.notes ?: "")
-                
-                // Embed the actual image
-                val bytes = getBytesFromImagePath(context, shop.storeImage)
-                if (bytes != null) {
-                    try {
-                        val anchor = helper.createClientAnchor().apply {
-                            setCol1(10)
-                            setRow1(row.rowNum)
-                            setCol2(11)
-                            setRow2(row.rowNum + 1)
-                        }
-                        val type = if (shop.storeImage?.endsWith(".png", ignoreCase = true) == true) {
-                            Workbook.PICTURE_TYPE_PNG
-                        } else {
-                            Workbook.PICTURE_TYPE_JPEG
-                        }
-                        val pictureIdx = workbook.addPicture(bytes, type)
-                        drawing.createPicture(anchor, pictureIdx)
-                        row.createCell(10).setCellValue("")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        row.createCell(10).setCellValue(shop.storeImage ?: "")
-                    }
-                } else {
-                    row.createCell(10).setCellValue("")
-                }
+                row.createCell(10).setCellValue(shop.storeImage ?: "")
             }
             for (i in shopsHeaders.indices) {
                 shopsSheet.setColumnWidth(i, 5000)
@@ -3195,11 +3164,7 @@ object Exporter {
                 row.createCell(4).setCellValue(item.locationNumber)
                 row.createCell(5).setCellValue(item.remark)
                 row.createCell(6).setCellValue(item.status)
-                if (item.salesEntryId != null) {
-                    row.createCell(7).setCellValue(item.salesEntryId.toDouble())
-                } else {
-                    row.createCell(7).setCellValue("")
-                }
+                row.createCell(7).setCellValue(item.salesEntryId?.toDouble() ?: 0.0)
                 row.createCell(8).setCellValue(converters.fromHistoryList(item.history) ?: "")
             }
             for (i in remarksHeaders.indices) {

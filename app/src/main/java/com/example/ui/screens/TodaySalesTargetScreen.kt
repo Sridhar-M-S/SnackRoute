@@ -67,6 +67,9 @@ fun TodaySalesTargetScreen(
     var selectedPrice by remember { mutableStateOf<ProductPrice?>(null) }
     var inputPacketsText by remember { mutableStateOf("50") }
 
+    var editingItem by remember { mutableStateOf<SalesTargetItem?>(null) }
+    var editPacketsText by remember { mutableStateOf("") }
+
     var categoryDropdownExpanded by remember { mutableStateOf(false) }
     var productDropdownExpanded by remember { mutableStateOf(false) }
     var priceDropdownExpanded by remember { mutableStateOf(false) }
@@ -649,17 +652,35 @@ fun TodaySalesTargetScreen(
                                     )
                                 }
 
-                                IconButton(
-                                    onClick = {
-                                        localTargetItems = localTargetItems.filter { it != item }
-                                    },
-                                    modifier = Modifier.testTag("btn_delete_target_item_${item.productName}")
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "Delete Item",
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
+                                    IconButton(
+                                        onClick = {
+                                            editingItem = item
+                                            editPacketsText = item.targetPackets.toString()
+                                        },
+                                        modifier = Modifier.testTag("btn_edit_target_item_${item.productName}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = "Edit Item",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            localTargetItems = localTargetItems.filter { it != item }
+                                        },
+                                        modifier = Modifier.testTag("btn_delete_target_item_${item.productName}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Delete Item",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
                                 }
                             }
 
@@ -732,5 +753,55 @@ fun TodaySalesTargetScreen(
                 }
             }
         }
+    }
+
+    if (editingItem != null) {
+        AlertDialog(
+            onDismissRequest = { editingItem = null },
+            title = { Text("Edit Target Packets") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Product: ${editingItem!!.productName}", fontWeight = FontWeight.Bold)
+                    Text("Selling Price: ₹${"%,.2f".format(editingItem!!.sellingPrice)} / packet", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editPacketsText,
+                        onValueChange = { editPacketsText = it },
+                        label = { Text("Target Packets") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("input_edit_target_packets")
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val newCount = editPacketsText.toIntOrNull()
+                        if (newCount != null && newCount >= 0) {
+                            val newAmount = editingItem!!.sellingPrice * newCount
+                            localTargetItems = localTargetItems.map {
+                                if (it == editingItem) it.copy(targetPackets = newCount, targetAmount = newAmount)
+                                else it
+                            }
+                            editingItem = null
+                        } else {
+                            Toast.makeText(context, "Please enter a valid packet count", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.testTag("btn_confirm_edit_target")
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { editingItem = null },
+                    modifier = Modifier.testTag("btn_cancel_edit_target")
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

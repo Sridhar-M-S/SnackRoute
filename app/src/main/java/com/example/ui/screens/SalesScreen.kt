@@ -115,13 +115,15 @@ fun SalesScreen(
     val extSellingPrice by viewModel.salesFilterSellingPrice.collectAsStateWithLifecycle()
     val extStartDate by viewModel.salesFilterStartDate.collectAsStateWithLifecycle()
     val extEndDate by viewModel.salesFilterEndDate.collectAsStateWithLifecycle()
+    val extStatus by viewModel.salesFilterStatus.collectAsStateWithLifecycle()
     val salesFilterTodayTrigger by viewModel.salesFilterTodayTrigger.collectAsStateWithLifecycle()
 
-    LaunchedEffect(extCategory, extProductName, extSellingPrice) {
-        if (extCategory != null || extProductName != null || extSellingPrice != null) {
+    LaunchedEffect(extCategory, extProductName, extSellingPrice, extStatus) {
+        if (extCategory != null || extProductName != null || extSellingPrice != null || extStatus != null) {
             filterCategory = extCategory
             filterProductName = extProductName
             filterSellingPrice = extSellingPrice
+            if (extStatus != null) filterStatus = extStatus
             filterExpanded = true
         }
     }
@@ -1242,7 +1244,7 @@ fun SalesScreen(
                         saleItems.forEach { itm ->
                             val given = itm.packetsGivenStr.toIntOrNull() ?: 0
                             val returned = itm.packetsReturnedStr.toIntOrNull() ?: 0
-                            val sold = maxOf(0, given - returned)
+                            val sold = given - returned
                             val rate = itm.ratePerPacketStr.toDoubleOrNull() ?: 0.0
                             val profitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
                             val prodCost = itm.productionCostUsed ?: 0.0
@@ -1371,9 +1373,6 @@ fun SalesScreen(
                             val returnedVal = itm.packetsReturnedStr.toIntOrNull() ?: 0
                             if (givenVal == null || givenVal < 0) {
                                 packErr = "Valid packets count is required"
-                                isAllValid = false
-                            } else if (returnedVal > givenVal) {
-                                packErr = "Returned cannot exceed Given packets"
                                 isAllValid = false
                             }
 
@@ -2401,7 +2400,7 @@ fun SaleItemRow(
             // Row Level Calculations
             val givenCount = item.packetsGivenStr.toIntOrNull() ?: 0
             val returnedCount = item.packetsReturnedStr.toIntOrNull() ?: 0
-            val soldCalculated = maxOf(0, givenCount - returnedCount)
+            val soldCalculated = givenCount - returnedCount
             
             val liveRate = item.ratePerPacketStr.toDoubleOrNull() ?: 0.0
             val totalAmountCalculated = soldCalculated * liveRate
@@ -2868,8 +2867,8 @@ fun CorrectRecordDialog(
                 
                 if (givenVal == null || givenVal < 0) {
                     errorMsg = "Please enter a valid non-negative number for Given Packets"
-                } else if (returnedVal < 0 || returnedVal > givenVal) {
-                    errorMsg = "Returned packets must be between 0 and Given Packets ($givenVal)"
+                } else if (returnedVal < 0) {
+                    errorMsg = "Returned packets cannot be negative"
                 } else if (rateVal == null || rateVal < 0) {
                     errorMsg = "Please enter a valid Selling Price"
                 } else {

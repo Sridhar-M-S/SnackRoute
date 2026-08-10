@@ -1151,8 +1151,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val rollingWeekStart = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
         val rollingMonthStart = System.currentTimeMillis() - 30 * 24 * 60 * 60 * 1000L
         
-        val salesToday = sales.filter { it.entryDate >= todayStart }
-        val shopsCreatedToday = shops.filter { it.startingDate >= todayStart }
+        val salesToday = sales.filter { formatDay(Date(it.entryDate)) == dayId }
+        val shopsCreatedToday = shops.filter { formatDay(Date(it.startingDate)) == dayId }
         
         val salesThisWeek = sales.filter { it.entryDate >= rollingWeekStart }
         val salesThisMonth = sales.filter { it.entryDate >= rollingMonthStart }
@@ -1250,19 +1250,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         unlockedBadges: List<UserBadge>
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val todayStart = getTodayStartMillis()
             val rollingWeekStart = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
             val rollingMonthStart = System.currentTimeMillis() - 30 * 24 * 60 * 60 * 1000L
             
-            val salesToday = sales.filter { it.entryDate >= todayStart }
-            val shopsCreatedToday = shops.filter { it.startingDate >= todayStart }
+            val now = Date()
+            val dayId = formatDay(now)
+            val salesToday = sales.filter { formatDay(Date(it.entryDate)) == dayId }
+            val shopsCreatedToday = shops.filter { formatDay(Date(it.startingDate)) == dayId }
             
             val salesThisWeek = sales.filter { it.entryDate >= rollingWeekStart }
             val salesThisMonth = sales.filter { it.entryDate >= rollingMonthStart }
             val shopsCreatedThisMonth = shops.filter { it.startingDate >= rollingMonthStart }
 
-            val now = Date()
-            val dayId = formatDay(now)
             val weekId = formatWeek(now)
             val monthId = formatMonth(now)
 
@@ -1661,13 +1660,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     val currentDailySales: StateFlow<List<SalesEntry>> = sales
         .map { salesList ->
-            val calendar = Calendar.getInstance()
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val today = calendar.timeInMillis
-            salesList.filter { it.entryDate >= today }
+            val now = Date()
+            val dayId = formatDay(now)
+            salesList.filter { formatDay(Date(it.entryDate)) == dayId }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -1726,6 +1721,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val salesFilterSellingPrice = MutableStateFlow<Double?>(null)
     val salesFilterStartDate = MutableStateFlow<Long?>(null)
     val salesFilterEndDate = MutableStateFlow<Long?>(null)
+    val salesFilterStatus = MutableStateFlow<String?>(null)
     private val _salesFilterTodayTrigger = MutableStateFlow(false)
     val salesFilterTodayTrigger: StateFlow<Boolean> = _salesFilterTodayTrigger.asStateFlow()
 
@@ -1742,6 +1738,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _salesFilterTodayTrigger.value = true
     }
 
+    fun setSalesPendingTodayFilter() {
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val todayStart = cal.timeInMillis
+        salesFilterStartDate.value = todayStart
+        salesFilterEndDate.value = todayStart
+        salesFilterStatus.value = "Pending"
+        _salesFilterTodayTrigger.value = true
+    }
+
     fun clearSalesTodayTrigger() {
         _salesFilterTodayTrigger.value = false
     }
@@ -1749,6 +1759,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSalesDateFilter() {
         salesFilterStartDate.value = null
         salesFilterEndDate.value = null
+        salesFilterStatus.value = null
         _salesFilterTodayTrigger.value = false
     }
 
@@ -5124,7 +5135,7 @@ User Question: $userQuestion
             
             val finalGiven = customGiven ?: sale.packetsGiven
             val finalReturned = customReturned ?: sale.packetsReturned
-            val finalSold = maxOf(0, finalGiven - finalReturned)
+            val finalSold = finalGiven - finalReturned
             
             val sellingPrice = customSellingPrice ?: sale.ratePerPacket
             
