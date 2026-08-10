@@ -343,7 +343,8 @@ object Exporter {
                 
                 row.createCell(8).setCellValue(shop.mobileNumber ?: "")
                 row.createCell(9).setCellValue(shop.notes ?: "")
-                row.createCell(10).setCellValue(shop.storeImage ?: "")
+                row.createCell(10).setCellValue("")
+                addImageToRow(context, workbook, drawing, row, 10, shop.storeImage)
             }
             
             // Set fixed column widths
@@ -2893,11 +2894,13 @@ object Exporter {
                 row.createCell(7).setCellValue(latLngStr)
                 row.createCell(8).setCellValue(shop.mobileNumber ?: "")
                 row.createCell(9).setCellValue(shop.notes ?: "")
-                row.createCell(10).setCellValue(shop.storeImage ?: "")
+                row.createCell(10).setCellValue("")
+                addImageToRow(context, workbook, drawing, row, 10, shop.storeImage)
             }
             for (i in shopsHeaders.indices) {
                 shopsSheet.setColumnWidth(i, 5000)
             }
+            shopsSheet.setColumnWidth(10, 8000)
 
             // --- 3. Products Sheet ---
             val productsSheet = workbook.createSheet("Products")
@@ -3670,5 +3673,32 @@ object Exporter {
             e.printStackTrace()
         }
         return list
+    }
+
+    private fun addImageToRow(context: Context, workbook: XSSFWorkbook, drawing: org.apache.poi.xssf.usermodel.XSSFDrawing, row: Row, colIndex: Int, imagePath: String?) {
+        if (imagePath.isNullOrEmpty()) return
+        try {
+            val bytes = getBytesFromImagePath(context, imagePath)
+            if (bytes != null && bytes.isNotEmpty()) {
+                val ext = imagePath.substringAfterLast('.', "jpg").lowercase()
+                val pictureType = if (ext == "png") Workbook.PICTURE_TYPE_PNG else Workbook.PICTURE_TYPE_JPEG
+                val pictureIdx = workbook.addPicture(bytes, pictureType)
+                val helper = workbook.creationHelper
+                val anchor = helper.createClientAnchor().apply {
+                    setCol1(colIndex)
+                    setRow1(row.rowNum)
+                    setCol2(colIndex + 1)
+                    setRow2(row.rowNum + 1)
+                    dx1 = 100
+                    dy1 = 100
+                    dx2 = -100
+                    dy2 = -100
+                    anchorType = org.apache.poi.ss.usermodel.ClientAnchor.AnchorType.MOVE_AND_RESIZE
+                }
+                drawing.createPicture(anchor, pictureIdx)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
