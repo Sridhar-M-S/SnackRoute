@@ -710,7 +710,7 @@ fun DashboardScreen(
                             pending = pendingCollections,
                             shopCount = totalShops,
                             onClick = {
-                                viewModel.setSalesPendingFilter()
+                                viewModel.setPendingSalesFilter()
                                 onNavigateToTab("Sales")
                             },
                             modifier = Modifier.weight(1f)
