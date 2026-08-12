@@ -1760,7 +1760,7 @@ object Exporter {
                 android.util.Log.d("SalesImport", "Row ${r + 1}: Read excelProfitPerPacket=$excelProfitPerPacket, excelTotalProfit=$excelTotalProfit from Excel. Storing profitPerPacket=$profitPerPacket, totalProfit=$totalProfit in database.")
                 
                 val totalAmount = totalAmountStr.toDoubleOrNull() ?: (packetsSold * ratePerPacket)
-                val status = "Paid" // Always Paid
+                val status = if (statusStr.isNotEmpty()) statusStr else "Paid"
                 
                 val salesEntry = SalesEntry(
                     entryDate = entryDate,
