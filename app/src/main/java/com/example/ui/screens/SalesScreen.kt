@@ -887,7 +887,11 @@ fun SalesScreen(
                                     shopError = null
                                     isShopLocked = false
 
-                                    val sessionSales = listOf(sale)
+                                    val sessionSales = if (!sale.sessionId.isNullOrEmpty()) {
+                                        sales.filter { it.sessionId == sale.sessionId }
+                                    } else {
+                                        sales.filter { it.id == sale.id }
+                                    }
 
                                     saleItems = sessionSales.map { s ->
                                         android.util.Log.d("SalesEdit", "Profit value loaded into the Edit Sales screen: id=${s.id}, productName=${s.productName}, profitPerPacket=${s.profitPerPacket}")

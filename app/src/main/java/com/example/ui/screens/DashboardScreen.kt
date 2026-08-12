@@ -14,6 +14,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -105,6 +107,10 @@ fun DashboardScreen(
     val allBadges by viewModel.allBadges.collectAsStateWithLifecycle()
     val unlockedBadges by viewModel.unlockedBadges.collectAsStateWithLifecycle()
     var activeCelebration by remember { mutableStateOf<GamificationEvent?>(null) }
+    var showReturnedPacketsDialog by remember { mutableStateOf(false) }
+    var showReturnReductionDialog by remember { mutableStateOf(false) }
+    var showCustomPriceDialog by remember { mutableStateOf(false) }
+    var showPacketsSoldDialog by remember { mutableStateOf(false) }
 
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
@@ -222,7 +228,12 @@ fun DashboardScreen(
             shopProfits = shopProfitsVal,
             todayPacketsReturned = todayPacketsReturnedVal,
             todayReturnReduction = todayReturnReductionVal,
-            todayCustomPriceReduction = todayCustomPriceReductionVal
+            todayCustomPriceReduction = todayCustomPriceReductionVal,
+            todayReturnedEntries = todaySalesEntries.filter { it.packetsReturned > 0 },
+            todayCustomPriceEntries = todaySalesEntries.filter { sale ->
+                sale.originalPacketRate != null && sale.ratePerPacket < sale.originalPacketRate
+            },
+            todaySoldEntries = todaySalesEntries.filter { it.packetsSold > 0 }
         )
     }
 
@@ -234,6 +245,9 @@ fun DashboardScreen(
     val todayPacketsReturned = stats.todayPacketsReturned
     val todayReturnReduction = stats.todayReturnReduction
     val todayCustomPriceReduction = stats.todayCustomPriceReduction
+    val todayReturnedEntries = stats.todayReturnedEntries
+    val todayCustomPriceEntries = stats.todayCustomPriceEntries
+    val todaySoldEntries = stats.todaySoldEntries
     val todayProfit = stats.todayProfit
     val monthlyProfit = stats.monthlyProfit
     val pendingCollections = stats.pendingCollections
@@ -664,6 +678,18 @@ fun DashboardScreen(
                         todayTargets = todayTargets,
                         onClick = {
                             onNavigateToTab("TodaySalesTarget")
+                        },
+                        onPacketsReturnedClick = {
+                            showReturnedPacketsDialog = true
+                        },
+                        onReturnReductionClick = {
+                            showReturnReductionDialog = true
+                        },
+                        onCustomPriceReductionClick = {
+                            showCustomPriceDialog = true
+                        },
+                        onPacketsSoldClick = {
+                            showPacketsSoldDialog = true
                         }
                     )
 
@@ -684,7 +710,7 @@ fun DashboardScreen(
                             pending = pendingCollections,
                             shopCount = totalShops,
                             onClick = {
-                                viewModel.setSalesPendingTodayFilter()
+                                viewModel.setSalesPendingFilter()
                                 onNavigateToTab("Sales")
                             },
                             modifier = Modifier.weight(1f)
@@ -1000,6 +1026,431 @@ fun DashboardScreen(
                     ) {
                         CircularProgressIndicator()
                         Text("Reading all-in-one backup spreadsheet and updating database states...")
+                    }
+                }
+            )
+        }
+
+        if (showReturnedPacketsDialog) {
+            AlertDialog(
+                onDismissRequest = { showReturnedPacketsDialog = false },
+                title = {
+                    Text("Packets Returned Breakdown", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Total Packets Returned: $todayPacketsReturned (TTL Reduction: ₹${"%,.2f".format(todayReturnReduction)})",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        HorizontalDivider()
+                        if (todayReturnedEntries.isEmpty()) {
+                            Text(
+                                text = "No packets returned today.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            todayReturnedEntries.forEach { entry ->
+                                val shopName = shops.firstOrNull { it.shopNumber == entry.shopNumber }?.storeName ?: "Shop ${entry.shopNumber}"
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = shopName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "₹${"%,.2f".format(entry.packetsReturned * entry.ratePerPacket)}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                        Text(
+                                            text = "Category / Product: ${entry.productName}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Rupees Packet (Rate): ₹${"%,.2f".format(entry.ratePerPacket)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Returned: ${entry.packetsReturned} packets",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showReturnedPacketsDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+
+        if (showReturnReductionDialog) {
+            AlertDialog(
+                onDismissRequest = { showReturnReductionDialog = false },
+                title = {
+                    Text("Reduction by Returns Calculation", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Total Return Reduction Amount: ₹${"%,.2f".format(todayReturnReduction)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        HorizontalDivider()
+                        if (todayReturnedEntries.isEmpty()) {
+                            Text(
+                                text = "No return reduction recorded for today.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            todayReturnedEntries.forEach { entry ->
+                                val category = products.firstOrNull { it.productName == entry.productName }?.productCategory ?: "General"
+                                val shopName = shops.firstOrNull { it.shopNumber == entry.shopNumber }?.storeName ?: "Shop ${entry.shopNumber}"
+                                val reductionAmount = entry.packetsReturned * entry.ratePerPacket
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = shopName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "Category: $category",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            text = "Snack / Product: ${entry.productName}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Rupee Rate: ₹${"%,.2f".format(entry.ratePerPacket)}/pkt",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Returned: ${entry.packetsReturned} pkts",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                                        Text(
+                                            text = "Calculation: ${entry.packetsReturned} packets × ₹${"%,.2f".format(entry.ratePerPacket)} = ₹${"%,.2f".format(reductionAmount)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showReturnReductionDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+
+        if (showCustomPriceDialog) {
+            AlertDialog(
+                onDismissRequest = { showCustomPriceDialog = false },
+                title = {
+                    Text("Custom Price Reduction Shops", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Total Custom Price Reduction: ₹${"%,.2f".format(todayCustomPriceReduction)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Tap any shop below to view it in Shop Master with today's date search.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HorizontalDivider()
+                        if (todayCustomPriceEntries.isEmpty()) {
+                            Text(
+                                text = "No custom price items recorded for today.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            todayCustomPriceEntries.forEach { entry ->
+                                val shopName = shops.firstOrNull { it.shopNumber == entry.shopNumber }?.storeName ?: "Shop ${entry.shopNumber}"
+                                val category = products.firstOrNull { it.productName == entry.productName }?.productCategory ?: "General"
+                                val originalRate = entry.originalPacketRate ?: entry.ratePerPacket
+                                val reductionPerUnit = originalRate - entry.ratePerPacket
+                                val totalReduction = reductionPerUnit * entry.packetsSold
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            viewModel.setPrefilledShopSearchQuery(shopName)
+                                            onNavigateToTab("Shops")
+                                            showCustomPriceDialog = false
+                                        },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = shopName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "Category: $category",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            text = "Product / Snack: ${entry.productName}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Original: ₹${"%,.2f".format(originalRate)} → Custom: ₹${"%,.2f".format(entry.ratePerPacket)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Qty: ${entry.packetsSold} pkts",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Reduction: ₹${"%,.2f".format(totalReduction)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                            Text(
+                                                text = "View in Shop Master ➔",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showCustomPriceDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+
+        if (showPacketsSoldDialog) {
+            AlertDialog(
+                onDismissRequest = { showPacketsSoldDialog = false },
+                title = {
+                    Text("Packets Sold Breakdown", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Total Packets Sold Today: $todaySalesCount",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        HorizontalDivider()
+                        if (todaySoldEntries.isEmpty()) {
+                            Text(
+                                text = "No packets sold today.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            todaySoldEntries.forEach { entry ->
+                                val category = products.firstOrNull { it.productName == entry.productName }?.productCategory ?: "General"
+                                val shopName = shops.firstOrNull { it.shopNumber == entry.shopNumber }?.storeName ?: "Shop ${entry.shopNumber}"
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = shopName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "Category: $category",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            text = "Item (Snack): ${entry.productName}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Price / Packet: ₹${"%,.2f".format(entry.ratePerPacket)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Qty: ${entry.packetsSold} pkts",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Total Amount: ₹${"%,.2f".format(entry.totalAmount)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showPacketsSoldDialog = false }) {
+                        Text("Close")
                     }
                 }
             )
@@ -1322,6 +1773,10 @@ fun BentoSalesCard(
     customPriceReduction: Double,
     todayTargets: List<com.example.data.SalesTargetItem>,
     onClick: () -> Unit,
+    onPacketsReturnedClick: () -> Unit = {},
+    onReturnReductionClick: () -> Unit = {},
+    onCustomPriceReductionClick: () -> Unit = {},
+    onPacketsSoldClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val targetPackets = todayTargets.sumOf { it.targetPackets }
@@ -1366,7 +1821,9 @@ fun BentoSalesCard(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.2f))
+                            .clickable(onClick = onPacketsSoldClick)
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Column {
@@ -1377,7 +1834,9 @@ fun BentoSalesCard(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.2f))
+                            .clickable(onClick = onPacketsReturnedClick)
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Column {
@@ -1394,7 +1853,9 @@ fun BentoSalesCard(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.15f))
+                            .clickable(onClick = onReturnReductionClick)
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Column {
@@ -1405,7 +1866,9 @@ fun BentoSalesCard(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.15f))
+                            .clickable(onClick = onCustomPriceReductionClick)
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Column {
@@ -2848,7 +3311,10 @@ data class DashboardStats(
     val shopProfits: Map<String, Double>,
     val todayPacketsReturned: Int,
     val todayReturnReduction: Double,
-    val todayCustomPriceReduction: Double
+    val todayCustomPriceReduction: Double,
+    val todayReturnedEntries: List<SalesEntry>,
+    val todayCustomPriceEntries: List<SalesEntry>,
+    val todaySoldEntries: List<SalesEntry>
 )
 
 @Composable
