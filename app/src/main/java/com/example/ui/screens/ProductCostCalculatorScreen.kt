@@ -328,6 +328,15 @@ fun ProductCostCalculatorScreen(
                                         editingCalculation = calc
                                         activeMode = FormMode.CalculationForm
                                     },
+                                    onCopy = { calc ->
+                                        val copied = calc.copy(
+                                            id = 0,
+                                            productName = "${calc.productName} (Copy)",
+                                            date = System.currentTimeMillis()
+                                        )
+                                        editingCalculation = copied
+                                        activeMode = FormMode.CalculationForm
+                                    },
                                     onDelete = { calc ->
                                         viewModel.deleteProductCostCalculation(calc)
                                         Toast.makeText(context, "Calculation deleted", Toast.LENGTH_SHORT).show()
@@ -412,6 +421,7 @@ fun ProductCostCalculatorScreen(
 fun CalculationsTab(
     calculations: List<ProductCostCalculation>,
     onEdit: (ProductCostCalculation) -> Unit,
+    onCopy: (ProductCostCalculation) -> Unit,
     onDelete: (ProductCostCalculation) -> Unit,
     onCreateNew: () -> Unit
 ) {
