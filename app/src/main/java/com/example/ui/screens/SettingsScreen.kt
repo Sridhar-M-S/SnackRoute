@@ -26,9 +26,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.AppViewModel
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.Scope
+import android.accounts.AccountManager
+import android.accounts.Account
 import com.google.android.gms.common.api.ApiException
 import androidx.compose.foundation.text.selection.SelectionContainer
 import android.content.Context
@@ -163,34 +162,18 @@ fun SettingsScreen(
     var showGDriveRestoreConfirm by remember { mutableStateOf(false) }
     var gdriveErrorDetails by remember { mutableStateOf<String?>(null) }
 
-    val gso = remember {
-        val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestProfile()
-            .requestScopes(Scope("https://www.googleapis.com/auth/drive.file"))
-        
-        val oauthClientId = com.example.BuildConfig.OAUTH_CLIENT_ID
-        if (oauthClientId.isNotEmpty()) {
-            builder.requestIdToken(oauthClientId)
-        }
-        builder.build()
-    }
-    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
-
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            viewModel.setGoogleAccount(account)
-            gdriveErrorDetails = null
-            Toast.makeText(context, "Successfully connected to Google Drive!", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            val parsedError = parseGoogleSignInError(e, context)
-            gdriveErrorDetails = parsedError
-            Toast.makeText(context, "Google Connection Failed (Details on Screen)", Toast.LENGTH_LONG).show()
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+            val accountType = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE) ?: "com.google"
+            if (accountName != null) {
+                val account = Account(accountName, accountType)
+                viewModel.setGoogleAccount(account)
+                gdriveErrorDetails = null
+                Toast.makeText(context, "Successfully connected $accountName to Google Drive!", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -1092,8 +1075,21 @@ fun SettingsScreen(
                         if (googleAccountState == null) {
                             Button(
                                 onClick = {
-                                    val signInIntent = googleSignInClient.signInIntent
-                                    launcher.launch(signInIntent)
+                                    try {
+                                        val intent = AccountManager.newChooseAccountIntent(
+                                            null,
+                                            null,
+                                            arrayOf("com.google"),
+                                            null,
+                                            null,
+                                            null,
+                                            null
+                                        )
+                                        launcher.launch(intent)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        Toast.makeText(context, "Error opening account picker: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),

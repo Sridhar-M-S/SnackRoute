@@ -254,8 +254,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val gamificationEvents: SharedFlow<GamificationEvent> = _gamificationEvents.asSharedFlow()
 
     // --- Google Drive Sync States & Persistence ---
-    private val _googleSignInAccount = MutableStateFlow<GoogleSignInAccount?>(null)
-    val googleSignInAccount: StateFlow<GoogleSignInAccount?> = _googleSignInAccount.asStateFlow()
+    data class GoogleAccountInfo(
+        val email: String,
+        val displayName: String,
+        val account: android.accounts.Account
+    )
+
+    private val _googleSignInAccount = MutableStateFlow<GoogleAccountInfo?>(null)
+    val googleSignInAccount: StateFlow<GoogleAccountInfo?> = _googleSignInAccount.asStateFlow()
 
     private val _syncProgress = MutableStateFlow<Int>(-1)
     val syncProgress: StateFlow<Int> = _syncProgress.asStateFlow()
@@ -792,18 +798,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setGoogleAccount(account: GoogleSignInAccount?) {
-        _googleSignInAccount.value = account
+    fun setGoogleAccount(account: android.accounts.Account?) {
         if (account != null) {
+            val info = GoogleAccountInfo(account.name, account.name, account)
+            _googleSignInAccount.value = info
             prefs.edit()
-                .putString("gdrive_connected_email", account.email)
-                .putString("gdrive_connected_name", account.displayName)
+                .putString("gdrive_connected_email", account.name)
+                .putString("gdrive_connected_name", account.name)
+                .putString("gdrive_connected_type", account.type)
                 .apply()
             triggerDriveSync()
         } else {
+            _googleSignInAccount.value = null
             prefs.edit()
                 .remove("gdrive_connected_email")
                 .remove("gdrive_connected_name")
+                .remove("gdrive_connected_type")
                 .apply()
         }
     }
@@ -817,17 +827,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOutGoogle(context: Context, onComplete: () -> Unit = {}) {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
-        GoogleSignIn.getClient(context, gso).signOut().addOnCompleteListener {
-            setGoogleAccount(null)
-            _syncStatus.value = "Idle"
-            _lastSyncError.value = ""
-            prefs.edit()
-                .remove("gdrive_sync_status")
-                .remove("gdrive_last_error")
-                .apply()
-            onComplete()
-        }
+        setGoogleAccount(null)
+        _syncStatus.value = "Idle"
+        _lastSyncError.value = ""
+        prefs.edit()
+            .remove("gdrive_sync_status")
+            .remove("gdrive_last_error")
+            .apply()
+        onComplete()
     }
 
     fun reloadPreferences() {
@@ -2435,8 +2442,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Initialize Google Sign-In account on launch
-        _googleSignInAccount.value = GoogleSignIn.getLastSignedInAccount(application)
+        // Initialize Google account from prefs on launch
+        val savedEmail = prefs.getString("gdrive_connected_email", null)
+        val savedType = prefs.getString("gdrive_connected_type", "com.google") ?: "com.google"
+        if (savedEmail != null) {
+            val acc = android.accounts.Account(savedEmail, savedType)
+            _googleSignInAccount.value = GoogleAccountInfo(savedEmail, savedEmail, acc)
+        }
 
         // Register connectivity observer for auto-retry when back online
         try {
