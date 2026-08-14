@@ -24,7 +24,7 @@ object GoogleDriveSyncHelper {
 
     private const val FOLDER_NAME = "SnackRoute Pro"
     private const val BACKUP_FILE_NAME = "snackroute_full_backup.enc"
-    private const val SCOPE = "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+    private const val SCOPE = "oauth2:https://www.googleapis.com/auth/drive.file"
 
     fun getAccessToken(context: Context, account: Account): String {
         return GoogleAuthUtil.getToken(context, account, SCOPE)

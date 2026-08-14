@@ -35,6 +35,8 @@ import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.Scope
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Network
@@ -283,6 +285,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isOfflineQueueActive = MutableStateFlow<Boolean>(false)
     val isOfflineQueueActive: StateFlow<Boolean> = _isOfflineQueueActive.asStateFlow()
+
+    private val _userRecoverableAuthIntent = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
+    val userRecoverableAuthIntent: SharedFlow<Intent> = _userRecoverableAuthIntent.asSharedFlow()
 
     private val _inAppNotifications = MutableStateFlow<List<InAppNotification>>(emptyList())
     val inAppNotifications: StateFlow<List<InAppNotification>> = _inAppNotifications.asStateFlow()
@@ -905,6 +910,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     .putString("gdrive_last_error", "")
                     .apply()
             }.onFailure { exception ->
+                val recoverable = (exception as? UserRecoverableAuthException)
+                    ?: (exception.cause as? UserRecoverableAuthException)
+                recoverable?.intent?.let { _userRecoverableAuthIntent.tryEmit(it) }
                 val errorMsg = exception.message ?: "Unknown sync error"
                 _syncStatus.value = "Failed"
                 _lastSyncError.value = "Upload Failed: $errorMsg"
@@ -960,6 +968,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 
                 onComplete(true, "Application backup restored successfully!")
             }.onFailure { exception ->
+                val recoverable = (exception as? UserRecoverableAuthException)
+                    ?: (exception.cause as? UserRecoverableAuthException)
+                recoverable?.intent?.let { _userRecoverableAuthIntent.tryEmit(it) }
                 val errorMsg = exception.message ?: "Unknown download/restore error"
                 _syncStatus.value = "Failed"
                 _lastSyncError.value = "Download Failed: $errorMsg"

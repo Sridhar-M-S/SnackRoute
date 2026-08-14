@@ -177,6 +177,21 @@ fun SettingsScreen(
         }
     }
 
+    val authConsentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            Toast.makeText(context, "Google Drive permission granted! Syncing...", Toast.LENGTH_SHORT).show()
+            viewModel.triggerDriveSync()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.userRecoverableAuthIntent.collect { intent ->
+            authConsentLauncher.launch(intent)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
