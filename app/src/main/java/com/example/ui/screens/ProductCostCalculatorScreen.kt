@@ -270,7 +270,7 @@ fun ProductCostCalculatorScreen(
                         text = when (activeMode) {
                             FormMode.List -> "Product Costing"
                             FormMode.IngredientForm -> if (editingIngredient == null) "New Ingredient" else "Edit Ingredient"
-                            FormMode.CalculationForm -> if (editingCalculation == null) "New Product Recipe" else "Edit Product Recipe"
+                            FormMode.CalculationForm -> if (editingCalculation == null) "New Product Recipe" else if (editingCalculation?.id == 0) "Duplicate Product Recipe" else "Edit Product Recipe"
                         },
                         fontWeight = FontWeight.Bold
                     )
@@ -544,10 +544,24 @@ fun CalculationsTab(
                                     ) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                                     }
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    OutlinedButton(
+                                        onClick = { onCopy(calc) },
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.primary
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("btn_copy_calc_${calc.id}")
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Copy", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Button(
                                         onClick = { onEdit(calc) },
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                         modifier = Modifier.testTag("btn_edit_calc_${calc.id}")
                                     ) {
                                         Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -852,6 +866,18 @@ fun CalculationFormScreen(
     // On-start restore logic
     LaunchedEffect(calculation) {
         if (calculation != null) {
+            productName = calculation.productName
+            category = calculation.category
+            sellingPriceStr = if (calculation.sellingPrice > 0.0) {
+                if (calculation.sellingPrice % 1.0 == 0.0) calculation.sellingPrice.toInt().toString()
+                else calculation.sellingPrice.toString()
+            } else ""
+            packetsProducedStr = if (calculation.packetsProduced > 0) calculation.packetsProduced.toString() else "1"
+            labourCostStr = if (calculation.labourCost > 0.0) {
+                if (calculation.labourCost % 1.0 == 0.0) calculation.labourCost.toInt().toString()
+                else calculation.labourCost.toString()
+            } else ""
+
             try {
                 val parsedIngs = deserializeIngredientsList(calculation.ingredientsJson)
                 ingredientsUsed.clear()
