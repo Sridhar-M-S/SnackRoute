@@ -2823,11 +2823,11 @@ object Exporter {
         productCostCalculations: List<com.example.data.ProductCostCalculation> = emptyList(),
         timetableEntries: List<com.example.data.TimetableEntry> = emptyList(),
         salesTargets: List<com.example.data.SalesTargetItem> = emptyList()
-    ) {
+    ): Boolean {
         val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
         val file = File(context.cacheDir, fileName)
 
-        try {
+        return try {
             val workbook = XSSFWorkbook()
 
             // Define styles
@@ -3334,9 +3334,11 @@ object Exporter {
             workbook.close()
 
             shareFile(context, file, "Unified All-Data Backup")
+            true
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(context, "Unified Export Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            false
         }
     }
 

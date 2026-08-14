@@ -76,6 +76,7 @@ fun DashboardScreen(
     val suggestions by viewModel.businessInsights.collectAsStateWithLifecycle(emptyList())
     val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
     val expenses by viewModel.allExpensesList.collectAsStateWithLifecycle()
+    val isExportNeeded by viewModel.isExportNeeded.collectAsStateWithLifecycle()
 
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
@@ -414,13 +415,64 @@ fun DashboardScreen(
                 )
 
                 NavigationDrawerItem(
-                    label = { Text("Export", fontWeight = FontWeight.Medium) },
+                    label = {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Export",
+                                    fontWeight = if (isExportNeeded) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isExportNeeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isExportNeeded) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(
+                                            text = "Export needed",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            if (isExportNeeded) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Changes detected — Export needed",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 13.sp
+                                )
+                            }
+                        }
+                    },
                     icon = {
-                        Icon(
-                            imageVector = Icons.Default.CloudDownload,
-                            contentDescription = "Export",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        BadgedBox(
+                            badge = {
+                                if (isExportNeeded) {
+                                    Badge(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError
+                                    ) {
+                                        Text("!", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = "Export",
+                                tint = if (isExportNeeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        }
                     },
                     selected = false,
                     onClick = {

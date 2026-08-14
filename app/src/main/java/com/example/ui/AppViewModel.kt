@@ -17,6 +17,7 @@ import com.example.data.*
 import com.example.utils.Exporter
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -291,6 +292,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _inAppNotifications = MutableStateFlow<List<InAppNotification>>(emptyList())
     val inAppNotifications: StateFlow<List<InAppNotification>> = _inAppNotifications.asStateFlow()
+
+    private val _isExportNeeded = MutableStateFlow<Boolean>(prefs.getBoolean("has_unexported_changes", false))
+    val isExportNeeded: StateFlow<Boolean> = _isExportNeeded.asStateFlow()
+
+    private val _lastSuccessfulExportTime = MutableStateFlow<Long>(prefs.getLong("last_successful_export_time", 0L))
+    val lastSuccessfulExportTime: StateFlow<Long> = _lastSuccessfulExportTime.asStateFlow()
+
+    @Volatile
+    private var isAppFullyInitialized = false
+
+    fun markDataChanged() {
+        _isExportNeeded.value = true
+        prefs.edit()
+            .putBoolean("has_unexported_changes", true)
+            .putLong("last_data_change_time", System.currentTimeMillis())
+            .apply()
+    }
+
+    fun markExportSuccessful() {
+        val now = System.currentTimeMillis()
+        _isExportNeeded.value = false
+        _lastSuccessfulExportTime.value = now
+        prefs.edit()
+            .putBoolean("has_unexported_changes", false)
+            .putLong("last_successful_export_time", now)
+            .apply()
+    }
 
     private fun loadInAppNotifications() {
         val serializedSet = prefs.getStringSet("in_app_notifications_set", emptySet()) ?: emptySet()
@@ -2498,6 +2526,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Register InvalidationTracker for real-time Export Needed detection across all tables
+        try {
+            repository.addDataChangeObserver {
+                if (isAppFullyInitialized) {
+                    markDataChanged()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // Initialize export state check on startup
+        viewModelScope.launch(Dispatchers.IO) {
+            val lastExport = prefs.getLong("last_successful_export_time", 0L)
+            val hasChanges = prefs.getBoolean("has_unexported_changes", false)
+            if (lastExport == 0L) {
+                if (repository.hasAnyData()) {
+                    _isExportNeeded.value = true
+                    prefs.edit().putBoolean("has_unexported_changes", true).apply()
+                }
+            } else {
+                _isExportNeeded.value = hasChanges
+            }
+            delay(1200L)
+            isAppFullyInitialized = true
+        }
+
         refreshNextShopNumber()
         viewModelScope.launch(Dispatchers.IO) {
             repository.initializeTimetableIfNeeded()
@@ -4657,7 +4712,7 @@ User Question: $userQuestion
                 val timetableList = repository.getDirectTimetableEntries()
                 val salesTargetsList = repository.getAllSalesTargetsDirect()
 
-                com.example.utils.Exporter.exportAllUnified(
+                val success = com.example.utils.Exporter.exportAllUnified(
                     context = context,
                     locations = locationsList,
                     shops = shopsList,
@@ -4677,6 +4732,9 @@ User Question: $userQuestion
                     timetableEntries = timetableList,
                     salesTargets = salesTargetsList
                 )
+                if (success) {
+                    markExportSuccessful()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 triggerError(
@@ -4984,6 +5042,7 @@ User Question: $userQuestion
                 )
 
                 reloadSalesReminderSettings()
+                markDataChanged()
                 Toast.makeText(context, "Unified Import Completed successfully!", Toast.LENGTH_LONG).show()
                 recalculateHistoricalSales("", true)
             } catch (e: Exception) {

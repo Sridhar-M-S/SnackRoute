@@ -3,13 +3,14 @@ package com.example.data
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import androidx.room.withTransaction
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
 class AppRepository(
-    private val database: AppDatabase,
+    val database: AppDatabase,
     private val locationDao: LocationDao,
     private val shopDao: ShopDao,
     private val productDao: ProductDao,
@@ -390,4 +391,56 @@ class AppRepository(
     suspend fun insertPurchases(purchases: List<IngredientPurchase>) = dynamicCostDao.insertPurchases(purchases)
     suspend fun insertCalculations(calculations: List<CostCalculation>) = dynamicCostDao.insertCalculations(calculations)
     suspend fun insertCalculationItems(items: List<CostCalculationItem>) = dynamicCostDao.insertCalculationItems(items)
+
+    companion object {
+        val ALL_PERSISTENT_DATA_TABLES = arrayOf(
+            "locations",
+            "shops",
+            "products",
+            "product_prices",
+            "sales",
+            "weekly_timetable",
+            "daily_targets",
+            "daily_tasks",
+            "ingredients",
+            "ingredient_purchases",
+            "cost_calculations",
+            "cost_calculation_items",
+            "shop_remarks",
+            "business_expenses",
+            "product_cost_ingredients",
+            "product_cost_calculations",
+            "sales_target_items"
+        )
+    }
+
+    fun addDataChangeObserver(onDataChanged: () -> Unit): androidx.room.InvalidationTracker.Observer {
+        val observer = object : androidx.room.InvalidationTracker.Observer(ALL_PERSISTENT_DATA_TABLES) {
+            override fun onInvalidated(tables: Set<String>) {
+                onDataChanged()
+            }
+        }
+        database.invalidationTracker.addObserver(observer)
+        return observer
+    }
+
+    fun removeDataChangeObserver(observer: androidx.room.InvalidationTracker.Observer) {
+        database.invalidationTracker.removeObserver(observer)
+    }
+
+    suspend fun hasAnyData(): Boolean {
+        return try {
+            val s = allShops.first()
+            val sa = allSales.first()
+            val p = allProducts.first()
+            val l = allLocations.first()
+            val t = allTasks.first()
+            val e = allExpenses.first()
+            val r = allRemarks.first()
+            val ing = allIngredients.first()
+            s.isNotEmpty() || sa.isNotEmpty() || p.isNotEmpty() || l.isNotEmpty() || t.isNotEmpty() || e.isNotEmpty() || r.isNotEmpty() || ing.isNotEmpty()
+        } catch (e: Exception) {
+            false
+        }
+    }
 }
