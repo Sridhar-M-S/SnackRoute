@@ -28,6 +28,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.LocationMaster
 import com.example.ui.AppViewModel
 import com.example.utils.Exporter
+import android.content.Intent
+import com.example.utils.LocationUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +43,63 @@ fun LocationsScreen(
 ) {
     val context = LocalContext.current
     val locations by viewModel.locations.collectAsStateWithLifecycle()
+    val shops by viewModel.shops.collectAsStateWithLifecycle()
+    val userCurrentLocation by viewModel.userCurrentLocation.collectAsStateWithLifecycle()
+    var currentUserLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
+
+    val fusedLocationClient = remember { com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context) }
+    var isFetchingLocation by remember { mutableStateOf(false) }
+
+    fun fetchCurrentLocation() {
+        val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val isGpsEnabled = try {
+            locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+            locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception) {
+            false
+        }
+
+        if (!isGpsEnabled) {
+            Toast.makeText(context, "GPS/Location Services are turned off. Please enable them.", Toast.LENGTH_LONG).show()
+            try {
+                context.startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            } catch (e: Exception) {
+                // fallback
+            }
+            return
+        }
+
+        isFetchingLocation = true
+        try {
+            fusedLocationClient.getCurrentLocation(
+                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+                com.google.android.gms.tasks.CancellationTokenSource().token
+            ).addOnSuccessListener { location ->
+                isFetchingLocation = false
+                if (location != null) {
+                    val lat = location.latitude
+                    val lng = location.longitude
+                    currentUserLocation = Pair(lat, lng)
+                    viewModel.setUserCurrentLocation(lat, lng)
+                } else {
+                    fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                        if (lastLoc != null) {
+                            val lat = lastLoc.latitude
+                            val lng = lastLoc.longitude
+                            currentUserLocation = Pair(lat, lng)
+                            viewModel.setUserCurrentLocation(lat, lng)
+                        }
+                    }
+                }
+            }.addOnFailureListener {
+                isFetchingLocation = false
+            }
+        } catch (e: Exception) {
+            isFetchingLocation = false
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -84,15 +141,53 @@ fun LocationsScreen(
         listState.scrollToItem(0)
     }
 
-    val filteredLocations = remember(locations, searchQuery, sortBy, sortAscending) {
+    LaunchedEffect(sortBy) {
+        if (sortBy == "Distance" && currentUserLocation == null && userCurrentLocation == null) {
+            fetchCurrentLocation()
+        }
+    }
+
+    val locationDistanceMap = remember(locations, shops, currentUserLocation, userCurrentLocation) {
+        val myLoc = currentUserLocation ?: userCurrentLocation
+        locations.associate { loc ->
+            val shopsInLoc = shops.filter { it.locationNumber == loc.locationNumber }
+            val validCoords = shopsInLoc.mapNotNull { s ->
+                if (s.latitude != null && s.longitude != null && s.latitude in -90.0..90.0 && s.longitude in -180.0..180.0 && !(s.latitude == 0.0 && s.longitude == 0.0)) {
+                    Pair(s.latitude, s.longitude)
+                } else if (!s.googleMapLink.isNullOrEmpty()) {
+                    LocationUtils.extractCoordinates(s.googleMapLink)
+                } else null
+            }
+            val centerCoords = if (validCoords.isNotEmpty()) {
+                Pair(validCoords.map { it.first }.average(), validCoords.map { it.second }.average())
+            } else null
+
+            val dist = if (centerCoords != null && myLoc != null) {
+                viewModel.calculateDistance(myLoc.first, myLoc.second, centerCoords.first, centerCoords.second)
+            } else null
+            loc.locationNumber to dist
+        }
+    }
+
+    val filteredLocations = remember(locations, searchQuery, sortBy, sortAscending, locationDistanceMap) {
         var list = locations.filter {
             it.locationNumber.contains(searchQuery, ignoreCase = true) ||
                     it.locationName.contains(searchQuery, ignoreCase = true)
         }
-        list = if (sortBy == "Number") {
-            list.sortedBy { it.locationNumber }
-        } else {
-            list.sortedBy { it.locationName }
+        list = when (sortBy) {
+            "Distance" -> {
+                if (sortAscending) {
+                    list.sortedWith(compareBy<LocationMaster> { locationDistanceMap[it.locationNumber] ?: Double.MAX_VALUE }.thenBy { it.locationName })
+                } else {
+                    list.sortedWith(compareByDescending<LocationMaster> { locationDistanceMap[it.locationNumber] ?: -1.0 }.thenBy { it.locationName })
+                }
+            }
+            "Number" -> {
+                if (sortAscending) list.sortedBy { it.locationNumber } else list.sortedByDescending { it.locationNumber }
+            }
+            else -> {
+                if (sortAscending) list.sortedBy { it.locationName } else list.sortedByDescending { it.locationName }
+            }
         }
         list
     }
@@ -179,12 +274,24 @@ fun LocationsScreen(
             // --- Sort Pills ---
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     "Sort by:",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                )
+                FilterChip(
+                    selected = sortBy == "Distance",
+                    onClick = {
+                        sortBy = "Distance"
+                        if (currentUserLocation == null && userCurrentLocation == null) {
+                            fetchCurrentLocation()
+                        }
+                    },
+                    label = { Text("Distance (GPS)") },
+                    leadingIcon = { Icon(Icons.Default.NearMe, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 )
                 FilterChip(
                     selected = sortBy == "Number",
@@ -196,6 +303,54 @@ fun LocationsScreen(
                     onClick = { sortBy = "Name" },
                     label = { Text("Location Name") }
                 )
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = { sortAscending = !sortAscending }) {
+                    Icon(
+                        if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                        contentDescription = "Toggle Sort Order",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            if (sortBy == "Distance") {
+                val myLoc = currentUserLocation ?: userCurrentLocation
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (myLoc != null) {
+                                if (sortAscending) "📍 Nearest locations first (Ascending)"
+                                else "📍 Farthest locations first (Descending)"
+                            } else if (isFetchingLocation) {
+                                "Fetching GPS location..."
+                            } else {
+                                "Tap to fetch GPS location"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = { fetchCurrentLocation() },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (myLoc != null) "Refresh GPS" else "Get GPS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
 
             // --- List of Locations ---
@@ -239,8 +394,10 @@ fun LocationsScreen(
                     modifier = Modifier.weight(1f)
                 ) {
                     items(filteredLocations, key = { it.locationNumber }) { loc ->
+                        val dist = locationDistanceMap[loc.locationNumber]
                         LocationCard(
                             location = loc,
+                            distance = dist,
                             onEdit = {
                                 selectedLocationForEdit = loc
                                 locNumField = loc.locationNumber
@@ -467,6 +624,7 @@ fun SummaryRow(label: String, value: String, color: Color = MaterialTheme.colorS
 @Composable
 fun LocationCard(
     location: LocationMaster,
+    distance: Double? = null,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onViewShops: () -> Unit
@@ -511,12 +669,49 @@ fun LocationCard(
                             fontSize = 15.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Text(
-                            text = "Code: ${location.locationNumber}",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Code: ${location.locationNumber}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (distance != null) {
+                                val distStr = if (distance >= 10.0) {
+                                    "%.1f km".format(distance)
+                                } else if (distance >= 1.0) {
+                                    "%.2f km".format(distance)
+                                } else {
+                                    "${(distance * 1000).toInt()} m"
+                                }
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.NearMe,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(10.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = distStr,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -178,10 +178,13 @@ fun ShopsScreen(
     }
 
     val selectedLocationFilter by viewModel.shopLocationFilter.collectAsStateWithLifecycle()
-    var sortBy by remember { mutableStateOf("Name") } // Name, Number, Rating, Date
+    val userCurrentLocation by viewModel.userCurrentLocation.collectAsStateWithLifecycle()
+    var currentUserLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var sortBy by remember { mutableStateOf("Name") } // Name, Distance, Number, Rating, Date
     var sortAscending by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
     var nearestQuery by remember { mutableStateOf("") }
+    var nearestSortAscending by remember { mutableStateOf(true) }
 
     val fusedLocationClient = remember { com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context) }
     var isFetchingLocation by remember { mutableStateOf(false) }
@@ -215,6 +218,8 @@ fun ShopsScreen(
                     isFetchingLocation = false
                     val lat = location.latitude
                     val lng = location.longitude
+                    currentUserLocation = Pair(lat, lng)
+                    viewModel.setUserCurrentLocation(lat, lng)
                     nearestQuery = "$lat,$lng"
                     viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
                 } else {
@@ -223,6 +228,8 @@ fun ShopsScreen(
                         if (lastLoc != null) {
                             val lat = lastLoc.latitude
                             val lng = lastLoc.longitude
+                            currentUserLocation = Pair(lat, lng)
+                            viewModel.setUserCurrentLocation(lat, lng)
                             nearestQuery = "$lat,$lng"
                             viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
                         } else {
@@ -239,6 +246,8 @@ fun ShopsScreen(
                     if (lastLoc != null) {
                         val lat = lastLoc.latitude
                         val lng = lastLoc.longitude
+                        currentUserLocation = Pair(lat, lng)
+                        viewModel.setUserCurrentLocation(lat, lng)
                         nearestQuery = "$lat,$lng"
                         viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
                     } else {
@@ -490,7 +499,13 @@ fun ShopsScreen(
         listState.scrollToItem(0)
     }
 
-    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales, locations) {
+    LaunchedEffect(sortBy) {
+        if (sortBy == "Distance" && currentUserLocation == null && userCurrentLocation == null) {
+            fetchCurrentLocation()
+        }
+    }
+
+    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales, locations, currentUserLocation, userCurrentLocation) {
         var list = shops.filter { shop ->
             val matchSearch = shop.storeName.contains(searchQuery, ignoreCase = true) ||
                     shop.shopNumber.contains(searchQuery, ignoreCase = true) ||
@@ -501,12 +516,41 @@ fun ShopsScreen(
             matchSearch && matchFilter
         }
 
+        val myLoc = currentUserLocation ?: userCurrentLocation
+        val shopDistanceMap = list.associate { shop ->
+            val coords = if (shop.latitude != null && shop.longitude != null && shop.latitude in -90.0..90.0 && shop.longitude in -180.0..180.0 && !(shop.latitude == 0.0 && shop.longitude == 0.0)) {
+                Pair(shop.latitude, shop.longitude)
+            } else if (!shop.googleMapLink.isNullOrEmpty()) {
+                extractCoordinates(shop.googleMapLink)
+            } else null
+
+            val dist = if (coords != null && myLoc != null) {
+                viewModel.calculateDistance(myLoc.first, myLoc.second, coords.first, coords.second)
+            } else null
+            shop.shopNumber to dist
+        }
+
         val shopAnalyticsMap = list.associate { shop ->
             val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
             shop.shopNumber to com.example.utils.RatingCalculator.calculateAnalytics(salesForShop)
         }
 
         list = when (sortBy) {
+            "Distance" -> {
+                if (sortAscending) {
+                    // Ascending: Nearest first (lowest distance to highest). Null distances placed at the bottom.
+                    list.sortedWith(
+                        compareBy<ShopMaster> { shopDistanceMap[it.shopNumber] ?: Double.MAX_VALUE }
+                            .thenBy { it.storeName }
+                    )
+                } else {
+                    // Descending: Farthest first (highest distance to lowest). Null distances placed at the bottom.
+                    list.sortedWith(
+                        compareByDescending<ShopMaster> { shopDistanceMap[it.shopNumber] ?: -1.0 }
+                            .thenBy { it.storeName }
+                    )
+                }
+            }
             "Highest Rating" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.currentRating ?: 0f }
             "Lowest Rating" -> list.sortedBy { shopAnalyticsMap[it.shopNumber]?.currentRating ?: 5f }
             "Most Regular Customer" -> list.sortedByDescending { shopAnalyticsMap[it.shopNumber]?.totalSalesTransactions ?: 0 }
@@ -544,11 +588,13 @@ fun ShopsScreen(
             val salesForShop = sales.filter { it.shopNumber == shop.shopNumber }
             val score = viewModel.calculateHealthScore(shop, salesForShop)
             val category = viewModel.getHealthCategory(score)
+            val dist = shopDistanceMap[shop.shopNumber]
             ShopDisplayItem(
                 shop = shop,
                 locationName = locName,
                 healthScore = score,
-                healthCategory = category
+                healthCategory = category,
+                distance = dist
             )
         }
     }
@@ -765,13 +811,31 @@ fun ShopsScreen(
                                 FilterChip(
                                     selected = true,
                                     onClick = { sortExpanded = true },
-                                    label = { Text("Sort: $sortBy") },
+                                    label = { Text(if (sortBy == "Distance") (if (sortAscending) "Distance: Nearest" else "Distance: Farthest") else "Sort: $sortBy") },
                                     trailingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
                                 )
                                 DropdownMenu(
                                     expanded = sortExpanded,
                                     onDismissRequest = { sortExpanded = false }
                                 ) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Icon(Icons.Default.NearMe, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                Text("Distance (Nearest / Farthest)", fontWeight = if (sortBy == "Distance") FontWeight.Bold else FontWeight.Normal)
+                                            }
+                                        },
+                                        onClick = {
+                                            sortBy = "Distance"
+                                            sortExpanded = false
+                                            if (currentUserLocation == null && userCurrentLocation == null) {
+                                                fetchCurrentLocation()
+                                            }
+                                        }
+                                    )
                                     DropdownMenuItem(text = { Text("Name") }, onClick = { sortBy = "Name"; sortExpanded = false })
                                     DropdownMenuItem(text = { Text("Shop Number") }, onClick = { sortBy = "Number"; sortExpanded = false })
                                     DropdownMenuItem(text = { Text("Highest Rating") }, onClick = { sortBy = "Highest Rating"; sortExpanded = false })
@@ -788,6 +852,57 @@ fun ShopsScreen(
                             }
                             IconButton(onClick = { sortAscending = !sortAscending }) {
                                 Icon(if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, contentDescription = "Toggle Sort Order")
+                            }
+                        }
+                    }
+
+                    if (sortBy == "Distance") {
+                        val myLoc = currentUserLocation ?: userCurrentLocation
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.NearMe,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = if (myLoc != null) {
+                                            if (sortAscending) "📍 Sorted by Distance: Nearest shops first (Ascending)"
+                                            else "📍 Sorted by Distance: Farthest shops first (Descending)"
+                                        } else if (isFetchingLocation) {
+                                            "Fetching current GPS location..."
+                                        } else {
+                                            "Tap 'Get GPS' to calculate distance from current location"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { fetchCurrentLocation() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (myLoc != null) "Refresh GPS" else "Get GPS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -847,6 +962,7 @@ fun ShopsScreen(
                                     locationName = item.locationName,
                                     healthScore = item.healthScore,
                                     healthCategory = item.healthCategory,
+                                    distance = item.distance,
                                     onClick = { selectedShopForDetail = shop },
                                     onGoToSales = {
                                         viewModel.setSalesFilterShopNumber(shop.shopNumber)
@@ -1190,7 +1306,10 @@ fun ShopsScreen(
                             shopsWithValidCoords.map { (shop, shopCoords) ->
                                 val dist = calculateDistance(tLat, tLng, shopCoords.first, shopCoords.second)
                                 Pair(shop, dist)
-                            }.sortedBy { it.second }.take(5)
+                            }.let { list ->
+                                if (nearestSortAscending) list.sortedBy { it.second }.take(5)
+                                else list.sortedByDescending { it.second }.take(5)
+                            }
                         }
                     }
 
@@ -1248,13 +1367,41 @@ fun ShopsScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 item {
-                                    Text(
-                                        text = "Nearest 5 Shops",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(vertical = 4.dp)
-                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (nearestSortAscending) "Nearest 5 Shops (Closest First)" else "Shops by Distance (Farthest First)",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = if (nearestSortAscending) "Nearest" else "Farthest",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            IconButton(
+                                                onClick = { nearestSortAscending = !nearestSortAscending },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    if (nearestSortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                                                    contentDescription = "Toggle Nearest/Farthest Sort Order",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                                 itemsIndexed(nearestShopsResult) { index, (shop, distance) ->
                                     val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: shop.locationNumber
@@ -2343,6 +2490,7 @@ fun ShopCard(
     locationName: String,
     healthScore: Int,
     healthCategory: String,
+    distance: Double? = null,
     onClick: () -> Unit,
     onGoToSales: () -> Unit,
     onRecordSale: () -> Unit,
@@ -2427,6 +2575,39 @@ fun ShopCard(
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
+                    if (distance != null) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val distStr = if (distance >= 10.0) {
+                            "%.1f km".format(distance)
+                        } else if (distance >= 1.0) {
+                            "%.2f km".format(distance)
+                        } else {
+                            "${(distance * 1000).toInt()} m"
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NearMe,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(11.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "$distStr away",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2759,5 +2940,6 @@ data class ShopDisplayItem(
     val shop: com.example.data.ShopMaster,
     val locationName: String,
     val healthScore: Int,
-    val healthCategory: String
+    val healthCategory: String,
+    val distance: Double? = null
 )

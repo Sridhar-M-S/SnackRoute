@@ -2423,6 +2423,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _openAddLocationForm.value = false
     }
 
+    // User Current Location State
+    private val _userCurrentLocation = MutableStateFlow<Pair<Double, Double>?>(null)
+    val userCurrentLocation: StateFlow<Pair<Double, Double>?> = _userCurrentLocation.asStateFlow()
+
+    fun setUserCurrentLocation(lat: Double, lng: Double) {
+        _userCurrentLocation.value = Pair(lat, lng)
+    }
+
+    /**
+     * Standard Haversine distance formula in kilometers between two GPS coordinates
+     */
+    fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return r * c
+    }
+
     // Open Nearest Shop Tab trigger
     private val _openNearestShopTab = MutableStateFlow(false)
     val openNearestShopTab: StateFlow<Boolean> = _openNearestShopTab.asStateFlow()
