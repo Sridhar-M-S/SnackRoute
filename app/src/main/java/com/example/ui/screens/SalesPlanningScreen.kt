@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -71,22 +73,47 @@ fun SalesPlanningScreen(
     var filterExpanded by remember { mutableStateOf(true) }
     var filterStartDate by remember { mutableStateOf<Long?>(null) }
     var filterEndDate by remember { mutableStateOf<Long?>(null) }
+    var filterDateBy by remember { mutableStateOf("Last Sale Date") } // "Last Sale Date" or "Due Date"
     var filterLocationNumber by remember { mutableStateOf<String?>(null) }
     var filterPaymentStatus by remember { mutableStateOf<String?>(null) } // "Paid", "Pending", "Partially Paid"
 
+    fun startOfDay(timeMs: Long): Long {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = timeMs
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    fun endOfDay(timeMs: Long): Long {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = timeMs
+        cal.set(Calendar.HOUR_OF_DAY, 23)
+        cal.set(Calendar.MINUTE, 59)
+        cal.set(Calendar.SECOND, 59)
+        cal.set(Calendar.MILLISECOND, 999)
+        return cal.timeInMillis
+    }
+
     val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
-    val filteredDueReminders = remember(dueReminders, sales, filterStartDate, filterEndDate, filterLocationNumber, filterPaymentStatus) {
+    val filteredDueReminders = remember(dueReminders, sales, filterStartDate, filterEndDate, filterDateBy, filterLocationNumber, filterPaymentStatus) {
         dueReminders.filter { reminder ->
             val matchLocation = filterLocationNumber == null || reminder.shop.locationNumber == filterLocationNumber
             
             val matchDate = if (filterStartDate == null && filterEndDate == null) {
                 true
             } else {
-                val start = filterStartDate ?: 0L
-                val end = (filterEndDate ?: Long.MAX_VALUE) + 86399999L
-                val shopSales = sales.filter { it.shopNumber == reminder.shop.shopNumber }
-                (reminder.lastSaleDate in start..end) || shopSales.any { it.entryDate in start..end }
+                val start = filterStartDate?.let { startOfDay(it) } ?: 0L
+                val end = filterEndDate?.let { endOfDay(it) } ?: Long.MAX_VALUE
+                val targetDate = if (filterDateBy == "Due Date") {
+                    reminder.lastSaleDate + (reminder.interval * 86400000L)
+                } else {
+                    reminder.lastSaleDate
+                }
+                targetDate in start..end
             }
 
             val matchPaymentStatus = if (filterPaymentStatus == null) {
@@ -97,8 +124,7 @@ fun SalesPlanningScreen(
                 if (shopSales.isEmpty()) {
                     filterPaymentStatus.equals("Pending", ignoreCase = true)
                 } else {
-                    shopSales.any { it.status.equals(filterPaymentStatus, ignoreCase = true) } ||
-                            (latestSale != null && latestSale.status.equals(filterPaymentStatus, ignoreCase = true))
+                    latestSale != null && latestSale.status.equals(filterPaymentStatus, ignoreCase = true)
                 }
             }
 
@@ -295,13 +321,101 @@ fun SalesPlanningScreen(
                                 ) {
                                     HorizontalDivider()
 
-                                    // 1. Date Range Filter
-                                    Text(
-                                        text = "Date Range Filter (From Date to Date):",
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    // 1. Date Filter Mode Selection
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Filter Date By:",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        FilterChip(
+                                            selected = filterDateBy == "Last Sale Date",
+                                            onClick = { filterDateBy = "Last Sale Date" },
+                                            label = { Text("Last Sale Date", fontSize = 11.sp) },
+                                            modifier = Modifier.testTag("filter_by_last_sale_chip")
+                                        )
+                                        FilterChip(
+                                            selected = filterDateBy == "Due Date",
+                                            onClick = { filterDateBy = "Due Date" },
+                                            label = { Text("Due Date", fontSize = 11.sp) },
+                                            modifier = Modifier.testTag("filter_by_due_date_chip")
+                                        )
+                                    }
+
+                                    // Quick Date Presets
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        SuggestionChip(
+                                            onClick = {
+                                                val now = System.currentTimeMillis()
+                                                filterStartDate = startOfDay(now)
+                                                filterEndDate = endOfDay(now)
+                                            },
+                                            label = { Text("Today", fontSize = 11.sp) }
+                                        )
+                                        SuggestionChip(
+                                            onClick = {
+                                                val cal = Calendar.getInstance()
+                                                cal.add(Calendar.DAY_OF_YEAR, -1)
+                                                filterStartDate = startOfDay(cal.timeInMillis)
+                                                filterEndDate = endOfDay(cal.timeInMillis)
+                                            },
+                                            label = { Text("Yesterday", fontSize = 11.sp) }
+                                        )
+                                        SuggestionChip(
+                                            onClick = {
+                                                val now = System.currentTimeMillis()
+                                                val cal = Calendar.getInstance()
+                                                cal.add(Calendar.DAY_OF_YEAR, -6)
+                                                filterStartDate = startOfDay(cal.timeInMillis)
+                                                filterEndDate = endOfDay(now)
+                                            },
+                                            label = { Text("Last 7 Days", fontSize = 11.sp) }
+                                        )
+                                        SuggestionChip(
+                                            onClick = {
+                                                val now = System.currentTimeMillis()
+                                                val cal = Calendar.getInstance()
+                                                cal.add(Calendar.DAY_OF_YEAR, -29)
+                                                filterStartDate = startOfDay(cal.timeInMillis)
+                                                filterEndDate = endOfDay(now)
+                                            },
+                                            label = { Text("Last 30 Days", fontSize = 11.sp) }
+                                        )
+                                        SuggestionChip(
+                                            onClick = {
+                                                val cal = Calendar.getInstance()
+                                                cal.set(Calendar.DAY_OF_MONTH, 1)
+                                                val start = startOfDay(cal.timeInMillis)
+                                                val calEnd = Calendar.getInstance()
+                                                calEnd.set(Calendar.DAY_OF_MONTH, calEnd.getActualMaximum(Calendar.DAY_OF_MONTH))
+                                                val end = endOfDay(calEnd.timeInMillis)
+                                                filterStartDate = start
+                                                filterEndDate = end
+                                            },
+                                            label = { Text("This Month", fontSize = 11.sp) }
+                                        )
+                                        if (filterStartDate != null || filterEndDate != null) {
+                                            SuggestionChip(
+                                                onClick = {
+                                                    filterStartDate = null
+                                                    filterEndDate = null
+                                                },
+                                                label = { Text("Clear Date", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
+                                            )
+                                        }
+                                    }
+
+                                    // Date Range Pickers (From Date and To Date)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -453,6 +567,64 @@ fun SalesPlanningScreen(
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter Active Banner / No matching reminders banner
+                val activeFiltersPresent = (filterStartDate != null || filterEndDate != null || filterLocationNumber != null || filterPaymentStatus != null)
+                if (activeFiltersPresent && filteredDueReminders.isEmpty() && dueReminders.isNotEmpty()) {
+                    item(key = "no_filtered_results_card") {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .testTag("no_filtered_results_card"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterListOff,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Text(
+                                    text = "No Reminders Found Matching Filters",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "No shops match the selected date range ($filterDateBy) or filters. Try adjusting your dates or clearing filters.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        filterStartDate = null
+                                        filterEndDate = null
+                                        filterLocationNumber = null
+                                        filterPaymentStatus = null
+                                    },
+                                    modifier = Modifier.testTag("reset_filters_button"),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Clear All Filters", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -905,81 +1077,179 @@ fun ManufacturingSummaryView(
 ) {
     if (reminders.isEmpty()) return
 
+    data class ItemSummary(
+        val locationName: String,
+        val productName: String,
+        val category: String,
+        val price: Double,
+        val totalPackets: Int,
+        val shopCount: Int
+    )
+
     val summaryItems = remember(reminders, products, productPrices, locationMap) {
-        reminders.flatMap { reminder ->
-            reminder.recommendedProducts.map { (prodName, recommendedQty) ->
-                val matchingProduct = products.find { it.productName == prodName }
-                val variety = matchingProduct?.productCategory ?: "Standard"
-                val latestSalePrice = reminder.lastSaleProducts.find { it.productName == prodName }?.sellingPrice
-                val matchingPrice = productPrices.find { it.productId == matchingProduct?.id }?.sellingPrice ?: 0.0
-                val sellingPrice = latestSalePrice ?: matchingPrice
-                val locationName = locationMap[reminder.shop.locationNumber] ?: "Location ${reminder.shop.locationNumber}"
-                
-                Triple(locationName, variety, sellingPrice) to recommendedQty
+        val flatList = reminders.flatMap { reminder ->
+            val locationName = locationMap[reminder.shop.locationNumber] ?: "Location ${reminder.shop.locationNumber}"
+            
+            // Prefer recommendedProducts (average sales quantity per product)
+            if (reminder.recommendedProducts.isNotEmpty()) {
+                reminder.recommendedProducts.map { (prodName, recommendedQty) ->
+                    val matchingProduct = products.find { it.productName.equals(prodName, ignoreCase = true) }
+                    val category = matchingProduct?.productCategory ?: "Standard"
+                    val latestSalePrice = reminder.lastSaleProducts.find { it.productName.equals(prodName, ignoreCase = true) }?.sellingPrice
+                    val matchingPrice = productPrices.find { it.productId == matchingProduct?.id }?.sellingPrice ?: 0.0
+                    val sellingPrice = latestSalePrice ?: matchingPrice
+                    
+                    Triple(locationName, prodName, sellingPrice) to Pair(recommendedQty, category)
+                }
+            } else {
+                // Fallback to last sale products if recommended products is empty
+                reminder.lastSaleProducts.map { lsp ->
+                    val matchingProduct = products.find { it.productName.equals(lsp.productName, ignoreCase = true) }
+                    val category = if (lsp.productVariety.isNotBlank()) lsp.productVariety else (matchingProduct?.productCategory ?: "Standard")
+                    Triple(locationName, lsp.productName, lsp.sellingPrice) to Pair(lsp.packetsSupplied, category)
+                }
             }
         }
-        .groupBy { it.first }
-        .map { (key, entries) ->
-            val totalPackets = entries.sumOf { it.second }
-            Triple(key.first, key.second, key.third) to totalPackets
-        }
-        .sortedWith(compareBy({ it.first.first }, { it.first.second }, { it.first.third }))
+
+        flatList
+            .groupBy { it.first }
+            .map { (key, entries) ->
+                val (locName, prodName, price) = key
+                val totalPackets = entries.sumOf { it.second.first }
+                val category = entries.firstOrNull()?.second?.second ?: "Standard"
+                val shopCount = entries.size
+                ItemSummary(
+                    locationName = locName,
+                    productName = prodName,
+                    category = category,
+                    price = price,
+                    totalPackets = totalPackets,
+                    shopCount = shopCount
+                )
+            }
+            .sortedWith(compareBy({ it.locationName }, { it.productName }, { it.price }))
+    }
+
+    val overallTotalPackets = remember(summaryItems) {
+        summaryItems.sumOf { it.totalPackets }
     }
 
     if (summaryItems.isNotEmpty()) {
         Card(
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.75f)
             ),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 8.dp)
                 .testTag(testTag)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Header with total badge
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Handyman,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    Text(
-                        text = "Stock Preparation Summary",
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        fontSize = 14.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Handyman,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Stock Preparation Summary",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiary,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "Total: $overallTotalPackets pkts",
+                            color = MaterialTheme.colorScheme.onTertiary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                val summaryByLocation = summaryItems.groupBy { it.first.first }
+
+                Text(
+                    text = "Breakdown by Location, Item Name, and Selling Price",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                )
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.15f),
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                val summaryByLocation = summaryItems.groupBy { it.locationName }
                 summaryByLocation.forEach { (locName, entries) ->
-                    Text(
-                        text = locName,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                    val locationTotal = entries.sumOf { it.totalPackets }
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = locName,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            text = "Subtotal: $locationTotal pkts",
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                            fontSize = 11.sp
+                        )
+                    }
+
                     entries.forEach { entry ->
-                        val (_, variety, price) = entry.first
-                        val totalPackets = entry.second
+                        val priceLabel = if (entry.price > 0.0) " ₹${String.format(Locale.getDefault(), "%.2f", entry.price)}" else ""
+                        val categoryBadge = if (entry.category.isNotBlank() && !entry.category.equals(entry.productName, ignoreCase = true) && !entry.category.equals("Standard", ignoreCase = true)) " (${entry.category})" else ""
+                        
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(start = 6.dp, top = 2.dp, bottom = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "• ${entry.productName}$categoryBadge$priceLabel",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                if (entry.shopCount > 1) {
+                                    Text(
+                                        text = "across ${entry.shopCount} shops",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f),
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                text = "• $variety ₹${String.format(Locale.getDefault(), "%.2f", price)}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.9f)
-                            )
-                            Text(
-                                text = "$totalPackets packets",
+                                text = "${entry.totalPackets} packets",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer

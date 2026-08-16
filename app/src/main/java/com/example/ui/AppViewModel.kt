@@ -2022,66 +2022,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun extractCoordinatesFromText(text: String): Pair<Double, Double>? {
-        if (text.isBlank()) return null
-        val decoded = try {
-            java.net.URLDecoder.decode(text, "UTF-8")
-        } catch (e: Exception) {
-            text
-        }
-
-        // 1. Try to find @lat,lng format
-        val atPattern = Regex("@(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
-        atPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        // 2. Try to find parameter pattern e.g. q=lat,lng or query=lat,lng
-        val paramPattern = Regex("(?:[?&](?:q|query|daddr|saddr|ll|cbll)=)(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
-        paramPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        // 2.5 Try to find place, dir or search path pattern: e.g. /place/lat,lng or /dir/lat,lng
-        val pathPattern = Regex("/(?:place|dir|search)/(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
-        pathPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        // 3. Try DMS format: e.g. 12°58'17.8"N 77°35'40.4"E
-        fun parseDMS(deg: String, min: String, sec: String, dir: String): Double? {
-            val d = deg.toDoubleOrNull() ?: return null
-            val m = min.toDoubleOrNull() ?: 0.0
-            val s = sec.toDoubleOrNull() ?: 0.0
-            var decimal = d + (m / 60.0) + (s / 3600.0)
-            if (dir.equals("S", ignoreCase = true) || dir.equals("W", ignoreCase = true)) {
-                decimal = -decimal
-            }
-            return decimal
-        }
-
-        val dmsRegex = Regex("(\\d+)[°\\s]+(\\d+)[\\'\\s]+(\\d+(?:\\.\\d+)?)\"?\\s*([NSEWnsew])")
-        val dmsMatches = dmsRegex.findAll(decoded).toList()
-        if (dmsMatches.size >= 2) {
-            val lat = parseDMS(dmsMatches[0].groupValues[1], dmsMatches[0].groupValues[2], dmsMatches[0].groupValues[3], dmsMatches[0].groupValues[4])
-            val lng = parseDMS(dmsMatches[1].groupValues[1], dmsMatches[1].groupValues[2], dmsMatches[1].groupValues[3], dmsMatches[1].groupValues[4])
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        // 4. Try generic decimal pair: e.g. "12.971598, 77.594562"
-        val genericPattern = Regex("(-?\\d{1,3}\\.\\d+)[\\s,]+(-?\\d{1,3}\\.\\d+)")
-        genericPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        return null
+        return com.example.utils.LocationUtils.extractCoordinates(text)
     }
 
     private fun geocodeAddress(context: Context, address: String): Pair<Double, Double>? {
@@ -4197,7 +4138,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         for (i in sorted1.indices) {
             val e1 = sorted1[i]
             val e2 = sorted2[i]
-            if (e1.productName != e2.productName ||
+            if (e1.entryDate != e2.entryDate ||
+                e1.productName != e2.productName ||
                 e1.packetsGiven != e2.packetsGiven ||
                 e1.packetsReturned != e2.packetsReturned ||
                 e1.ratePerPacket != e2.ratePerPacket ||

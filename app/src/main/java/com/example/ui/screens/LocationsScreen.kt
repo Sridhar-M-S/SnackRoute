@@ -44,6 +44,7 @@ fun LocationsScreen(
     val context = LocalContext.current
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val shops by viewModel.shops.collectAsStateWithLifecycle()
+    val resolvedUrls by viewModel.resolvedUrls.collectAsStateWithLifecycle()
     val userCurrentLocation by viewModel.userCurrentLocation.collectAsStateWithLifecycle()
     var currentUserLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
@@ -52,7 +53,20 @@ fun LocationsScreen(
     val fusedLocationClient = remember { com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context) }
     var isFetchingLocation by remember { mutableStateOf(false) }
 
-    fun fetchCurrentLocation() {
+    fun hasLocationPermission(): Boolean {
+        val fine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val coarse = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun doFetchCurrentLocation() {
         val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
         val isGpsEnabled = try {
             locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
@@ -77,28 +91,80 @@ fun LocationsScreen(
                 com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
                 com.google.android.gms.tasks.CancellationTokenSource().token
             ).addOnSuccessListener { location ->
-                isFetchingLocation = false
                 if (location != null) {
+                    isFetchingLocation = false
                     val lat = location.latitude
                     val lng = location.longitude
                     currentUserLocation = Pair(lat, lng)
                     viewModel.setUserCurrentLocation(lat, lng)
+                    Toast.makeText(context, "GPS location acquired.", Toast.LENGTH_SHORT).show()
                 } else {
                     fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                        isFetchingLocation = false
                         if (lastLoc != null) {
                             val lat = lastLoc.latitude
                             val lng = lastLoc.longitude
                             currentUserLocation = Pair(lat, lng)
                             viewModel.setUserCurrentLocation(lat, lng)
+                            Toast.makeText(context, "GPS location acquired.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Acquiring GPS location... Please ensure GPS is active.", Toast.LENGTH_SHORT).show()
                         }
+                    }.addOnFailureListener { e ->
+                        isFetchingLocation = false
+                        Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
-            }.addOnFailureListener {
-                isFetchingLocation = false
+            }.addOnFailureListener { e ->
+                fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                    isFetchingLocation = false
+                    if (lastLoc != null) {
+                        val lat = lastLoc.latitude
+                        val lng = lastLoc.longitude
+                        currentUserLocation = Pair(lat, lng)
+                        viewModel.setUserCurrentLocation(lat, lng)
+                        Toast.makeText(context, "GPS location acquired.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }.addOnFailureListener {
+                    isFetchingLocation = false
+                    Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
+        } catch (e: SecurityException) {
+            isFetchingLocation = false
+            Toast.makeText(context, "Location permission is required.", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             isFetchingLocation = false
+            Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+            val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+            if (fineGranted || coarseGranted) {
+                doFetchCurrentLocation()
+            } else {
+                Toast.makeText(context, "Location permission denied. Please allow location permissions in settings.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
+    fun fetchCurrentLocation() {
+        if (!hasLocationPermission()) {
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+        doFetchCurrentLocation()
     }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -147,7 +213,7 @@ fun LocationsScreen(
         }
     }
 
-    val locationDistanceMap = remember(locations, shops, currentUserLocation, userCurrentLocation) {
+    val locationDistanceMap = remember(locations, shops, currentUserLocation, userCurrentLocation, resolvedUrls) {
         val myLoc = currentUserLocation ?: userCurrentLocation
         locations.associate { loc ->
             val shopsInLoc = shops.filter { it.locationNumber == loc.locationNumber }
@@ -155,7 +221,7 @@ fun LocationsScreen(
                 if (s.latitude != null && s.longitude != null && s.latitude in -90.0..90.0 && s.longitude in -180.0..180.0 && !(s.latitude == 0.0 && s.longitude == 0.0)) {
                     Pair(s.latitude, s.longitude)
                 } else if (!s.googleMapLink.isNullOrEmpty()) {
-                    LocationUtils.extractCoordinates(s.googleMapLink)
+                    LocationUtils.extractCoordinates(s.googleMapLink, resolvedUrls[s.googleMapLink])
                 } else null
             }
             val centerCoords = if (validCoords.isNotEmpty()) {

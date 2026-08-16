@@ -85,66 +85,14 @@ fun ShopsScreen(
     val unlockedBadges by viewModel.unlockedBadges.collectAsStateWithLifecycle()
 
     fun extractCoordinates(text: String): Pair<Double, Double>? {
-        if (text.isBlank()) return null
-        val urlToParse = resolvedUrls[text] ?: text
-        val decoded = try {
-            java.net.URLDecoder.decode(urlToParse, "UTF-8")
-        } catch (e: Exception) {
-            urlToParse
-        }
+        return com.example.utils.LocationUtils.extractCoordinates(text, resolvedUrls[text])
+    }
 
-        // 1. Try to find @lat,lng format
-        val atPattern = Regex("@(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
-        atPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
+    LaunchedEffect(shops) {
+        val links = shops.mapNotNull { it.googleMapLink }.filter { it.isNotBlank() }
+        if (links.isNotEmpty()) {
+            viewModel.triggerUrlResolution(links)
         }
-
-        // 2. Try to find parameter pattern e.g. q=lat,lng or query=lat,lng
-        val paramPattern = Regex("(?:[?&](?:q|query|daddr|saddr|ll|cbll)=)(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
-        // 2.5 Try to find place, dir or search path pattern: e.g. /place/lat,lng or /dir/lat,lng
-        val pathPattern = Regex("/(?:place|dir|search)/(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)")
-        pathPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-        paramPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        // 3. Try DMS format: e.g. 12°58'17.8"N 77°35'40.4"E
-        fun parseDMS(deg: String, min: String, sec: String, dir: String): Double? {
-            val d = deg.toDoubleOrNull() ?: return null
-            val m = min.toDoubleOrNull() ?: 0.0
-            val s = sec.toDoubleOrNull() ?: 0.0
-            var decimal = d + (m / 60.0) + (s / 3600.0)
-            if (dir.equals("S", ignoreCase = true) || dir.equals("W", ignoreCase = true)) {
-                decimal = -decimal
-            }
-            return decimal
-        }
-
-        val dmsRegex = Regex("(\\d+)[°\\s]+(\\d+)[\\'\\s]+(\\d+(?:\\.\\d+)?)\"?\\s*([NSEWnsew])")
-        val dmsMatches = dmsRegex.findAll(decoded).toList()
-        if (dmsMatches.size >= 2) {
-            val lat = parseDMS(dmsMatches[0].groupValues[1], dmsMatches[0].groupValues[2], dmsMatches[0].groupValues[3], dmsMatches[0].groupValues[4])
-            val lng = parseDMS(dmsMatches[1].groupValues[1], dmsMatches[1].groupValues[2], dmsMatches[1].groupValues[3], dmsMatches[1].groupValues[4])
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        // 4. Try generic decimal pair: e.g. "12.971598, 77.594562"
-        val genericPattern = Regex("(-?\\d{1,3}\\.\\d+)[\\s,]+(-?\\d{1,3}\\.\\d+)")
-        genericPattern.find(decoded)?.let {
-            val lat = it.groupValues[1].toDoubleOrNull()
-            val lng = it.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) return Pair(lat, lng)
-        }
-
-        return null
     }
 
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
@@ -188,8 +136,26 @@ fun ShopsScreen(
 
     val fusedLocationClient = remember { com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context) }
     var isFetchingLocation by remember { mutableStateOf(false) }
+    var googleMapLink by remember { mutableStateOf("") }
+    var formLatitude by remember { mutableStateOf<Double?>(null) }
+    var formLongitude by remember { mutableStateOf<Double?>(null) }
+    var isFetchingLocationForForm by remember { mutableStateOf(false) }
+    var locationTargetForForm by remember { mutableStateOf(false) }
 
-    fun fetchCurrentLocation() {
+    fun hasLocationPermission(): Boolean {
+        val fine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val coarse = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun doFetchCurrentLocation() {
         val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
         val isGpsEnabled = try {
             locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
@@ -222,6 +188,7 @@ fun ShopsScreen(
                     viewModel.setUserCurrentLocation(lat, lng)
                     nearestQuery = "$lat,$lng"
                     viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
+                    Toast.makeText(context, "GPS location acquired.", Toast.LENGTH_SHORT).show()
                 } else {
                     fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
                         isFetchingLocation = false
@@ -232,8 +199,9 @@ fun ShopsScreen(
                             viewModel.setUserCurrentLocation(lat, lng)
                             nearestQuery = "$lat,$lng"
                             viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
+                            Toast.makeText(context, "GPS location acquired.", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "Unable to retrieve current location. Please verify GPS or try again.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Acquiring GPS location... Please ensure GPS is active.", Toast.LENGTH_SHORT).show()
                         }
                     }.addOnFailureListener { e ->
                         isFetchingLocation = false
@@ -250,6 +218,7 @@ fun ShopsScreen(
                         viewModel.setUserCurrentLocation(lat, lng)
                         nearestQuery = "$lat,$lng"
                         viewModel.resolveNearestQueryCoords(context, "$lat,$lng")
+                        Toast.makeText(context, "GPS location acquired.", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(context, "Unable to retrieve current location: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
@@ -267,13 +236,8 @@ fun ShopsScreen(
         }
     }
 
-    var googleMapLink by remember { mutableStateOf("") }
-    var formLatitude by remember { mutableStateOf<Double?>(null) }
-    var formLongitude by remember { mutableStateOf<Double?>(null) }
-    var isFetchingLocationForForm by remember { mutableStateOf(false) }
-    var locationTargetForForm by remember { mutableStateOf(false) }
-
-    fun fetchCurrentLocationForForm() {
+    @android.annotation.SuppressLint("MissingPermission")
+    fun doFetchCurrentLocationForForm() {
         val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
         val isGpsEnabled = try {
             locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
@@ -289,20 +253,6 @@ fun ShopsScreen(
             } catch (e: Exception) {
                 // fallback
             }
-            return
-        }
-
-        val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-        val isNetworkEnabled = if (connectivityManager != null) {
-            val activeNetwork = connectivityManager.activeNetwork
-            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-            capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        } else {
-            true
-        }
-
-        if (!isNetworkEnabled) {
-            Toast.makeText(context, "Network unavailable.", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -372,62 +322,50 @@ fun ShopsScreen(
             val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
             if (fineGranted || coarseGranted) {
                 if (locationTargetForForm) {
-                    fetchCurrentLocationForForm()
+                    doFetchCurrentLocationForForm()
                 } else {
-                    fetchCurrentLocation()
+                    doFetchCurrentLocation()
                 }
             } else {
-                Toast.makeText(context, "Location permission denied. Please allow location permissions in system settings.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Location permission denied. Please allow location permissions in settings.", Toast.LENGTH_LONG).show()
             }
         }
     )
 
-    fun checkAndRequestLocation() {
+    fun fetchCurrentLocation() {
         locationTargetForForm = false
-        val hasFinePermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.ACCESS_FINE_LOCATION
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-        val hasCoarsePermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-        if (hasFinePermission || hasCoarsePermission) {
-            fetchCurrentLocation()
-        } else {
+        if (!hasLocationPermission()) {
             permissionLauncher.launch(
                 arrayOf(
                     android.Manifest.permission.ACCESS_FINE_LOCATION,
                     android.Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
+            return
         }
+        doFetchCurrentLocation()
+    }
+
+    fun fetchCurrentLocationForForm() {
+        locationTargetForForm = true
+        if (!hasLocationPermission()) {
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+        doFetchCurrentLocationForForm()
+    }
+
+    fun checkAndRequestLocation() {
+        fetchCurrentLocation()
     }
 
     fun checkAndRequestLocationForForm() {
-        locationTargetForForm = true
-        val hasFinePermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.ACCESS_FINE_LOCATION
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-        val hasCoarsePermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-        if (hasFinePermission || hasCoarsePermission) {
-            fetchCurrentLocationForForm()
-        } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    android.Manifest.permission.ACCESS_FINE_LOCATION,
-                    android.Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
-        }
+        fetchCurrentLocationForForm()
     }
 
     LaunchedEffect(nearestQuery) {
@@ -505,7 +443,7 @@ fun ShopsScreen(
         }
     }
 
-    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales, locations, currentUserLocation, userCurrentLocation) {
+    val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales, locations, currentUserLocation, userCurrentLocation, resolvedUrls) {
         var list = shops.filter { shop ->
             val matchSearch = shop.storeName.contains(searchQuery, ignoreCase = true) ||
                     shop.shopNumber.contains(searchQuery, ignoreCase = true) ||

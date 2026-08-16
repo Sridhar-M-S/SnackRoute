@@ -39,20 +39,31 @@ class MainActivity : ComponentActivity() {
         // Schedule daily reminders alarm
         com.example.utils.AlarmScheduler.scheduleDailyAlarm(applicationContext)
 
-        // Request POST_NOTIFICATIONS runtime permission on Android 13+
+        // Request runtime permissions (Notifications and Location)
+        val permissionsToRequest = mutableListOf<String>()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            val requestPermissionLauncher = registerForActivityResult(
-                androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-            ) { isGranted: Boolean ->
-                // Handled
-            }
             if (androidx.core.content.ContextCompat.checkSelfPermission(
                     this,
                     android.Manifest.permission.POST_NOTIFICATIONS
                 ) != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
-                requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
             }
+        }
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            permissionsToRequest.add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            val requestPermissionsLauncher = registerForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+            ) { /* Handled */ }
+            requestPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
 
         setContent {
