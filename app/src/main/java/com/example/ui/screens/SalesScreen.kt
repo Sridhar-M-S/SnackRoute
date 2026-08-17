@@ -192,9 +192,35 @@ fun SalesScreen(
             // Status filter
             val matchStatus = filterStatus == null || sale.status == filterStatus
 
-            // Date Range filter
-            val matchDate = (filterStartDate == null || sale.entryDate >= filterStartDate!!) &&
-                    (filterEndDate == null || sale.entryDate <= filterEndDate!! + 86400000L) // Include whole end day
+            // Date Range filter (normalized start and end of day)
+            val matchDate = run {
+                if (filterStartDate == null && filterEndDate == null) return@run true
+                
+                val startThreshold = filterStartDate?.let { startMillis ->
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = startMillis
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    cal.timeInMillis
+                }
+                
+                val endThreshold = filterEndDate?.let { endMillis ->
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = endMillis
+                        set(Calendar.HOUR_OF_DAY, 23)
+                        set(Calendar.MINUTE, 59)
+                        set(Calendar.SECOND, 59)
+                        set(Calendar.MILLISECOND, 999)
+                    }
+                    cal.timeInMillis
+                }
+
+                (startThreshold == null || sale.entryDate >= startThreshold) &&
+                (endThreshold == null || sale.entryDate <= endThreshold)
+            }
 
             // Category & Selling Price filters from Packets Sold Breakdown
             val matchCategory = filterCategory == null || products.find { it.productName.equals(sale.productName, ignoreCase = true) }?.productCategory == filterCategory
@@ -227,11 +253,29 @@ fun SalesScreen(
     val summaryGrossProfit = remember(summaryTotalSales, summaryProductionCost) { summaryTotalSales - summaryProductionCost }
 
     val summaryBusinessExpenses = remember(expenses, filterStartDate, filterEndDate) {
-        val start = filterStartDate
-        val end = filterEndDate
+        val start = filterStartDate?.let { startMillis ->
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = startMillis
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            cal.timeInMillis
+        }
+        val end = filterEndDate?.let { endMillis ->
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = endMillis
+                set(Calendar.HOUR_OF_DAY, 23)
+                set(Calendar.MINUTE, 59)
+                set(Calendar.SECOND, 59)
+                set(Calendar.MILLISECOND, 999)
+            }
+            cal.timeInMillis
+        }
         expenses.filter { expense ->
             val matchStart = start == null || expense.expenseDate >= start
-            val matchEnd = end == null || expense.expenseDate <= (end + 86400000L)
+            val matchEnd = end == null || expense.expenseDate <= end
             matchStart && matchEnd
         }.sumOf { it.amount }
     }
@@ -615,11 +659,21 @@ fun SalesScreen(
                                 
                                 Button(
                                     onClick = {
-                                        val calendar = Calendar.getInstance()
+                                        val initialCal = Calendar.getInstance().apply {
+                                            if (filterStartDate != null) timeInMillis = filterStartDate!!
+                                        }
                                         DatePickerDialog(context, { _, y, m, d ->
-                                            calendar.set(y, m, d)
-                                            filterStartDate = calendar.timeInMillis
-                                        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                                            val selectedCal = Calendar.getInstance().apply {
+                                                set(Calendar.YEAR, y)
+                                                set(Calendar.MONTH, m)
+                                                set(Calendar.DAY_OF_MONTH, d)
+                                                set(Calendar.HOUR_OF_DAY, 0)
+                                                set(Calendar.MINUTE, 0)
+                                                set(Calendar.SECOND, 0)
+                                                set(Calendar.MILLISECOND, 0)
+                                            }
+                                            filterStartDate = selectedCal.timeInMillis
+                                        }, initialCal.get(Calendar.YEAR), initialCal.get(Calendar.MONTH), initialCal.get(Calendar.DAY_OF_MONTH)).show()
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface),
                                     modifier = Modifier.weight(1f)
@@ -633,11 +687,22 @@ fun SalesScreen(
 
                                 Button(
                                     onClick = {
-                                        val calendar = Calendar.getInstance()
+                                        val initialCal = Calendar.getInstance().apply {
+                                            if (filterEndDate != null) timeInMillis = filterEndDate!!
+                                            else if (filterStartDate != null) timeInMillis = filterStartDate!!
+                                        }
                                         DatePickerDialog(context, { _, y, m, d ->
-                                            calendar.set(y, m, d)
-                                            filterEndDate = calendar.timeInMillis
-                                        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                                            val selectedCal = Calendar.getInstance().apply {
+                                                set(Calendar.YEAR, y)
+                                                set(Calendar.MONTH, m)
+                                                set(Calendar.DAY_OF_MONTH, d)
+                                                set(Calendar.HOUR_OF_DAY, 23)
+                                                set(Calendar.MINUTE, 59)
+                                                set(Calendar.SECOND, 59)
+                                                set(Calendar.MILLISECOND, 999)
+                                            }
+                                            filterEndDate = selectedCal.timeInMillis
+                                        }, initialCal.get(Calendar.YEAR), initialCal.get(Calendar.MONTH), initialCal.get(Calendar.DAY_OF_MONTH)).show()
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface),
                                     modifier = Modifier.weight(1f)

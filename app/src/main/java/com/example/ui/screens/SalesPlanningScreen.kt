@@ -1086,28 +1086,13 @@ fun ManufacturingSummaryView(
         val shopCount: Int
     )
 
-    val summaryItems = remember(reminders, products, productPrices, locationMap) {
+    val summaryItems = remember(reminders, locationMap) {
         val flatList = reminders.flatMap { reminder ->
             val locationName = locationMap[reminder.shop.locationNumber] ?: "Location ${reminder.shop.locationNumber}"
             
-            // Prefer recommendedProducts (average sales quantity per product)
-            if (reminder.recommendedProducts.isNotEmpty()) {
-                reminder.recommendedProducts.map { (prodName, recommendedQty) ->
-                    val matchingProduct = products.find { it.productName.equals(prodName, ignoreCase = true) }
-                    val category = matchingProduct?.productCategory ?: "Standard"
-                    val latestSalePrice = reminder.lastSaleProducts.find { it.productName.equals(prodName, ignoreCase = true) }?.sellingPrice
-                    val matchingPrice = productPrices.find { it.productId == matchingProduct?.id }?.sellingPrice ?: 0.0
-                    val sellingPrice = latestSalePrice ?: matchingPrice
-                    
-                    Triple(locationName, prodName, sellingPrice) to Pair(recommendedQty, category)
-                }
-            } else {
-                // Fallback to last sale products if recommended products is empty
-                reminder.lastSaleProducts.map { lsp ->
-                    val matchingProduct = products.find { it.productName.equals(lsp.productName, ignoreCase = true) }
-                    val category = if (lsp.productVariety.isNotBlank()) lsp.productVariety else (matchingProduct?.productCategory ?: "Standard")
-                    Triple(locationName, lsp.productName, lsp.sellingPrice) to Pair(lsp.packetsSupplied, category)
-                }
+            // Strictly show the actual items and packets from the last sales record
+            reminder.lastSaleProducts.map { lsp ->
+                Triple(locationName, lsp.productName, lsp.sellingPrice) to lsp.packetsSupplied
             }
         }
 
@@ -1115,13 +1100,12 @@ fun ManufacturingSummaryView(
             .groupBy { it.first }
             .map { (key, entries) ->
                 val (locName, prodName, price) = key
-                val totalPackets = entries.sumOf { it.second.first }
-                val category = entries.firstOrNull()?.second?.second ?: "Standard"
+                val totalPackets = entries.sumOf { it.second }
                 val shopCount = entries.size
                 ItemSummary(
                     locationName = locName,
                     productName = prodName,
-                    category = category,
+                    category = "",
                     price = price,
                     totalPackets = totalPackets,
                     shopCount = shopCount
@@ -1223,7 +1207,6 @@ fun ManufacturingSummaryView(
 
                     entries.forEach { entry ->
                         val priceLabel = if (entry.price > 0.0) " ₹${String.format(Locale.getDefault(), "%.2f", entry.price)}" else ""
-                        val categoryBadge = if (entry.category.isNotBlank() && !entry.category.equals(entry.productName, ignoreCase = true) && !entry.category.equals("Standard", ignoreCase = true)) " (${entry.category})" else ""
                         
                         Row(
                             modifier = Modifier
@@ -1234,7 +1217,7 @@ fun ManufacturingSummaryView(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "• ${entry.productName}$categoryBadge$priceLabel",
+                                    text = "• ${entry.productName}$priceLabel",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer
