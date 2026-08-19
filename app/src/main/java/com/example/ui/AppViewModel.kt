@@ -300,6 +300,151 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _lastSuccessfulExportTime = MutableStateFlow<Long>(prefs.getLong("last_successful_export_time", 0L))
     val lastSuccessfulExportTime: StateFlow<Long> = _lastSuccessfulExportTime.asStateFlow()
 
+    private val _unexportedChanges = MutableStateFlow<List<com.example.data.UnexportedChange>>(loadUnexportedChanges())
+    val unexportedChanges: StateFlow<List<com.example.data.UnexportedChange>> = _unexportedChanges.asStateFlow()
+
+    private fun loadUnexportedChanges(): List<com.example.data.UnexportedChange> {
+        val serializedSet = prefs.getStringSet("unexported_changes_list_v2", emptySet()) ?: emptySet()
+        return serializedSet.mapNotNull { com.example.data.UnexportedChange.fromJsonString(it) }
+            .sortedBy { it.timestamp }
+    }
+
+    private fun saveUnexportedChanges(list: List<com.example.data.UnexportedChange>) {
+        val serializedSet = list.map { it.toJsonString() }.toSet()
+        prefs.edit().putStringSet("unexported_changes_list_v2", serializedSet).apply()
+        _unexportedChanges.value = list
+    }
+
+    fun recordExportChange(
+        category: String,
+        changeType: String,
+        count: Int = 1,
+        summarySentence: String,
+        detailText: String? = null
+    ) {
+        val newChange = com.example.data.UnexportedChange(
+            category = category,
+            changeType = changeType,
+            count = count,
+            summarySentence = summarySentence,
+            detailText = detailText
+        )
+        val current = _unexportedChanges.value.toMutableList()
+        current.add(newChange)
+        saveUnexportedChanges(current)
+        markDataChanged()
+    }
+
+    fun getGroupedExportSummaries(changes: List<com.example.data.UnexportedChange>): List<com.example.data.ExportCategorySummary> {
+        if (changes.isEmpty()) {
+            if (_isExportNeeded.value) {
+                return listOf(
+                    com.example.data.ExportCategorySummary(
+                        category = "Recent Changes",
+                        totalCount = 1,
+                        headlineSentence = "Database updates detected since last export",
+                        items = listOf(
+                            com.example.data.UnexportedChange(
+                                category = "Recent Changes",
+                                changeType = "UPDATE",
+                                count = 1,
+                                summarySentence = "Recent modifications are pending export to your Excel backup."
+                            )
+                        )
+                    )
+                )
+            }
+            return emptyList()
+        }
+
+        val grouped = changes.groupBy { it.category }
+        return grouped.map { (category, categoryChanges) ->
+            val totalCount = categoryChanges.sumOf { it.count }
+            val adds = categoryChanges.filter { it.changeType == "ADD" }.sumOf { it.count }
+            val updates = categoryChanges.filter { it.changeType == "UPDATE" }.sumOf { it.count }
+            val deletes = categoryChanges.filter { it.changeType == "DELETE" }.sumOf { it.count }
+            val imports = categoryChanges.filter { it.changeType == "IMPORT" }.sumOf { it.count }
+
+            val headline = when (category) {
+                "Sales" -> {
+                    val parts = mutableListOf<String>()
+                    if (adds > 0) parts.add(if (adds == 1) "1 sale added" else "$adds sales added")
+                    if (updates > 0) parts.add(if (updates == 1) "1 sale updated" else "$updates sales updated")
+                    if (deletes > 0) parts.add(if (deletes == 1) "1 sale deleted" else "$deletes sales deleted")
+                    if (imports > 0) parts.add(if (imports == 1) "1 sale imported" else "$imports sales imported")
+                    if (parts.size == 1) parts.first() else "$totalCount sales changes (${parts.joinToString(", ")})"
+                }
+                "Locations" -> {
+                    val parts = mutableListOf<String>()
+                    if (adds > 0) parts.add(if (adds == 1) "1 location added" else "$adds locations added")
+                    if (updates > 0) parts.add(if (updates == 1) "1 location updated" else "$updates locations updated")
+                    if (deletes > 0) parts.add(if (deletes == 1) "1 location deleted" else "$deletes locations deleted")
+                    if (imports > 0) parts.add(if (imports == 1) "1 location imported" else "$imports locations imported")
+                    if (parts.size == 1) parts.first() else "$totalCount location changes (${parts.joinToString(", ")})"
+                }
+                "Shops" -> {
+                    val parts = mutableListOf<String>()
+                    if (adds > 0) parts.add(if (adds == 1) "1 shop added" else "$adds shops added")
+                    if (updates > 0) parts.add(if (updates == 1) "1 shop updated" else "$updates shops updated")
+                    if (deletes > 0) parts.add(if (deletes == 1) "1 shop deleted" else "$deletes shops deleted")
+                    if (imports > 0) parts.add(if (imports == 1) "1 shop imported" else "$imports shops imported")
+                    if (parts.size == 1) parts.first() else "$totalCount shop changes (${parts.joinToString(", ")})"
+                }
+                "Products" -> {
+                    val parts = mutableListOf<String>()
+                    if (adds > 0) parts.add(if (adds == 1) "1 product added" else "$adds products added")
+                    if (updates > 0) parts.add(if (updates == 1) "1 product updated" else "$updates products updated")
+                    if (deletes > 0) parts.add(if (deletes == 1) "1 product deleted" else "$deletes products deleted")
+                    if (imports > 0) parts.add(if (imports == 1) "1 product imported" else "$imports products imported")
+                    if (parts.size == 1) parts.first() else "$totalCount product changes (${parts.joinToString(", ")})"
+                }
+                "Expenses" -> {
+                    if (adds == 1 && updates == 0 && deletes == 0) "1 business expense added"
+                    else if (adds > 1 && updates == 0 && deletes == 0) "$adds business expenses added"
+                    else "$totalCount expense updates"
+                }
+                "Daily Tasks" -> {
+                    if (adds == 1 && updates == 0 && deletes == 0) "1 daily task added"
+                    else if (adds > 1 && updates == 0 && deletes == 0) "$adds daily tasks added"
+                    else "$totalCount task updates"
+                }
+                "Shop Remarks" -> {
+                    if (adds == 1 && updates == 0 && deletes == 0) "1 store remark added"
+                    else if (adds > 1 && updates == 0 && deletes == 0) "$adds store remarks added"
+                    else "$totalCount remark updates"
+                }
+                "Cost Engine" -> {
+                    if (totalCount == 1) "1 cost engine change" else "$totalCount cost engine changes"
+                }
+                "Weekly Timetable" -> "Weekly timetable updated"
+                "Sales Targets" -> {
+                    if (totalCount == 1) "1 sales target update" else "$totalCount sales target updates"
+                }
+                else -> {
+                    if (totalCount == 1) "1 change in $category" else "$totalCount changes in $category"
+                }
+            }
+
+            com.example.data.ExportCategorySummary(
+                category = category,
+                totalCount = totalCount,
+                headlineSentence = headline,
+                items = categoryChanges
+            )
+        }
+    }
+
+    fun getConciseExportSummary(changes: List<com.example.data.UnexportedChange>): String {
+        val summaries = getGroupedExportSummaries(changes)
+        if (summaries.isEmpty()) return "Changes detected — Export needed"
+        val headlines = summaries.map { it.headlineSentence }
+        return if (headlines.size <= 2) {
+            headlines.joinToString(" • ")
+        } else {
+            "${headlines.take(2).joinToString(", ")} +${headlines.size - 2} more"
+        }
+    }
+
     @Volatile
     private var isAppFullyInitialized = false
 
@@ -314,6 +459,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun markExportSuccessful() {
         val now = System.currentTimeMillis()
         _isExportNeeded.value = false
+        saveUnexportedChanges(emptyList())
         _lastSuccessfulExportTime.value = now
         prefs.edit()
             .putBoolean("has_unexported_changes", false)
@@ -2795,6 +2941,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun addLocation(location: LocationMaster) = viewModelScope.launch {
         try {
             repository.insertLocation(location)
+            recordExportChange("Locations", "ADD", 1, "1 location added: ${location.locationNumber} - ${location.locationName}")
         } catch (e: Exception) {
             triggerError(
                 module = "Location Master",
@@ -2808,6 +2955,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updateLocation(location: LocationMaster) = viewModelScope.launch {
         try {
             repository.updateLocation(location)
+            recordExportChange("Locations", "UPDATE", 1, "1 location updated: ${location.locationNumber} - ${location.locationName}")
         } catch (e: Exception) {
             triggerError(
                 module = "Location Master",
@@ -2821,6 +2969,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteLocation(location: LocationMaster) = viewModelScope.launch {
         try {
             repository.deleteLocation(location)
+            recordExportChange("Locations", "DELETE", 1, "1 location deleted: ${location.locationNumber} - ${location.locationName}")
         } catch (e: Exception) {
             triggerError(
                 module = "Location Master",
@@ -2834,6 +2983,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteAllLocations() = viewModelScope.launch {
         try {
             repository.deleteAllLocations()
+            recordExportChange("Locations", "DELETE", 1, "All locations deleted")
         } catch (e: Exception) {
             triggerError(
                 module = "Location Master",
@@ -2853,6 +3003,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             val resolvedShop = resolveShopCoords(getApplication(), shop)
             repository.insertShop(resolvedShop)
+            recordExportChange("Shops", "ADD", 1, "1 shop added: ${shop.shopNumber} - ${shop.storeName}", "Location: ${shop.locationNumber}")
             refreshNextShopNumber()
 
             val salesAfter = repository.allSales.first()
@@ -2913,6 +3064,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
             }
             repository.updateShop(oldShopNumber, resolvedShop)
+            recordExportChange("Shops", "UPDATE", 1, "1 shop updated: ${shop.shopNumber} - ${shop.storeName}")
 
             if (oldShop != null && oldShop.startingDate != resolvedShop.startingDate) {
                 try {
@@ -2970,6 +3122,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             repository.deleteShop(shop)
             repository.deleteRemarksByShopNumber(shop.shopNumber)
+            recordExportChange("Shops", "DELETE", 1, "1 shop deleted: ${shop.shopNumber} - ${shop.storeName}")
             if (!shop.storeImage.isNullOrEmpty()) {
                 try {
                     val file = File(shop.storeImage)
@@ -3020,6 +3173,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
             }
             repository.deleteAllShops()
+            recordExportChange("Shops", "DELETE", 1, "All shops deleted")
             refreshNextShopNumber()
 
             val salesAfter = repository.allSales.first()
@@ -3173,24 +3327,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun insertExpense(expense: com.example.data.BusinessExpense) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertExpense(expense)
+            recordExportChange("Expenses", "ADD", 1, "1 expense added: ${expense.category} - ${expense.description} (₹${expense.amount})")
         }
     }
 
     fun updateExpense(expense: com.example.data.BusinessExpense) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateExpense(expense)
+            recordExportChange("Expenses", "UPDATE", 1, "1 expense updated: ${expense.category} - ${expense.description} (₹${expense.amount})")
         }
     }
 
     fun deleteExpense(expense: com.example.data.BusinessExpense) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteExpense(expense)
+            recordExportChange("Expenses", "DELETE", 1, "1 expense deleted: ${expense.category} - ${expense.description}")
         }
     }
 
     fun deleteExpenseById(id: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteExpenseById(id)
+            recordExportChange("Expenses", "DELETE", 1, "1 expense deleted")
         }
     }
 
@@ -3484,7 +3642,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun addProduct(product: ProductMaster): Long {
         return try {
-            repository.insertProduct(product)
+            val id = repository.insertProduct(product)
+            recordExportChange("Products", "ADD", 1, "1 product added: ${product.productName}")
+            id
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3499,6 +3659,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun addProductWithPrices(product: ProductMaster, prices: List<ProductPrice>) {
         try {
             repository.insertProductWithPrices(product, prices)
+            recordExportChange("Products", "ADD", 1, "1 product added: ${product.productName} (${prices.size} price option${if (prices.size != 1) "s" else ""})")
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3513,6 +3674,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updateProduct(product: ProductMaster) = viewModelScope.launch {
         try {
             repository.updateProduct(product)
+            recordExportChange("Products", "UPDATE", 1, "1 product updated: ${product.productName}")
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3526,6 +3688,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteProduct(product: ProductMaster) = viewModelScope.launch {
         try {
             repository.deleteProductWithPrices(product)
+            recordExportChange("Products", "DELETE", 1, "1 product deleted: ${product.productName}")
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3539,6 +3702,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deletePricesForProduct(productId: Int) = viewModelScope.launch {
         try {
             repository.deletePricesForProduct(productId)
+            recordExportChange("Products", "DELETE", 1, "Pricing removed for product")
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3552,6 +3716,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun addPrice(price: ProductPrice) = viewModelScope.launch {
         try {
             repository.insertPrice(price)
+            recordExportChange("Products", "ADD", 1, "Price added for product (₹${price.sellingPrice})")
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3565,6 +3730,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteAllProducts() = viewModelScope.launch {
         try {
             repository.deleteAllProducts()
+            recordExportChange("Products", "DELETE", 1, "All products deleted")
         } catch (e: Exception) {
             triggerError(
                 module = "Product Master",
@@ -3641,6 +3807,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.insertSales(salesEntry)
+            recordExportChange("Sales", "ADD", 1, "1 sale added for ${salesEntry.shopNumber} - ${salesEntry.productName} (${salesEntry.packetsSold} sold)")
             syncShopStartingDateOnSalesChange(salesEntry.shopNumber, null, salesEntry.entryDate, emptyList(), null)
 
             if (!salesEntry.remarks.isNullOrBlank()) {
@@ -3690,6 +3857,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val oldSalesDate = oldSale?.entryDate
 
             repository.updateSales(salesEntry)
+            recordExportChange("Sales", "UPDATE", 1, "1 sale updated for ${salesEntry.shopNumber} - ${salesEntry.productName}")
             syncShopStartingDateOnSalesChange(
                 salesEntry.shopNumber,
                 oldSalesDate,
@@ -3944,6 +4112,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.deleteSales(salesEntry)
+            recordExportChange("Sales", "DELETE", 1, "1 sale deleted for ${salesEntry.shopNumber} - ${salesEntry.productName}")
             syncShopStartingDateOnSalesDelete(salesEntry.shopNumber)
 
             val linkedRemark = repository.getRemarkBySalesId(salesEntry.id)
@@ -3977,8 +4146,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val badgesBefore = repository.unlockedBadges.first()
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
-            val affectedShopNumber = salesBefore.firstOrNull { it.sessionId == sessionId }?.shopNumber
+            val sessionSales = salesBefore.filter { it.sessionId == sessionId }
+            val count = sessionSales.size.coerceAtLeast(1)
+            val affectedShopNumber = sessionSales.firstOrNull()?.shopNumber
             repository.deleteSalesBySessionId(sessionId)
+            recordExportChange("Sales", "DELETE", count, if (count == 1) "1 sale deleted" else "$count sales deleted")
             if (affectedShopNumber != null) {
                 syncShopStartingDateOnSalesDelete(affectedShopNumber)
             }
@@ -4029,6 +4201,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore, _bonusXp.value)
 
             repository.saveSalesSession(salesList, oldSessionId, legacyIdToDelete)
+            
+            val count = salesList.size
+            val shopNo = salesList.firstOrNull()?.shopNumber ?: ""
+            val shopNm = salesList.firstOrNull()?.shopName ?: ""
+            val changeType = if (isEdit) "UPDATE" else "ADD"
+            val headline = if (isEdit) {
+                if (count == 1) "1 sale updated for $shopNo ($shopNm)" else "$count sales updated for $shopNo ($shopNm)"
+            } else {
+                if (count == 1) "1 sale added for $shopNo ($shopNm)" else "$count sales added for $shopNo ($shopNm)"
+            }
+            recordExportChange("Sales", changeType, count, headline)
+
             incrementSessionCombo()
 
             if (salesList.isNotEmpty()) {
@@ -4077,6 +4261,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val xpBefore = calculateTotalXpSnapshot(salesBefore, shopsBefore, badgesBefore)
 
             repository.deleteAllSales()
+            recordExportChange("Sales", "DELETE", 1, "All sales records deleted")
 
             val salesAfter = repository.allSales.first()
             val shopsAfter = repository.allShops.first()
@@ -4284,14 +4469,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 e1.productName != e2.productName ||
                 e1.packetsGiven != e2.packetsGiven ||
                 e1.packetsReturned != e2.packetsReturned ||
-                e1.ratePerPacket != e2.ratePerPacket ||
-                e1.totalAmount != e2.totalAmount ||
-                e1.profitPerPacket != e2.profitPerPacket ||
-                e1.totalProfit != e2.totalProfit ||
+                e1.packetsSold != e2.packetsSold ||
+                Math.abs(e1.ratePerPacket - e2.ratePerPacket) > 0.001 ||
+                Math.abs(e1.totalAmount - e2.totalAmount) > 0.001 ||
+                Math.abs(e1.profitPerPacket - e2.profitPerPacket) > 0.001 ||
+                Math.abs(e1.totalProfit - e2.totalProfit) > 0.001 ||
                 e1.status != e2.status ||
+                Math.abs((e1.paidAmount ?: 0.0) - (e2.paidAmount ?: 0.0)) > 0.001 ||
+                (e1.paidAmount == null) != (e2.paidAmount == null) ||
                 e1.remarks != e2.remarks ||
                 e1.shopNumber != e2.shopNumber ||
-                e1.locationNumber != e2.locationNumber) {
+                e1.locationNumber != e2.locationNumber ||
+                e1.sessionId != e2.sessionId ||
+                e1.originalPacketRate != e2.originalPacketRate ||
+                e1.customSellingPrice != e2.customSellingPrice ||
+                e1.productionCostUsed != e2.productionCostUsed) {
                 return false
             }
         }
@@ -4385,11 +4577,85 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Backup & Restore Actions ---
+    suspend fun createUnifiedFullBackup(context: Context): Pair<Boolean, File?> = withContext(Dispatchers.IO) {
+        try {
+            val backupDir = File(context.filesDir, "backups")
+            if (!backupDir.exists()) backupDir.mkdirs()
+
+            val locationsList = repository.allLocations.first()
+            val shopsList = repository.allShops.first()
+            val productsList = repository.allProducts.first()
+            val allPrices = repository.getAllPrices()
+            val salesList = repository.allSales.first()
+            val expensesList = repository.getAllExpensesDirect()
+            val tasks = repository.allTasks.first()
+            val ingredients = repository.getAllIngredientsDirect()
+            val purchases = repository.getAllPurchasesDirect()
+            val calculations = repository.getAllCalculationsDirect()
+            val calculationItems = repository.getAllCalculationItemsDirect()
+            val remarksList = repository.getAllRemarksDirect()
+            val isEnabled = isDynamicProfitEnabled.value
+            val pCostIngredients = repository.getAllProductCostIngredientsDirect()
+            val pCostCalculations = repository.getAllProductCostCalculationsDirect()
+            val timetableList = repository.getDirectTimetableEntries()
+            val salesTargetsList = repository.getAllSalesTargetsDirect()
+
+            // 1. Create Unified Excel File
+            val excelFileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
+            val excelFile = File(backupDir, excelFileName)
+            val excelSuccess = com.example.utils.Exporter.exportAllUnified(
+                context = context,
+                locations = locationsList,
+                shops = shopsList,
+                products = productsList,
+                allPrices = allPrices,
+                salesList = salesList,
+                expensesList = expensesList,
+                tasks = tasks,
+                ingredients = ingredients,
+                purchases = purchases,
+                calculations = calculations,
+                calculationItems = calculationItems,
+                remarksList = remarksList,
+                isDynamicProfitEnabled = isEnabled,
+                productCostIngredients = pCostIngredients,
+                productCostCalculations = pCostCalculations,
+                timetableEntries = timetableList,
+                salesTargets = salesTargetsList
+            )
+
+            // Copy to fixed name for quick local restore
+            val fixedExcel = File(backupDir, "snackroute_unified_backup.xlsx")
+            if (excelFile.exists()) {
+                excelFile.copyTo(fixedExcel, overwrite = true)
+            }
+
+            // 2. Create Full Application ZIP (database, settings, shop images)
+            val zipFile = File(backupDir, "snackroute_full_backup.zip")
+            val zipSuccess = com.example.utils.BackupHelper.createBackupZip(context, zipFile)
+
+            if (excelSuccess || zipSuccess) {
+                markExportSuccessful()
+                val returnFile = if (excelFile.exists()) excelFile else zipFile
+                Pair(true, returnFile)
+            } else {
+                Pair(false, null)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, null)
+        }
+    }
+
     fun backupData(context: Context): Boolean {
         val backupDir = File(context.filesDir, "backups")
         if (!backupDir.exists()) backupDir.mkdirs()
         val backupFile = File(backupDir, "snackroute_full_backup.zip")
-        return com.example.utils.BackupHelper.createBackupZip(context, backupFile)
+        val zipSuccess = com.example.utils.BackupHelper.createBackupZip(context, backupFile)
+        if (zipSuccess) {
+            markExportSuccessful()
+        }
+        return zipSuccess
     }
 
     fun restoreData(context: Context): Boolean {
@@ -4610,6 +4876,7 @@ User Question: $userQuestion
                         isReminderEnabled = isReminderEnabled
                     )
                 )
+                recordExportChange("Tasks", "ADD", 1, "1 task added: $title ($date)")
             } catch (e: Exception) {
                 triggerError("DailyTasks", "addTask", "DatabaseError", e.message ?: "Failed to add task", "Check database connection", e)
             }
@@ -4620,6 +4887,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updateTask(task)
+                recordExportChange("Tasks", "UPDATE", 1, "1 task updated: ${task.title}")
             } catch (e: Exception) {
                 triggerError("DailyTasks", "updateTask", "DatabaseError", e.message ?: "Failed to update task", "Check database connection", e)
             }
@@ -4630,6 +4898,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteTask(task)
+                recordExportChange("Tasks", "DELETE", 1, "1 task deleted: ${task.title}")
             } catch (e: Exception) {
                 triggerError("DailyTasks", "deleteTask", "DatabaseError", e.message ?: "Failed to delete task", "Check database connection", e)
             }
@@ -4641,6 +4910,7 @@ User Question: $userQuestion
             try {
                 val updatedTask = task.copy(isCompleted = !task.isCompleted)
                 repository.updateTask(updatedTask)
+                recordExportChange("Tasks", "UPDATE", 1, "Task '${task.title}' marked ${if (updatedTask.isCompleted) "completed" else "pending"}")
                 if (updatedTask.isCompleted) {
                     val xpReward = 15
                     val newXp = _bonusXp.value + xpReward
@@ -5234,6 +5504,7 @@ User Question: $userQuestion
                 repository.insertIngredient(
                     Ingredient(name = name, variety = variety, category = category)
                 )
+                recordExportChange("Dynamic Cost", "ADD", 1, "1 ingredient added: $name ($variety)")
             } catch (e: Exception) {
                 triggerError("DynamicCost", "addIngredient", "DatabaseError", e.message ?: "Failed to add ingredient", "Check database connection", e)
             }
@@ -5244,6 +5515,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updateIngredient(ingredient)
+                recordExportChange("Dynamic Cost", "UPDATE", 1, "1 ingredient updated: ${ingredient.name}")
             } catch (e: Exception) {
                 triggerError("DynamicCost", "updateIngredient", "DatabaseError", e.message ?: "Failed to update ingredient", "Check database connection", e)
             }
@@ -5254,6 +5526,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteIngredient(ingredient)
+                recordExportChange("Dynamic Cost", "DELETE", 1, "1 ingredient deleted: ${ingredient.name}")
             } catch (e: Exception) {
                 triggerError("DynamicCost", "deleteIngredient", "DatabaseError", e.message ?: "Failed to delete ingredient", "Check database connection", e)
             }
@@ -5288,6 +5561,7 @@ User Question: $userQuestion
                         largeCoverDistribution = largeCoverDistribution
                     )
                 )
+                recordExportChange("Dynamic Cost", "ADD", 1, "1 purchase added ($date, ₹$price)")
                 recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "addPurchase", "DatabaseError", e.message ?: "Failed to add purchase", "Check database connection", e)
@@ -5299,6 +5573,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updatePurchase(purchase)
+                recordExportChange("Dynamic Cost", "UPDATE", 1, "1 purchase updated (${purchase.purchaseDate}, ₹${purchase.purchasePrice})")
                 recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "updatePurchase", "DatabaseError", e.message ?: "Failed to update purchase", "Check database connection", e)
@@ -5310,6 +5585,7 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deletePurchase(purchase)
+                recordExportChange("Dynamic Cost", "DELETE", 1, "1 purchase deleted")
                 recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "deletePurchase", "DatabaseError", e.message ?: "Failed to delete purchase", "Check database connection", e)

@@ -77,6 +77,8 @@ fun DashboardScreen(
     val isDynamicProfitEnabled by viewModel.isDynamicProfitEnabled.collectAsStateWithLifecycle()
     val expenses by viewModel.allExpensesList.collectAsStateWithLifecycle()
     val isExportNeeded by viewModel.isExportNeeded.collectAsStateWithLifecycle()
+    val unexportedChanges by viewModel.unexportedChanges.collectAsStateWithLifecycle()
+    var showExportDialog by remember { mutableStateOf(false) }
 
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
@@ -433,6 +435,10 @@ fun DashboardScreen(
                         .testTag("drawer_item_checklist")
                 )
 
+                val exportSummaryText = remember(unexportedChanges, isExportNeeded) {
+                    viewModel.getConciseExportSummary(unexportedChanges)
+                }
+
                 NavigationDrawerItem(
                     label = {
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -464,11 +470,13 @@ fun DashboardScreen(
                             if (isExportNeeded) {
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "Changes detected — Export needed",
+                                    text = exportSummaryText,
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.error,
                                     fontWeight = FontWeight.Medium,
-                                    lineHeight = 13.sp
+                                    lineHeight = 13.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -477,11 +485,16 @@ fun DashboardScreen(
                         BadgedBox(
                             badge = {
                                 if (isExportNeeded) {
+                                    val count = unexportedChanges.sumOf { it.count }
                                     Badge(
                                         containerColor = MaterialTheme.colorScheme.error,
                                         contentColor = MaterialTheme.colorScheme.onError
                                     ) {
-                                        Text("!", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            if (count > 0) (if (count > 99) "99+" else "$count") else "!",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
@@ -496,7 +509,7 @@ fun DashboardScreen(
                     selected = false,
                     onClick = {
                         coroutineScope.launch { drawerState.close() }
-                        viewModel.exportAllUnifiedToExcel(context)
+                        showExportDialog = true
                     },
                     modifier = Modifier
                         .padding(horizontal = 12.dp, vertical = 2.dp)
@@ -1109,6 +1122,16 @@ fun DashboardScreen(
                         CircularProgressIndicator()
                         Text("Reading all-in-one backup spreadsheet and updating database states...")
                     }
+                }
+            )
+        }
+
+        if (showExportDialog) {
+            ExportChangesDialog(
+                viewModel = viewModel,
+                onDismiss = { showExportDialog = false },
+                onExportConfirmed = {
+                    viewModel.exportAllUnifiedToExcel(context)
                 }
             )
         }

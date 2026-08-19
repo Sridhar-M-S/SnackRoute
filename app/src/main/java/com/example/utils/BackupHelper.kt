@@ -92,6 +92,65 @@ object BackupHelper {
         }
     }
 
+    fun isExcelFile(context: Context, uri: Uri): Boolean {
+        val mimeType = context.contentResolver.getType(uri)
+        if (mimeType != null && (mimeType.contains("spreadsheet") || mimeType.contains("excel") || mimeType.contains("officedocument.spreadsheetml"))) {
+            return true
+        }
+        val fileName = getFileName(context, uri) ?: ""
+        if (fileName.endsWith(".xlsx", ignoreCase = true) || fileName.endsWith(".xls", ignoreCase = true)) {
+            return true
+        }
+        // Deep inspect: check for Excel workbook XML inside ZIP structure
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val zis = ZipInputStream(BufferedInputStream(stream))
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    val name = entry.name
+                    if (name.startsWith("xl/") || name.contains("workbook.xml") || name == "[Content_Types].xml") {
+                        zis.close()
+                        return true
+                    }
+                    if (name.startsWith("databases/") || name.startsWith("shared_prefs/")) {
+                        zis.close()
+                        return false
+                    }
+                    entry = zis.nextEntry
+                }
+                zis.close()
+            }
+        } catch (ignored: Exception) {}
+        return false
+    }
+
+    fun getFileName(context: Context, uri: Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            try {
+                val cursor = context.contentResolver.query(uri, null, null, null, null)
+                cursor?.use {
+                    if (it.moveToFirst()) {
+                        val index = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (index != -1) {
+                            result = it.getString(index)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/')
+            if (cut != null && cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result
+    }
+
     private fun zipDirectory(dir: File, baseName: String, zipOut: ZipOutputStream, excludeFolder: String? = null) {
         val files = dir.listFiles() ?: return
         for (file in files) {

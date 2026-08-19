@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -158,6 +159,10 @@ fun SettingsScreen(
     val syncProgressState by viewModel.syncProgress.collectAsState()
     val syncProgressTextState by viewModel.syncProgressText.collectAsState()
     val isOfflineQueueActiveState by viewModel.isOfflineQueueActive.collectAsState()
+
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importSummary by viewModel.importSummary.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     var showGDriveRestoreConfirm by remember { mutableStateOf(false) }
     var gdriveErrorDetails by remember { mutableStateOf<String?>(null) }
@@ -943,20 +948,20 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Full App Backup", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Creates a safe ZIP backup package containing database, settings, and all shop images", fontSize = 11.sp, color = Color.Gray)
+                            Text("Creates a safe unified backup (Excel .xlsx & ZIP package) containing all 12 modules, database, settings, and all shop images", fontSize = 11.sp, color = Color.Gray)
                         }
                         Button(
                             onClick = {
-                                val backupDir = File(context.filesDir, "backups")
-                                if (!backupDir.exists()) backupDir.mkdirs()
-                                val backupFile = File(backupDir, "snackroute_full_backup.zip")
-                                val success = viewModel.backupData(context)
-                                if (success && backupFile.exists()) {
-                                    Toast.makeText(context, "Full backup created successfully!", Toast.LENGTH_SHORT).show()
-                                    // Export/Share the Backup File immediately
-                                    com.example.utils.Exporter.shareFile(context, backupFile, "Share SnackRoute Backup ZIP")
-                                } else {
-                                    Toast.makeText(context, "Backup failed. Verify storage space.", Toast.LENGTH_LONG).show()
+                                coroutineScope.launch {
+                                    Toast.makeText(context, "Creating unified full backup...", Toast.LENGTH_SHORT).show()
+                                    val (success, file) = viewModel.createUnifiedFullBackup(context)
+                                    if (success && file != null && file.exists()) {
+                                        Toast.makeText(context, "Full unified backup created successfully!", Toast.LENGTH_SHORT).show()
+                                        // Export/Share the Backup File immediately
+                                        com.example.utils.Exporter.shareFile(context, file, "Share SnackRoute Unified Backup")
+                                    } else {
+                                        Toast.makeText(context, "Backup failed. Verify storage space.", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             },
                             modifier = Modifier.testTag("backup_db_button")
@@ -1011,17 +1016,22 @@ fun SettingsScreen(
                         contract = ActivityResultContracts.GetContent()
                     ) { uri: Uri? ->
                         if (uri != null) {
-                            val success = viewModel.restoreFromUri(context, uri)
-                            if (success) {
-                                Toast.makeText(context, "Full Backup restored successfully! Restarting application...", Toast.LENGTH_LONG).show()
-                                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                                if (intent != null) {
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                    context.startActivity(intent)
-                                }
-                                android.os.Process.killProcess(android.os.Process.myPid())
+                            if (com.example.utils.BackupHelper.isExcelFile(context, uri)) {
+                                Toast.makeText(context, "Restoring unified Excel backup...", Toast.LENGTH_SHORT).show()
+                                viewModel.importAllUnifiedFromExcel(context, uri)
                             } else {
-                                Toast.makeText(context, "Failed to restore backup. Ensure it is a valid ZIP backup package.", Toast.LENGTH_LONG).show()
+                                val success = viewModel.restoreFromUri(context, uri)
+                                if (success) {
+                                    Toast.makeText(context, "Full Backup restored successfully! Restarting application...", Toast.LENGTH_LONG).show()
+                                    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                                    if (intent != null) {
+                                        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                        context.startActivity(intent)
+                                    }
+                                    android.os.Process.killProcess(android.os.Process.myPid())
+                                } else {
+                                    Toast.makeText(context, "Failed to restore backup. Ensure it is a valid Excel or ZIP backup package.", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }
                     }
@@ -1033,11 +1043,11 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Restore from Backup File", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Select and import a .zip backup package from your device", fontSize = 11.sp, color = Color.Gray)
+                            Text("Select and import unified Excel (.xlsx) or .zip backup package from your device", fontSize = 11.sp, color = Color.Gray)
                         }
                         Button(
                             onClick = {
-                                filePickerLauncher.launch("application/zip")
+                                filePickerLauncher.launch("*/*")
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                             modifier = Modifier.testTag("restore_from_file_button")
@@ -1535,6 +1545,95 @@ fun SettingsScreen(
                     Text("Designed for Professional Distributors", fontSize = 11.sp, color = Color.Gray)
                 }
             }
+        }
+
+        if (isImporting) {
+            AlertDialog(
+                onDismissRequest = {},
+                confirmButton = {},
+                title = { Text("Restoring Unified Backup...", fontWeight = FontWeight.Bold) },
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(8.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Text("Reading all-in-one backup spreadsheet and updating database states...")
+                    }
+                }
+            )
+        }
+
+        if (importSummary != null) {
+            val summary = importSummary!!
+            AlertDialog(
+                onDismissRequest = { viewModel.clearImportSummary() },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (summary.failedRowsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (summary.failedRowsCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text("Restore Summary", fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        Text("The backup restore has completed successfully:")
+                        
+                        HorizontalDivider()
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Total Rows Scanned:", fontWeight = FontWeight.Medium)
+                            Text("${summary.totalRows}")
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Successfully Imported:", fontWeight = FontWeight.Medium)
+                            Text("${summary.successfullyImported}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Skipped/Failed Rows:", fontWeight = FontWeight.Medium)
+                            Text("${summary.skippedRows}", color = if (summary.skippedRows > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                        }
+                        
+                        HorizontalDivider()
+                        
+                        Text("Module Breakdown:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        
+                        Text(
+                            text = summary.remarks ?: "All application data restored into active database.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.clearImportSummary() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Dismiss")
+                    }
+                }
+            )
         }
     }
 }
