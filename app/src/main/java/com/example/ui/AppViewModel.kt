@@ -1784,6 +1784,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _salesFilterTodayTrigger.value = true
     }
 
+    fun setSalesDateFilter(targetDateMillis: Long) {
+        val calStart = java.util.Calendar.getInstance().apply {
+            timeInMillis = targetDateMillis
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val calEnd = java.util.Calendar.getInstance().apply {
+            timeInMillis = targetDateMillis
+            set(java.util.Calendar.HOUR_OF_DAY, 23)
+            set(java.util.Calendar.MINUTE, 59)
+            set(java.util.Calendar.SECOND, 59)
+            set(java.util.Calendar.MILLISECOND, 999)
+        }
+        salesFilterStartDate.value = calStart.timeInMillis
+        salesFilterEndDate.value = calEnd.timeInMillis
+        salesFilterStatus.value = null
+        salesFilterShopNumber.value = null
+        salesSearchQuery.value = ""
+        salesFilterCategory.value = null
+        salesFilterProductName.value = null
+        salesFilterSellingPrice.value = null
+        _salesFilterTodayTrigger.value = false
+    }
+
     fun setPendingSalesFilter() {
         salesFilterStartDate.value = null
         salesFilterEndDate.value = null

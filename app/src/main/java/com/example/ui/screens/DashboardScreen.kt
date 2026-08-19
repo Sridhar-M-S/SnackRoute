@@ -112,6 +112,7 @@ fun DashboardScreen(
     var showReturnReductionDialog by remember { mutableStateOf(false) }
     var showCustomPriceDialog by remember { mutableStateOf(false) }
     var showPacketsSoldDialog by remember { mutableStateOf(false) }
+    var showCalendarDialog by remember { mutableStateOf(false) }
 
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
@@ -342,6 +343,25 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 NavigationDrawerItem(
+                    label = { Text("Sales Calendar", fontWeight = FontWeight.Medium) },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = "Sales Calendar",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        showCalendarDialog = true
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("drawer_item_sales_calendar")
+                )
+
+                NavigationDrawerItem(
                     label = { Text("Weekly Timetable", fontWeight = FontWeight.Medium) },
                     icon = {
                         Icon(
@@ -560,6 +580,17 @@ fun DashboardScreen(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { showCalendarDialog = true },
+                            modifier = Modifier.testTag("sales_calendar_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarMonth,
+                                contentDescription = "Sales Calendar",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
                         IconButton(
                             onClick = { onNavigateToTab("SalesPlanning") },
                             modifier = Modifier.testTag("notification_bell_button")
@@ -1575,6 +1606,17 @@ fun DashboardScreen(
                     ) {
                         Text("Dismiss")
                     }
+                }
+            )
+        }
+        if (showCalendarDialog) {
+            SalesCalendarDialog(
+                sales = sales,
+                onDismiss = { showCalendarDialog = false },
+                onDateSelected = { dateMillis ->
+                    showCalendarDialog = false
+                    viewModel.setSalesDateFilter(dateMillis)
+                    onNavigateToTab("Sales")
                 }
             )
         }
