@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.graphicsLayer
@@ -106,6 +107,9 @@ class MainActivity : ComponentActivity() {
                 val navigationHistory = remember { mutableStateListOf<String>("Dashboard") }
 
                 fun navigateToParentTab(tab: String) {
+                    if (tab != "Sales") {
+                        viewModel.clearSalesOpenedFromCalendar()
+                    }
                     navigationHistory.clear()
                     navigationHistory.add("Dashboard")
                     if (tab != "Dashboard") {
@@ -125,6 +129,9 @@ class MainActivity : ComponentActivity() {
                     if (navigationHistory.size > 1) {
                         navigationHistory.removeAt(navigationHistory.lastIndex)
                         currentTab = navigationHistory.last()
+                        if (currentTab != "Sales") {
+                            viewModel.clearSalesOpenedFromCalendar()
+                        }
                     } else {
                         showExitConfirmationDialog = true
                     }
@@ -231,13 +238,14 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 if (navigationHistory.contains("Sales")) {
+                                    val isSalesFromCalendar by viewModel.isSalesOpenedFromCalendar.collectAsStateWithLifecycle()
                                     Box(modifier = if (currentTab == "Sales") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         SalesScreen(
                                             viewModel = viewModel,
                                             onOpenChat = { isAiChatOpen = true },
                                             onOpenTimetable = { isTimetableOpen = true },
                                             onBackToParent = { navigateBack() },
-                                            showBackButton = navigationHistory.size > 2 && navigationHistory.last() == "Sales",
+                                            showBackButton = isSalesFromCalendar || (navigationHistory.size > 2 && navigationHistory.last() == "Sales"),
                                             onNavigateToBreakdown = { navigateToChildTab("PacketsSoldBreakdown") },
                                             onNavigateToTab = { navigateToChildTab(it) }
                                         )
@@ -329,6 +337,18 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
+                                if (navigationHistory.contains("SalesCalendar")) {
+                                    Box(modifier = if (currentTab == "SalesCalendar") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        SalesCalendarScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() },
+                                            onDateSelected = { dateMillis, year, month ->
+                                                viewModel.selectCalendarDateAndOpenSales(dateMillis, year, month)
+                                                navigateToChildTab("Sales")
+                                            }
+                                        )
+                                    }
+                                }
                                 if (navigationHistory.contains("ProductCostCalculator")) {
                                     Box(modifier = if (currentTab == "ProductCostCalculator") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
                                         com.example.ui.screens.ProductCostCalculatorScreen(

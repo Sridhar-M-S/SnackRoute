@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -92,10 +93,15 @@ fun SalesScreen(
     val validationErrors by viewModel.validationErrors.collectAsStateWithLifecycle()
     var showValidationReportDialog by remember { mutableStateOf(false) }
     var selectedTabForComparison by remember { mutableStateOf<String?>(null) }
-    
+    val isOpenedFromCalendar by viewModel.isSalesOpenedFromCalendar.collectAsStateWithLifecycle()
+
     BackHandler(enabled = showAddEditScreen) {
         showAddEditScreen = false
         selectedSalesForEdit = null
+    }
+
+    BackHandler(enabled = !showAddEditScreen && (showBackButton || isOpenedFromCalendar)) {
+        onBackToParent()
     }
     var isShopLocked by remember { mutableStateOf(false) }
 
@@ -425,11 +431,14 @@ fun SalesScreen(
                 TopAppBar(
                     title = { Text("Sales Records", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        if (showBackButton) {
-                            IconButton(onClick = onBackToParent) {
+                        if (showBackButton || isOpenedFromCalendar) {
+                            IconButton(
+                                onClick = onBackToParent,
+                                modifier = Modifier.testTag("sales_back_button")
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Back",
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = if (isOpenedFromCalendar) "Back to Calendar" else "Back",
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }

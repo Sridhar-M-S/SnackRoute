@@ -112,7 +112,6 @@ fun DashboardScreen(
     var showReturnReductionDialog by remember { mutableStateOf(false) }
     var showCustomPriceDialog by remember { mutableStateOf(false) }
     var showPacketsSoldDialog by remember { mutableStateOf(false) }
-    var showCalendarDialog by remember { mutableStateOf(false) }
 
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
@@ -354,7 +353,7 @@ fun DashboardScreen(
                     selected = false,
                     onClick = {
                         coroutineScope.launch { drawerState.close() }
-                        showCalendarDialog = true
+                        onNavigateToTab("SalesCalendar")
                     },
                     modifier = Modifier
                         .padding(horizontal = 12.dp, vertical = 2.dp)
@@ -581,7 +580,7 @@ fun DashboardScreen(
                     },
                     actions = {
                         IconButton(
-                            onClick = { showCalendarDialog = true },
+                            onClick = { onNavigateToTab("SalesCalendar") },
                             modifier = Modifier.testTag("sales_calendar_button")
                         ) {
                             Icon(
@@ -1606,17 +1605,6 @@ fun DashboardScreen(
                     ) {
                         Text("Dismiss")
                     }
-                }
-            )
-        }
-        if (showCalendarDialog) {
-            SalesCalendarDialog(
-                sales = sales,
-                onDismiss = { showCalendarDialog = false },
-                onDateSelected = { dateMillis ->
-                    showCalendarDialog = false
-                    viewModel.setSalesDateFilter(dateMillis)
-                    onNavigateToTab("Sales")
                 }
             )
         }

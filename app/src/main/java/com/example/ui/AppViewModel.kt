@@ -1683,6 +1683,53 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         issuesList
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private fun saveCachedGamification(state: GamificationState) {
+        prefs.edit()
+            .putInt("cached_user_level", state.level)
+            .putInt("cached_user_xp", state.xp)
+            .putInt("cached_user_xp_needed", state.xpNeededForNextLevel)
+            .putFloat("cached_user_xp_progress", state.xpProgress)
+            .putInt("cached_user_coins", state.coins)
+            .putString("cached_user_rank", state.rank)
+            .putInt("cached_user_streak", state.streak)
+            .putString("cached_user_title", state.title)
+            .putInt("cached_user_sales_count", state.totalSalesCount)
+            .putInt("cached_user_shops_count", state.totalShopsCount)
+            .putInt("cached_user_locations_count", state.totalLocationsCount)
+            .putInt("cached_user_badges_count", state.unlockedBadgesCount)
+            .apply()
+    }
+
+    private fun loadCachedGamificationState(): GamificationState {
+        val cachedLevel = prefs.getInt("cached_user_level", 1)
+        val cachedXp = prefs.getInt("cached_user_xp", 0)
+        val cachedXpNeeded = prefs.getInt("cached_user_xp_needed", 500)
+        val cachedProgress = prefs.getFloat("cached_user_xp_progress", 0f)
+        val cachedCoins = prefs.getInt("cached_user_coins", 0)
+        val cachedRank = prefs.getString("cached_user_rank", "Bronze Seller") ?: "Bronze Seller"
+        val cachedStreak = prefs.getInt("cached_user_streak", 0)
+        val cachedTitle = prefs.getString("cached_user_title", "Beginner Seller") ?: "Beginner Seller"
+        val cachedSales = prefs.getInt("cached_user_sales_count", 0)
+        val cachedShops = prefs.getInt("cached_user_shops_count", 0)
+        val cachedLocations = prefs.getInt("cached_user_locations_count", 0)
+        val cachedBadges = prefs.getInt("cached_user_badges_count", 0)
+
+        return GamificationState(
+            level = cachedLevel,
+            xp = cachedXp,
+            xpNeededForNextLevel = cachedXpNeeded,
+            xpProgress = cachedProgress,
+            coins = cachedCoins,
+            rank = cachedRank,
+            streak = cachedStreak,
+            title = cachedTitle,
+            totalSalesCount = cachedSales,
+            totalShopsCount = cachedShops,
+            totalLocationsCount = cachedLocations,
+            unlockedBadgesCount = cachedBadges
+        )
+    }
+
     val gamificationState: StateFlow<GamificationState> = combine(
         sales,
         repository.allShops,
@@ -1701,8 +1748,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val bCoins = array[5] as Int
         val rIds = array[6] as Set<String>
         val combo = array[7] as Int
-        calculateGamificationState(sales, shops, locs, badges, bXp, bCoins, rIds, combo)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GamificationState())
+        val state = calculateGamificationState(sales, shops, locs, badges, bXp, bCoins, rIds, combo)
+        saveCachedGamification(state)
+        state
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), loadCachedGamificationState())
 
     val currentDailySales: StateFlow<List<SalesEntry>> = sales
         .map { salesList ->
@@ -1770,6 +1819,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val salesFilterStatus = MutableStateFlow<String?>(null)
     private val _salesFilterTodayTrigger = MutableStateFlow(false)
     val salesFilterTodayTrigger: StateFlow<Boolean> = _salesFilterTodayTrigger.asStateFlow()
+
+    val calendarViewedYear = MutableStateFlow(java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+    val calendarViewedMonth = MutableStateFlow(java.util.Calendar.getInstance().get(java.util.Calendar.MONTH))
+    val calendarSelectedDateMillis = MutableStateFlow<Long?>(null)
+    val isSalesOpenedFromCalendar = MutableStateFlow(false)
+    val isCalendarViewOpen = MutableStateFlow(false)
+
+    fun openSalesCalendar() {
+        isCalendarViewOpen.value = true
+    }
+
+    fun closeSalesCalendar() {
+        isCalendarViewOpen.value = false
+    }
+
+    fun setCalendarMonth(year: Int, month: Int) {
+        calendarViewedYear.value = year
+        calendarViewedMonth.value = month
+    }
+
+    fun selectCalendarDateAndOpenSales(dateMillis: Long, year: Int, month: Int) {
+        calendarViewedYear.value = year
+        calendarViewedMonth.value = month
+        calendarSelectedDateMillis.value = dateMillis
+        isSalesOpenedFromCalendar.value = true
+        isCalendarViewOpen.value = false
+        setSalesDateFilter(dateMillis)
+    }
+
+    fun returnFromSalesToCalendar() {
+        isSalesOpenedFromCalendar.value = false
+        isCalendarViewOpen.value = true
+    }
+
+    fun clearSalesOpenedFromCalendar() {
+        isSalesOpenedFromCalendar.value = false
+    }
 
     fun setSalesDateFilterToToday() {
         val cal = java.util.Calendar.getInstance().apply {
@@ -2573,7 +2659,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Monitoring level changes for celebrations
-        var previousLevel = -1
+        var previousLevel = prefs.getInt("cached_user_level", -1)
         viewModelScope.launch {
             gamificationState.collect { state ->
                 if (previousLevel == -1) {
