@@ -82,7 +82,7 @@ fun DashboardScreen(
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
 
     val unifiedImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.importAllUnifiedFromExcel(context, uri)
@@ -515,7 +515,7 @@ fun DashboardScreen(
                     selected = false,
                     onClick = {
                         coroutineScope.launch { drawerState.close() }
-                        unifiedImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        unifiedImportLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*"))
                     },
                     modifier = Modifier
                         .padding(horizontal = 12.dp, vertical = 2.dp)

@@ -61,7 +61,7 @@ fun BusinessExpensesScreen(
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
 
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.importExpensesFromExcel(context, uri)
@@ -229,7 +229,7 @@ fun BusinessExpensesScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        onClick = { importLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*")) },
                         modifier = Modifier.testTag("btn_expenses_import")
                     ) {
                         Icon(Icons.Default.Upload, contentDescription = "Import Excel")

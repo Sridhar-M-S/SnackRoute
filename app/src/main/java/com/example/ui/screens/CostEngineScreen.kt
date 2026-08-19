@@ -133,7 +133,7 @@ fun CostEngineScreen(
     val importSummary by viewModel.importSummary.collectAsState()
 
     val excelImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.importDynamicCostEngineFromExcel(context, uri)
@@ -202,7 +202,7 @@ fun CostEngineScreen(
                     ) {
                         IconButton(
                             onClick = {
-                                excelImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                                excelImportLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*"))
                             },
                             modifier = Modifier.testTag("import_cost_engine_button")
                         ) {

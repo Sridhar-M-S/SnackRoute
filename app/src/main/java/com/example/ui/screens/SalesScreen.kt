@@ -79,7 +79,7 @@ fun SalesScreen(
     val locations by viewModel.locations.collectAsStateWithLifecycle()
 
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.importSalesFromExcel(context, uri)
@@ -87,6 +87,7 @@ fun SalesScreen(
     }
 
     val searchQuery by viewModel.salesSearchQuery.collectAsStateWithLifecycle()
+    val pickedShopForSales by viewModel.pickedShopForSales.collectAsStateWithLifecycle()
     var isQuickAddMode by remember { mutableStateOf(viewModel.openAddSalesForm.value) }
     var showAddEditScreen by remember { mutableStateOf(viewModel.openAddSalesForm.value || viewModel.prefilledSaleData.value != null) }
     var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
@@ -97,15 +98,9 @@ fun SalesScreen(
     val isOpenedFromCalendar by viewModel.isSalesOpenedFromCalendar.collectAsStateWithLifecycle()
 
     BackHandler(enabled = showAddEditScreen) {
-        if (isQuickAddMode) {
-            isQuickAddMode = false
-            showAddEditScreen = false
-            selectedSalesForEdit = null
-            onBackToParent()
-        } else {
-            showAddEditScreen = false
-            selectedSalesForEdit = null
-        }
+        showAddEditScreen = false
+        selectedSalesForEdit = null
+        isQuickAddMode = false
     }
 
     BackHandler(enabled = !showAddEditScreen && (showBackButton || isOpenedFromCalendar)) {
@@ -163,6 +158,14 @@ fun SalesScreen(
     var sortBy by remember { mutableStateOf("Date") } // Date, Amount, Profit
     var sortAscending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var scrollToTopTrigger by remember { mutableStateOf(0) }
+
+    LaunchedEffect(scrollToTopTrigger) {
+        if (scrollToTopTrigger > 0) {
+            kotlinx.coroutines.delay(50)
+            listState.animateScrollToItem(0)
+        }
+    }
 
     // Form fields
     var entryDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -335,6 +338,16 @@ fun SalesScreen(
         }
     }
 
+    LaunchedEffect(pickedShopForSales) {
+        if (pickedShopForSales != null) {
+            val shopNum = pickedShopForSales!!
+            selectedShopNumber = shopNum
+            shopError = null
+            showAddEditScreen = true
+            viewModel.clearPickedShopForSales()
+        }
+    }
+
     LaunchedEffect(prefilledSaleData) {
         if (prefilledSaleData != null) {
             val (shopNumber, _, _) = prefilledSaleData!!
@@ -495,7 +508,7 @@ fun SalesScreen(
                             Icon(Icons.Default.FilterList, contentDescription = "Toggle Filters")
                         }
                         IconButton(
-                            onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                            onClick = { importLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*")) },
                             modifier = Modifier.testTag("import_sales_button")
                         ) {
                             Icon(Icons.Default.Upload, contentDescription = "Import Excel")
@@ -1045,15 +1058,9 @@ fun SalesScreen(
                     title = { Text(if (isEdit) "Edit Sales Record" else "Log Daily Sales", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = {
-                            if (isQuickAddMode) {
-                                isQuickAddMode = false
-                                showAddEditScreen = false
-                                selectedSalesForEdit = null
-                                onBackToParent()
-                            } else {
-                                showAddEditScreen = false
-                                selectedSalesForEdit = null
-                            }
+                            showAddEditScreen = false
+                            selectedSalesForEdit = null
+                            isQuickAddMode = false
                         }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
@@ -1304,10 +1311,10 @@ fun SalesScreen(
                                 }
                             }
 
-                            // Location icon button to quickly find nearest shops in Shop Master
+                            // Location icon button to quickly search shops by location in Shop Master
                             FilledTonalIconButton(
                                 onClick = {
-                                    viewModel.triggerOpenNearestShopTab()
+                                    viewModel.startShopPickerForSales()
                                     onNavigateToTab("Shops")
                                 },
                                 modifier = Modifier
@@ -1316,7 +1323,7 @@ fun SalesScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.LocationOn,
-                                    contentDescription = "Find Nearest Shop",
+                                    contentDescription = "Search Shop by Location",
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
@@ -1325,15 +1332,48 @@ fun SalesScreen(
 
                     item {
                         val shopLocCode = currentShopObj?.locationNumber
-                        val shopLocName = locations.firstOrNull { it.locationNumber == shopLocCode }?.locationName ?: shopLocCode ?: "Not Assigned"
-                        OutlinedTextField(
-                            value = shopLocName,
-                            onValueChange = {},
-                            label = { Text("Associated Route / Location") },
-                            readOnly = true,
-                            enabled = false,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        val shopLocName = locations.firstOrNull { it.locationNumber == shopLocCode }?.locationName ?: shopLocCode ?: ""
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.startShopPickerForSales()
+                                    onNavigateToTab("Shops")
+                                }
+                                .testTag("sales_form_location_field")
+                        ) {
+                            OutlinedTextField(
+                                value = if (shopLocName.isNotEmpty()) shopLocName else "",
+                                onValueChange = {},
+                                label = { Text("Location / Route (Click to search in Shop Master)") },
+                                placeholder = { Text("Tap to search Shop by Location...") },
+                                readOnly = true,
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.startShopPickerForSales()
+                                            onNavigateToTab("Shops")
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Search Shop by Location in Shop Master",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            // Transparent clickable surface overlay to capture touches on the entire field
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable {
+                                        viewModel.startShopPickerForSales()
+                                        onNavigateToTab("Shops")
+                                    }
+                            )
+                        }
                     }
 
                     // Iterate and render each product row in saleItems list
@@ -1836,15 +1876,10 @@ fun SalesScreen(
                             } else {
                                 Toast.makeText(context, "Sales logged successfully", Toast.LENGTH_SHORT).show()
                             }
-                            if (isQuickAddMode) {
-                                isQuickAddMode = false
-                                showAddEditScreen = false
-                                selectedSalesForEdit = null
-                                onBackToParent()
-                            } else {
-                                showAddEditScreen = false
-                                selectedSalesForEdit = null
-                            }
+                            showAddEditScreen = false
+                            selectedSalesForEdit = null
+                            isQuickAddMode = false
+                            scrollToTopTrigger++
                         }
                     },
                     modifier = Modifier

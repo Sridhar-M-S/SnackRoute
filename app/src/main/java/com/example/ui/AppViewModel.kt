@@ -2437,6 +2437,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _prefilledSaleData = MutableStateFlow<Triple<String, String, String>?>(null) // ShopNumber, ShopName, LocationName
     val prefilledSaleData: StateFlow<Triple<String, String, String>?> = _prefilledSaleData.asStateFlow()
 
+    // Shop Picker Mode for Daily Sales Entry
+    private val _shopPickerForSalesMode = MutableStateFlow(false)
+    val shopPickerForSalesMode: StateFlow<Boolean> = _shopPickerForSalesMode.asStateFlow()
+
+    private val _pickedShopForSales = MutableStateFlow<String?>(null)
+    val pickedShopForSales: StateFlow<String?> = _pickedShopForSales.asStateFlow()
+
+    fun startShopPickerForSales() {
+        _shopPickerForSalesMode.value = true
+    }
+
+    fun endShopPickerForSales() {
+        _shopPickerForSalesMode.value = false
+    }
+
+    fun pickShopForSales(shopNumber: String) {
+        _pickedShopForSales.value = shopNumber
+        _shopPickerForSalesMode.value = false
+    }
+
+    fun clearPickedShopForSales() {
+        _pickedShopForSales.value = null
+    }
+
     // Pre-filled search query for Shop Master (Shops screen)
     private val _prefilledShopSearchQuery = MutableStateFlow<String?>(null)
     val prefilledShopSearchQuery: StateFlow<String?> = _prefilledShopSearchQuery.asStateFlow()
@@ -4780,7 +4804,9 @@ User Question: $userQuestion
             val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(uri, takeFlags)
         } catch (e: Exception) {
-            // Ignore if persistable permissions not available
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (ignored: Exception) {}
         }
         val prefs = context.getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
         prefs.edit().putString("last_imported_unified_excel_uri", uri.toString()).apply()

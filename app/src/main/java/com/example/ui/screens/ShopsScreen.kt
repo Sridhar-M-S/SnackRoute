@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
@@ -29,6 +31,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -99,7 +103,7 @@ fun ShopsScreen(
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
 
     val excelImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.importShopsFromExcel(context, uri)
@@ -108,6 +112,25 @@ fun ShopsScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var activeSubTab by remember { mutableStateOf("Directory") } // "Directory" or "Nearest Search"
+    val shopPickerForSalesMode by viewModel.shopPickerForSalesMode.collectAsStateWithLifecycle()
+    val searchFocusRequester = remember { FocusRequester() }
+
+    BackHandler(enabled = shopPickerForSalesMode) {
+        viewModel.endShopPickerForSales()
+        onBack()
+    }
+
+    LaunchedEffect(shopPickerForSalesMode) {
+        if (shopPickerForSalesMode) {
+            activeSubTab = "Directory"
+            try {
+                searchFocusRequester.requestFocus()
+            } catch (e: Exception) {
+                // Layout may still be preparing
+            }
+        }
+    }
+
     val prefilledShopSearchQuery by viewModel.prefilledShopSearchQuery.collectAsStateWithLifecycle()
     LaunchedEffect(prefilledShopSearchQuery) {
         prefilledShopSearchQuery?.let { query ->
@@ -445,9 +468,11 @@ fun ShopsScreen(
 
     val filteredShops = remember(shops, searchQuery, selectedLocationFilter, sortBy, sortAscending, sales, locations, currentUserLocation, userCurrentLocation, resolvedUrls) {
         var list = shops.filter { shop ->
+            val locName = locations.firstOrNull { it.locationNumber == shop.locationNumber }?.locationName ?: ""
             val matchSearch = shop.storeName.contains(searchQuery, ignoreCase = true) ||
                     shop.shopNumber.contains(searchQuery, ignoreCase = true) ||
                     shop.locationNumber.contains(searchQuery, ignoreCase = true) ||
+                    locName.contains(searchQuery, ignoreCase = true) ||
                     (shop.mobileNumber ?: "").contains(searchQuery)
             
             val matchFilter = selectedLocationFilter == null || shop.locationNumber == selectedLocationFilter
@@ -541,12 +566,22 @@ fun ShopsScreen(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Shop Master", fontWeight = FontWeight.Bold) },
+                    title = {
+                        Text(
+                            text = if (shopPickerForSalesMode) "Select Shop for Sales" else "Shop Master",
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
                     navigationIcon = {
-                        if (showBackButton) {
-                            IconButton(onClick = onBack) {
+                        if (showBackButton || shopPickerForSalesMode) {
+                            IconButton(onClick = {
+                                if (shopPickerForSalesMode) {
+                                    viewModel.endShopPickerForSales()
+                                }
+                                onBack()
+                            }) {
                                 Icon(
-                                    imageVector = Icons.Default.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
                                     tint = MaterialTheme.colorScheme.primary
                                 )
@@ -567,7 +602,7 @@ fun ShopsScreen(
                         // Import Excel Button
                         IconButton(
                             onClick = {
-                                excelImportLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                                excelImportLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*"))
                             },
                             modifier = Modifier.testTag("import_shops_button")
                         ) {
@@ -624,6 +659,47 @@ fun ShopsScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // --- Shop Picker Mode Header Banner ---
+                if (shopPickerForSalesMode) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Select Store for Daily Sales Entry",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Search by Location or Store Name, then tap any shop to select it.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                            TextButton(onClick = {
+                                viewModel.endShopPickerForSales()
+                                onBack()
+                            }) {
+                                Text("Cancel", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
                 // --- Sub Tabs (Store Directory / Nearest Shops) ---
                 Row(
                     modifier = Modifier
@@ -658,7 +734,7 @@ fun ShopsScreen(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search by Shop Name, ID, Mobile...") },
+                        placeholder = { Text("Search by Route/Location, Shop Name, ID...") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -673,6 +749,7 @@ fun ShopsScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusRequester(searchFocusRequester)
                             .testTag("shop_search_input"),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
@@ -901,7 +978,19 @@ fun ShopsScreen(
                                     healthScore = item.healthScore,
                                     healthCategory = item.healthCategory,
                                     distance = item.distance,
-                                    onClick = { selectedShopForDetail = shop },
+                                    isPickerMode = shopPickerForSalesMode,
+                                    onClick = {
+                                        if (shopPickerForSalesMode) {
+                                            viewModel.pickShopForSales(shop.shopNumber)
+                                            onBack()
+                                        } else {
+                                            selectedShopForDetail = shop
+                                        }
+                                    },
+                                    onSelectShop = {
+                                        viewModel.pickShopForSales(shop.shopNumber)
+                                        onBack()
+                                    },
                                     onGoToSales = {
                                         viewModel.setSalesFilterShopNumber(shop.shopNumber)
                                         viewModel.setSalesSearchQuery(shop.storeName)
@@ -1348,7 +1437,19 @@ fun ShopsScreen(
                                         locationName = locName,
                                         distance = distance,
                                         index = index + 1,
-                                        onClick = { selectedShopForDetail = shop },
+                                        isPickerMode = shopPickerForSalesMode,
+                                        onClick = {
+                                            if (shopPickerForSalesMode) {
+                                                viewModel.pickShopForSales(shop.shopNumber)
+                                                onBack()
+                                            } else {
+                                                selectedShopForDetail = shop
+                                            }
+                                        },
+                                        onSelectShop = {
+                                            viewModel.pickShopForSales(shop.shopNumber)
+                                            onBack()
+                                        },
                                         onNavigate = {
                                             if (!shop.googleMapLink.isNullOrEmpty()) {
                                                 val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(shop.googleMapLink))
@@ -2098,54 +2199,70 @@ fun ShopsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Button(
-                        onClick = {
-                            viewModel.setSalesFilterShopNumber(detail.shopNumber)
-                            viewModel.setSalesSearchQuery(detail.storeName)
-                            onNavigateToTab("Sales")
-                            selectedShopForDetail = null
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary
-                        ),
-                        modifier = Modifier.testTag("go_to_sales_detail_button")
-                    ) {
-                        Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sales")
-                    }
-                    if (!detail.googleMapLink.isNullOrEmpty()) {
-                        OutlinedButton(
+                    if (shopPickerForSalesMode) {
+                        Button(
                             onClick = {
-                                try {
-                                    val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(detail.googleMapLink))
-                                    context.startActivity(mapIntent)
-                                } catch (e: Exception) {
-                                    // fallback
-                                }
+                                viewModel.pickShopForSales(detail.shopNumber)
+                                selectedShopForDetail = null
+                                onBack()
                             },
-                            modifier = Modifier.testTag("go_to_map_detail_button"),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(8.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.testTag("select_shop_detail_button")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Navigation,
-                                contentDescription = "Navigate to Google Maps",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Map", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("Select This Shop")
                         }
-                    }
-                    Button(
-                        onClick = {
-                            viewModel.setPrefilledSaleData(detail.shopNumber, detail.storeName, locName)
-                            onNavigateToTab("Sales")
-                            selectedShopForDetail = null
+                    } else {
+                        Button(
+                            onClick = {
+                                viewModel.setSalesFilterShopNumber(detail.shopNumber)
+                                viewModel.setSalesSearchQuery(detail.storeName)
+                                onNavigateToTab("Sales")
+                                selectedShopForDetail = null
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            ),
+                            modifier = Modifier.testTag("go_to_sales_detail_button")
+                        ) {
+                            Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Sales")
                         }
-                    ) {
-                        Text("Create Daily Sale")
+                        if (!detail.googleMapLink.isNullOrEmpty()) {
+                            OutlinedButton(
+                                onClick = {
+                                    try {
+                                        val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(detail.googleMapLink))
+                                        context.startActivity(mapIntent)
+                                    } catch (e: Exception) {
+                                        // fallback
+                                    }
+                                },
+                                modifier = Modifier.testTag("go_to_map_detail_button"),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Navigation,
+                                    contentDescription = "Navigate to Google Maps",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Map", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.setPrefilledSaleData(detail.shopNumber, detail.storeName, locName)
+                                onNavigateToTab("Sales")
+                                selectedShopForDetail = null
+                            }
+                        ) {
+                            Text("Create Daily Sale")
+                        }
                     }
                     TextButton(onClick = { selectedShopForDetail = null }) {
                         Text("Close")
@@ -2429,7 +2546,9 @@ fun ShopCard(
     healthScore: Int,
     healthCategory: String,
     distance: Double? = null,
+    isPickerMode: Boolean = false,
     onClick: () -> Unit,
+    onSelectShop: (() -> Unit)? = null,
     onGoToSales: () -> Unit,
     onRecordSale: () -> Unit,
     onEdit: () -> Unit,
@@ -2443,7 +2562,10 @@ fun ShopCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPickerMode) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface
+        ),
+        border = if (isPickerMode) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -2580,12 +2702,14 @@ fun ShopCard(
                 }
 
                 // Edit/Delete actions
-                Column(horizontalAlignment = Alignment.End) {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    }
-                    IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                if (!isPickerMode) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
             }
@@ -2598,67 +2722,88 @@ fun ShopCard(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val hasMapLink = !shop.googleMapLink.isNullOrEmpty()
-                val hasCoords = shop.latitude != null && shop.longitude != null && shop.latitude != 0.0 && shop.longitude != 0.0
-                if (hasMapLink || hasCoords) {
-                    val context = LocalContext.current
-                    OutlinedButton(
-                        onClick = {
-                            try {
-                                val intent = if (hasMapLink) {
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(shop.googleMapLink))
-                                } else {
-                                    Intent(Intent.ACTION_VIEW, Uri.parse("geo:${shop.latitude},${shop.longitude}?q=${Uri.encode(shop.storeName)}"))
+                if (isPickerMode) {
+                    Button(
+                        onClick = { onSelectShop?.invoke() ?: onClick() },
+                        modifier = Modifier.testTag("select_shop_button_${shop.shopNumber}"),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Select Shop",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                } else {
+                    val hasMapLink = !shop.googleMapLink.isNullOrEmpty()
+                    val hasCoords = shop.latitude != null && shop.longitude != null && shop.latitude != 0.0 && shop.longitude != 0.0
+                    if (hasMapLink || hasCoords) {
+                        val context = LocalContext.current
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    val intent = if (hasMapLink) {
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(shop.googleMapLink))
+                                    } else {
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("geo:${shop.latitude},${shop.longitude}?q=${Uri.encode(shop.storeName)}"))
+                                    }
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    // fallback
                                 }
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                // fallback
-                            }
-                        },
-                        modifier = Modifier.testTag("go_to_map_button_${shop.shopNumber}"),
+                            },
+                            modifier = Modifier.testTag("go_to_map_button_${shop.shopNumber}"),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = "Navigate to Google Maps",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Map", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    OutlinedButton(
+                        onClick = onGoToSales,
+                        modifier = Modifier.testTag("go_to_sales_button_${shop.shopNumber}"),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Navigation,
-                            contentDescription = "Navigate to Google Maps",
+                            imageVector = Icons.Default.ReceiptLong,
+                            contentDescription = "Navigate to Sales",
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Map", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                        Text("Sales", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                }
-                OutlinedButton(
-                    onClick = onGoToSales,
-                    modifier = Modifier.testTag("go_to_sales_button_${shop.shopNumber}"),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ReceiptLong,
-                        contentDescription = "Navigate to Sales",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Sales", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = onRecordSale,
-                    modifier = Modifier.testTag("record_sale_button_${shop.shopNumber}"),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Record Sale",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Record Sale", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    Button(
+                        onClick = onRecordSale,
+                        modifier = Modifier.testTag("record_sale_button_${shop.shopNumber}"),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Record Sale",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Record Sale", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    }
                 }
             }
 
@@ -2711,7 +2856,9 @@ fun NearestShopCard(
     locationName: String,
     distance: Double,
     index: Int,
+    isPickerMode: Boolean = false,
     onClick: () -> Unit,
+    onSelectShop: (() -> Unit)? = null,
     onNavigate: () -> Unit,
     onCreateSale: () -> Unit,
     onImageClick: ((String) -> Unit)? = null
@@ -2722,7 +2869,10 @@ fun NearestShopCard(
             .clickable(onClick = onClick)
             .testTag("nearest_shop_card_${shop.shopNumber}"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPickerMode) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface
+        ),
+        border = if (isPickerMode) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null,
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
@@ -2846,27 +2996,43 @@ fun NearestShopCard(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (!shop.googleMapLink.isNullOrEmpty()) {
-                        OutlinedButton(
-                            onClick = onNavigate,
+                    if (isPickerMode) {
+                        Button(
+                            onClick = { onSelectShop?.invoke() ?: onClick() },
+                            modifier = Modifier
+                                .height(36.dp)
+                                .testTag("select_nearest_shop_button_${shop.shopNumber}"),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Select Shop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        if (!shop.googleMapLink.isNullOrEmpty()) {
+                            OutlinedButton(
+                                onClick = onNavigate,
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                modifier = Modifier.height(36.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Map", fontSize = 11.sp)
+                            }
+                        }
+                        Button(
+                            onClick = onCreateSale,
                             contentPadding = PaddingValues(horizontal = 12.dp),
                             modifier = Modifier.height(36.dp),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Map", fontSize = 11.sp)
+                            Text("Sale", fontSize = 11.sp)
                         }
-                    }
-                    Button(
-                        onClick = onCreateSale,
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier.height(36.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sale", fontSize = 11.sp)
                     }
                 }
             }

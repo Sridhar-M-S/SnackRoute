@@ -20,6 +20,26 @@ class ExportActivity : ComponentActivity() {
     private var originalUri: Uri? = null
     private var originalFileName: String? = null
 
+    private val selectOriginalFileForWriteLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                // Persistable permissions may not be needed if session active
+            }
+            val prefs = getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
+            prefs.edit().putString("last_imported_unified_excel_uri", uri.toString()).apply()
+            originalUri = uri
+            saveFileToUri(uri)
+        } else {
+            Toast.makeText(this, "Update cancelled", Toast.LENGTH_SHORT).show()
+            finish()
+        }
+    }
+
     private val createDocumentLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     ) { uri ->
@@ -113,20 +133,28 @@ class ExportActivity : ComponentActivity() {
 
     private fun updateOriginalFile(uri: Uri) {
         try {
-            contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
+            val outputStream = contentResolver.openOutputStream(uri, "wt")
+                ?: throw Exception("Could not obtain write stream for this file")
+            outputStream.use { os ->
                 sourceFile.inputStream().use { inputStream ->
-                    inputStream.copyTo(outputStream)
+                    inputStream.copyTo(os)
                 }
             }
             val displayName = originalFileName ?: "Imported Excel file"
             Toast.makeText(this, "$displayName updated with latest data successfully!", Toast.LENGTH_LONG).show()
+            finish()
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Could not update original file: ${e.message}. Saving as a new file...", Toast.LENGTH_LONG).show()
-            launchSaveToDevice()
-            return
-        } finally {
-            finish()
+            val fileName = originalFileName ?: "your original Excel file"
+            Toast.makeText(this, "Please select '$fileName' once to grant write permission", Toast.LENGTH_LONG).show()
+            try {
+                selectOriginalFileForWriteLauncher.launch(
+                    arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*")
+                )
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+                launchSaveToDevice()
+            }
         }
     }
 
@@ -169,12 +197,14 @@ class ExportActivity : ComponentActivity() {
 
     private fun saveFileToUri(uri: Uri) {
         try {
-            contentResolver.openOutputStream(uri)?.use { outputStream ->
+            val outputStream = contentResolver.openOutputStream(uri, "wt") ?: contentResolver.openOutputStream(uri)
+                ?: throw Exception("Could not open file for writing")
+            outputStream.use { os ->
                 sourceFile.inputStream().use { inputStream ->
-                    inputStream.copyTo(outputStream)
+                    inputStream.copyTo(os)
                 }
             }
-            Toast.makeText(this, "File saved successfully!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "File updated and saved successfully!", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Failed to save file: ${e.message}", Toast.LENGTH_LONG).show()

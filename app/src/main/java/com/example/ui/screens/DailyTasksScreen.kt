@@ -53,7 +53,7 @@ fun DailyTasksScreen(
     val importSummary by viewModel.importSummary.collectAsState()
 
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             viewModel.importDailyTasksFromExcel(context, uri)
@@ -111,7 +111,7 @@ fun DailyTasksScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        onClick = { importLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*")) },
                         modifier = Modifier.testTag("import_daily_tasks_button")
                     ) {
                         Icon(

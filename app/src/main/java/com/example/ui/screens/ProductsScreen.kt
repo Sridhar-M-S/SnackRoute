@@ -54,7 +54,7 @@ fun ProductsScreen(
     val importSummary by viewModel.importSummary.collectAsStateWithLifecycle()
     
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             viewModel.importProductsFromExcel(context, uri)
@@ -135,7 +135,7 @@ fun ProductsScreen(
                         )
                     }
                     IconButton(
-                        onClick = { importLauncher.launch("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") },
+                        onClick = { importLauncher.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "*/*")) },
                         modifier = Modifier.testTag("import_products_button")
                     ) {
                         Icon(Icons.Default.Upload, contentDescription = "Import Excel")
