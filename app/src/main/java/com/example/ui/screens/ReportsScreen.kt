@@ -306,7 +306,7 @@ fun ReportsScreen(
         }
 
         val pendingColList = sales.filter { it.status == "Pending" || it.status == "Partially Paid" }
-        val pendingColAmount = pendingColList.sumOf { it.totalAmount }
+        val pendingColAmount = pendingColList.sumOf { it.pendingBalanceAmount }
 
         ReportsCache(
             locationWise = locWise,

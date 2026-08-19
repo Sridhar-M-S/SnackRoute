@@ -5,18 +5,20 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import java.io.File
-import java.io.FileOutputStream
 import java.util.Locale
 
 class ExportActivity : ComponentActivity() {
 
     private lateinit var sourceFile: File
     private var fileTitle: String = "Exported File"
+    private var originalUri: Uri? = null
+    private var originalFileName: String? = null
 
     private val createDocumentLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -48,27 +50,84 @@ class ExportActivity : ComponentActivity() {
             return
         }
 
+        // Check if there is an imported Excel file URI
+        val prefs = getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
+        val savedUriString = prefs.getString("last_imported_unified_excel_uri", null)
+        if (!savedUriString.isNullOrBlank()) {
+            try {
+                val parsed = Uri.parse(savedUriString)
+                originalUri = parsed
+                contentResolver.query(parsed, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1) {
+                            originalFileName = cursor.getString(nameIndex)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         showExportOptionsDialog()
     }
 
     private fun showExportOptionsDialog() {
         val builder = android.app.AlertDialog.Builder(this)
         builder.setTitle(fileTitle)
-        builder.setMessage("Choose how you want to export this file:")
-        
-        builder.setPositiveButton("Share") { _, _ ->
-            shareFileDirectly()
+
+        if (originalUri != null) {
+            val fileName = originalFileName ?: "Imported Excel"
+            builder.setMessage("Imported file detected: $fileName\n\nChoose an export action:")
+
+            builder.setPositiveButton("Update Original File") { _, _ ->
+                updateOriginalFile(originalUri!!)
+            }
+
+            builder.setNeutralButton("Save as New File") { _, _ ->
+                launchSaveToDevice()
+            }
+
+            builder.setNegativeButton("Share") { _, _ ->
+                shareFileDirectly()
+            }
+        } else {
+            builder.setMessage("Choose how you want to export this file:")
+
+            builder.setPositiveButton("Save to Device") { _, _ ->
+                launchSaveToDevice()
+            }
+
+            builder.setNegativeButton("Share") { _, _ ->
+                shareFileDirectly()
+            }
         }
-        
-        builder.setNegativeButton("Save to Device") { _, _ ->
-            launchSaveToDevice()
-        }
-        
+
         builder.setOnCancelListener {
             finish()
         }
-        
+
         builder.show()
+    }
+
+    private fun updateOriginalFile(uri: Uri) {
+        try {
+            contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
+                sourceFile.inputStream().use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+            val displayName = originalFileName ?: "Imported Excel file"
+            Toast.makeText(this, "$displayName updated with latest data successfully!", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Could not update original file: ${e.message}. Saving as a new file...", Toast.LENGTH_LONG).show()
+            launchSaveToDevice()
+            return
+        } finally {
+            finish()
+        }
     }
 
     private fun shareFileDirectly() {
@@ -124,3 +183,4 @@ class ExportActivity : ComponentActivity() {
         }
     }
 }
+

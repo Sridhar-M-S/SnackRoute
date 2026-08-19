@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -3028,6 +3029,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importShopsFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -3100,6 +3102,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importLocationsFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -3180,6 +3183,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importExpensesFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -3206,6 +3210,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importSalesFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -3343,6 +3348,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importProductsFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -4650,6 +4656,7 @@ User Question: $userQuestion
     }
 
     fun importDailyTasksFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -4717,6 +4724,7 @@ User Question: $userQuestion
     }
 
     fun importDynamicCostEngineFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null
@@ -4767,9 +4775,23 @@ User Question: $userQuestion
         }
     }
 
+    fun saveImportedExcelUri(context: Context, uri: Uri) {
+        try {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+        } catch (e: Exception) {
+            // Ignore if persistable permissions not available
+        }
+        val prefs = context.getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
+        prefs.edit().putString("last_imported_unified_excel_uri", uri.toString()).apply()
+    }
+
     fun exportAllUnifiedToExcel(context: Context) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Preparing Excel export...", Toast.LENGTH_SHORT).show()
+                }
                 val locationsList = repository.allLocations.first()
                 val shopsList = repository.allShops.first()
                 val productsList = repository.allProducts.first()
@@ -4825,6 +4847,7 @@ User Question: $userQuestion
     }
 
     fun importAllUnifiedFromExcel(context: Context, uri: Uri) {
+        saveImportedExcelUri(context, uri)
         viewModelScope.launch {
             _isImporting.value = true
             _importSummary.value = null

@@ -178,7 +178,7 @@ fun DashboardScreen(
         // Pending Collections
         val pendingCollectionsVal = sales.filter {
             it.status == "Pending" || it.status == "Partially Paid"
-        }.sumOf { it.totalAmount }
+        }.sumOf { it.pendingBalanceAmount }
 
         // Product performance
         val productSalesVal = sales.groupBy { it.productName }.mapValues { (_, entries) -> entries.sumOf { it.packetsSold } }

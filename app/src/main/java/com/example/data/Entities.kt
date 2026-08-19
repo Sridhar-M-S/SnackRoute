@@ -71,6 +71,7 @@ data class SalesEntry(
     val profitPerPacket: Double,
     val totalProfit: Double, // Packets Sold * Profit Per Packet
     val status: String, // Paid, Pending, Partially Paid
+    val paidAmount: Double? = null,
     val remarks: String? = null,
     val sessionId: String? = null,
     val originalPacketRate: Double? = null,
@@ -79,6 +80,20 @@ data class SalesEntry(
 ) {
     val entryDateFormatted: String
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(entryDate))
+
+    val actualPaidAmount: Double
+        get() = when (status) {
+            "Paid" -> totalAmount
+            "Partially Paid" -> (paidAmount ?: 0.0).coerceIn(0.0, totalAmount)
+            "Pending" -> (paidAmount ?: 0.0).coerceIn(0.0, totalAmount)
+            else -> paidAmount ?: totalAmount
+        }
+
+    val pendingBalanceAmount: Double
+        get() = when (status) {
+            "Paid" -> 0.0
+            else -> (totalAmount - actualPaidAmount).coerceAtLeast(0.0)
+        }
 }
 
 @Entity(tableName = "weekly_timetable")

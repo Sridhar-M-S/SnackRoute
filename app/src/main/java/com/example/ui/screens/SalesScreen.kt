@@ -87,7 +87,8 @@ fun SalesScreen(
     }
 
     val searchQuery by viewModel.salesSearchQuery.collectAsStateWithLifecycle()
-    var showAddEditScreen by remember { mutableStateOf(false) }
+    var isQuickAddMode by remember { mutableStateOf(viewModel.openAddSalesForm.value) }
+    var showAddEditScreen by remember { mutableStateOf(viewModel.openAddSalesForm.value || viewModel.prefilledSaleData.value != null) }
     var selectedSalesForEdit by remember { mutableStateOf<SalesEntry?>(null) }
     
     val validationErrors by viewModel.validationErrors.collectAsStateWithLifecycle()
@@ -96,8 +97,15 @@ fun SalesScreen(
     val isOpenedFromCalendar by viewModel.isSalesOpenedFromCalendar.collectAsStateWithLifecycle()
 
     BackHandler(enabled = showAddEditScreen) {
-        showAddEditScreen = false
-        selectedSalesForEdit = null
+        if (isQuickAddMode) {
+            isQuickAddMode = false
+            showAddEditScreen = false
+            selectedSalesForEdit = null
+            onBackToParent()
+        } else {
+            showAddEditScreen = false
+            selectedSalesForEdit = null
+        }
     }
 
     BackHandler(enabled = !showAddEditScreen && (showBackButton || isOpenedFromCalendar)) {
@@ -160,8 +168,15 @@ fun SalesScreen(
     var entryDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var selectedShopNumber by remember { mutableStateOf("") }
     var payStatus by remember { mutableStateOf("Paid") } // Paid, Pending, Partially Paid
+    var partialPaidAmountStr by remember { mutableStateOf("") }
+    var partialAmountError by remember { mutableStateOf<String?>(null) }
     var remarks by remember { mutableStateOf("") }
-    var saleItems by remember { mutableStateOf<List<SaleItemState>>(emptyList()) }
+    var saleItems by remember {
+        val defaultProdName = products.filter { it.status == "Active" }.firstOrNull()?.productName 
+            ?: products.firstOrNull()?.productName 
+            ?: ""
+        mutableStateOf(listOf(SaleItemState(productName = defaultProdName)))
+    }
 
     // Validation
     var shopError by remember { mutableStateOf<String?>(null) }
@@ -295,6 +310,7 @@ fun SalesScreen(
 
     LaunchedEffect(openAddSalesForm) {
         if (openAddSalesForm) {
+            isQuickAddMode = true
             selectedSalesForEdit = null
             isShopLocked = false
             entryDateMillis = System.currentTimeMillis()
@@ -309,6 +325,8 @@ fun SalesScreen(
                 )
             )
             payStatus = "Paid"
+            partialPaidAmountStr = ""
+            partialAmountError = null
             remarks = ""
             shopError = null
             showAddEditScreen = true
@@ -320,6 +338,7 @@ fun SalesScreen(
     LaunchedEffect(prefilledSaleData) {
         if (prefilledSaleData != null) {
             val (shopNumber, _, _) = prefilledSaleData!!
+            isQuickAddMode = true
             
             // Set form fields
             entryDateMillis = System.currentTimeMillis()
@@ -335,6 +354,8 @@ fun SalesScreen(
                 )
             )
             payStatus = "Paid"
+            partialPaidAmountStr = ""
+            partialAmountError = null
             remarks = ""
             shopError = null
             
@@ -511,6 +532,8 @@ fun SalesScreen(
                                 )
                             )
                             payStatus = "Paid"
+                            partialPaidAmountStr = ""
+                            partialAmountError = null
                             remarks = ""
                             shopError = null
                             showAddEditScreen = true
@@ -967,6 +990,14 @@ fun SalesScreen(
                                         sales.filter { it.id == sale.id }
                                     }
 
+                                    val totalSessionPaid = sessionSales.sumOf { it.actualPaidAmount }
+                                    partialPaidAmountStr = if (sale.status == "Partially Paid" || (sale.status == "Pending" && totalSessionPaid > 0.0)) {
+                                        String.format(java.util.Locale.US, "%.2f", totalSessionPaid).trimEnd('0').trimEnd('.')
+                                    } else {
+                                        ""
+                                    }
+                                    partialAmountError = null
+
                                     saleItems = sessionSales.map { s ->
                                         android.util.Log.d("SalesEdit", "Profit value loaded into the Edit Sales screen: id=${s.id}, productName=${s.productName}, profitPerPacket=${s.profitPerPacket}")
                                         val isCustom = s.originalPacketRate != null
@@ -1014,15 +1045,60 @@ fun SalesScreen(
                     title = { Text(if (isEdit) "Edit Sales Record" else "Log Daily Sales", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = {
-                            showAddEditScreen = false
-                            selectedSalesForEdit = null
+                            if (isQuickAddMode) {
+                                isQuickAddMode = false
+                                showAddEditScreen = false
+                                selectedSalesForEdit = null
+                                onBackToParent()
+                            } else {
+                                showAddEditScreen = false
+                                selectedSalesForEdit = null
+                            }
                         }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     }
                 )
             }
         ) { innerPadding ->
+            val totalProducts = saleItems.size
+            val totalPacketsGiven = remember(saleItems) {
+                saleItems.sumOf { it.packetsGivenStr.toIntOrNull() ?: 0 }
+            }
+            val totalPacketsReturned = remember(saleItems) {
+                saleItems.sumOf { it.packetsReturnedStr.toIntOrNull() ?: 0 }
+            }
+            val totalPacketsSold = remember(totalPacketsGiven, totalPacketsReturned) {
+                (totalPacketsGiven - totalPacketsReturned).coerceAtLeast(0)
+            }
+            val grandTotalAmount = remember(saleItems) {
+                saleItems.sumOf { itm ->
+                    val given = itm.packetsGivenStr.toIntOrNull() ?: 0
+                    val returned = itm.packetsReturnedStr.toIntOrNull() ?: 0
+                    val sold = given - returned
+                    val rate = itm.ratePerPacketStr.toDoubleOrNull() ?: 0.0
+                    sold * rate
+                }
+            }
+            val totalProductionCost = remember(saleItems) {
+                saleItems.sumOf { itm ->
+                    val given = itm.packetsGivenStr.toIntOrNull() ?: 0
+                    val returned = itm.packetsReturnedStr.toIntOrNull() ?: 0
+                    val sold = given - returned
+                    val prodCost = itm.productionCostUsed ?: 0.0
+                    sold * prodCost
+                }
+            }
+            val totalEstimatedProfit = remember(saleItems) {
+                saleItems.sumOf { itm ->
+                    val given = itm.packetsGivenStr.toIntOrNull() ?: 0
+                    val returned = itm.packetsReturnedStr.toIntOrNull() ?: 0
+                    val sold = given - returned
+                    val profitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
+                    sold * profitPerUnit
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1311,30 +1387,6 @@ fun SalesScreen(
 
                     item {
                         // Calculations Summary Card
-                        val totalProducts = saleItems.size
-                        var totalPacketsGiven = 0
-                        var totalPacketsReturned = 0
-                        var totalPacketsSold = 0
-                        var totalProductionCost = 0.0
-                        var totalEstimatedProfit = 0.0
-                        var grandTotalAmount = 0.0
-                        
-                        saleItems.forEach { itm ->
-                            val given = itm.packetsGivenStr.toIntOrNull() ?: 0
-                            val returned = itm.packetsReturnedStr.toIntOrNull() ?: 0
-                            val sold = given - returned
-                            val rate = itm.ratePerPacketStr.toDoubleOrNull() ?: 0.0
-                            val profitPerUnit = itm.customProfitStr.toDoubleOrNull() ?: 0.0
-                            val prodCost = itm.productionCostUsed ?: 0.0
-                            
-                            totalPacketsGiven += given
-                            totalPacketsReturned += returned
-                            totalPacketsSold += sold
-                            totalProductionCost += (sold * prodCost)
-                            totalEstimatedProfit += (sold * profitPerUnit)
-                            grandTotalAmount += (sold * rate)
-                        }
-
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)),
@@ -1384,28 +1436,224 @@ fun SalesScreen(
                     }
 
                     item {
-                        // Paid Status Radio Group
+                        // Paid Status Radio Group & Partial Amount Field
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Payment Status*", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { payStatus = "Paid" }) {
-                                        RadioButton(selected = payStatus == "Paid", onClick = { payStatus = "Paid" })
+                                    Text("Payment Status*", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    if (payStatus == "Paid") {
+                                        Surface(
+                                            color = Color(0xFFE8F5E9),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(14.dp))
+                                                Text("Fully Paid", fontSize = 11.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable {
+                                            payStatus = "Paid"
+                                            partialPaidAmountStr = ""
+                                            partialAmountError = null
+                                        }
+                                    ) {
+                                        RadioButton(
+                                            selected = payStatus == "Paid",
+                                            onClick = {
+                                                payStatus = "Paid"
+                                                partialPaidAmountStr = ""
+                                                partialAmountError = null
+                                            }
+                                        )
                                         Text("Paid", fontSize = 13.sp)
                                     }
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { payStatus = "Partially Paid" }) {
-                                        RadioButton(selected = payStatus == "Partially Paid", onClick = { payStatus = "Partially Paid" })
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable {
+                                            payStatus = "Partially Paid"
+                                            partialAmountError = null
+                                        }
+                                    ) {
+                                        RadioButton(
+                                            selected = payStatus == "Partially Paid",
+                                            onClick = {
+                                                payStatus = "Partially Paid"
+                                                partialAmountError = null
+                                            }
+                                        )
                                         Text("Partial", fontSize = 13.sp)
                                     }
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { payStatus = "Pending" }) {
-                                        RadioButton(selected = payStatus == "Pending", onClick = { payStatus = "Pending" })
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable {
+                                            payStatus = "Pending"
+                                            partialAmountError = null
+                                        }
+                                    ) {
+                                        RadioButton(
+                                            selected = payStatus == "Pending",
+                                            onClick = {
+                                                payStatus = "Pending"
+                                                partialAmountError = null
+                                            }
+                                        )
                                         Text("Pending", fontSize = 13.sp)
+                                    }
+                                }
+
+                                // If status is Partially Paid or Pending, show the optional Partially Paid Amount input
+                                if (payStatus == "Partially Paid" || payStatus == "Pending") {
+                                    val currentPaidVal = partialPaidAmountStr.toDoubleOrNull() ?: 0.0
+                                    val balanceDue = (grandTotalAmount - currentPaidVal).coerceAtLeast(0.0)
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = partialPaidAmountStr,
+                                            onValueChange = { input ->
+                                                val clean = input.filter { it.isDigit() || it == '.' }
+                                                if (clean.count { it == '.' } > 1) return@OutlinedTextField
+
+                                                if (clean.isEmpty()) {
+                                                    partialPaidAmountStr = ""
+                                                    partialAmountError = null
+                                                } else {
+                                                    val enteredVal = clean.toDoubleOrNull()
+                                                    if (enteredVal != null) {
+                                                        if (grandTotalAmount > 0.0 && enteredVal > grandTotalAmount) {
+                                                            // Capped - cannot enter more amount than total
+                                                            partialAmountError = "Cannot enter more than total amount (₹${"%.2f".format(grandTotalAmount)})"
+                                                            partialPaidAmountStr = String.format(java.util.Locale.US, "%.2f", grandTotalAmount).trimEnd('0').trimEnd('.')
+                                                            payStatus = "Paid"
+                                                            Toast.makeText(context, "Full amount received (₹${"%.2f".format(grandTotalAmount)})! Mode changed to Paid.", Toast.LENGTH_SHORT).show()
+                                                        } else if (grandTotalAmount > 0.0 && Math.abs(enteredVal - grandTotalAmount) < 0.01) {
+                                                            // Full amount received
+                                                            partialPaidAmountStr = ""
+                                                            partialAmountError = null
+                                                            payStatus = "Paid"
+                                                            Toast.makeText(context, "Full amount received! Mode changed to Paid.", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            partialPaidAmountStr = clean
+                                                            partialAmountError = null
+                                                            if (enteredVal > 0.0 && payStatus == "Pending") {
+                                                                payStatus = "Partially Paid"
+                                                            }
+                                                        }
+                                                    } else {
+                                                        partialPaidAmountStr = clean
+                                                        partialAmountError = null
+                                                    }
+                                                }
+                                            },
+                                            label = { Text(if (payStatus == "Partially Paid") "Partially Paid Amount (₹)" else "Paid Amount (₹) - Optional") },
+                                            placeholder = { Text("e.g. 250 (Max ₹${"%.2f".format(grandTotalAmount)})") },
+                                            leadingIcon = {
+                                                Text("₹", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
+                                            },
+                                            trailingIcon = {
+                                                if (partialPaidAmountStr.isNotEmpty()) {
+                                                    IconButton(onClick = {
+                                                        partialPaidAmountStr = ""
+                                                        partialAmountError = null
+                                                    }) {
+                                                        Icon(Icons.Default.Clear, contentDescription = "Clear amount", modifier = Modifier.size(18.dp))
+                                                    }
+                                                }
+                                            },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            singleLine = true,
+                                            isError = partialAmountError != null,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+
+                                        if (partialAmountError != null) {
+                                            Text(
+                                                text = partialAmountError!!,
+                                                color = MaterialTheme.colorScheme.error,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Bill: ₹${"%.2f".format(grandTotalAmount)}",
+                                                fontSize = 11.sp,
+                                                color = Color.Gray
+                                            )
+                                            Text(
+                                                text = "Balance Due: ₹${"%.2f".format(balanceDue)}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (balanceDue > 0) Color(0xFFE65100) else Color(0xFF2E7D32)
+                                            )
+                                        }
+
+                                        // Quick Fill Chips
+                                        if (grandTotalAmount > 0.0) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                SuggestionChip(
+                                                    onClick = {
+                                                        payStatus = "Paid"
+                                                        partialPaidAmountStr = ""
+                                                        partialAmountError = null
+                                                    },
+                                                    label = { Text("Full Paid (₹${"%.0f".format(grandTotalAmount)})", fontSize = 11.sp) }
+                                                )
+                                                SuggestionChip(
+                                                    onClick = {
+                                                        val half = grandTotalAmount * 0.5
+                                                        partialPaidAmountStr = String.format(java.util.Locale.US, "%.2f", half).trimEnd('0').trimEnd('.')
+                                                        payStatus = "Partially Paid"
+                                                        partialAmountError = null
+                                                    },
+                                                    label = { Text("50% (₹${"%.0f".format(grandTotalAmount * 0.5)})", fontSize = 11.sp) }
+                                                )
+                                                if (partialPaidAmountStr.isNotEmpty()) {
+                                                    SuggestionChip(
+                                                        onClick = {
+                                                            partialPaidAmountStr = ""
+                                                            payStatus = "Pending"
+                                                            partialAmountError = null
+                                                        },
+                                                        label = { Text("Clear (₹0)", fontSize = 11.sp) }
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1469,10 +1717,29 @@ fun SalesScreen(
 
                         saleItems = validatedItems
 
+                        val enteredPartial = partialPaidAmountStr.toDoubleOrNull()
+                        if (enteredPartial != null && grandTotalAmount > 0 && enteredPartial > grandTotalAmount) {
+                            partialAmountError = "Cannot enter more than total amount (₹${"%.2f".format(grandTotalAmount)})"
+                            isAllValid = false
+                        }
+
                         if (isAllValid) {
                             // Generate or reuse Sales Session ID
                             val sessionId = selectedSalesForEdit?.sessionId 
                                 ?: ("SESS_" + java.util.UUID.randomUUID().toString().substring(0, 8).uppercase())
+
+                            val effectiveSessionPaid = when (payStatus) {
+                                "Paid" -> grandTotalAmount
+                                "Partially Paid" -> (enteredPartial ?: 0.0).coerceIn(0.0, grandTotalAmount)
+                                "Pending" -> (enteredPartial ?: 0.0).coerceIn(0.0, grandTotalAmount)
+                                else -> grandTotalAmount
+                            }
+
+                            val finalStatus = if (grandTotalAmount > 0 && effectiveSessionPaid >= grandTotalAmount) {
+                                "Paid"
+                            } else {
+                                payStatus
+                            }
 
                             val salesToInsert = saleItems.map { itm ->
                                 val givenVal = itm.packetsGivenStr.toInt()
@@ -1523,6 +1790,12 @@ fun SalesScreen(
                                 val finalProfitPerUnit = rateVal - costUsed
                                 val finalProfitTotal = finalSold * finalProfitPerUnit
 
+                                val itemPaid = if (grandTotalAmount > 0) {
+                                    (finalTotal / grandTotalAmount) * effectiveSessionPaid
+                                } else {
+                                    0.0
+                                }
+
                                 SalesEntry(
                                     id = itm.dbId,
                                     entryDate = entryDateMillis,
@@ -1537,7 +1810,8 @@ fun SalesScreen(
                                     totalAmount = finalTotal,
                                     profitPerPacket = finalProfitPerUnit,
                                     totalProfit = finalProfitTotal,
-                                    status = payStatus,
+                                    status = finalStatus,
+                                    paidAmount = itemPaid,
                                     remarks = remarks.trim().ifEmpty { null },
                                     sessionId = sessionId,
                                     originalPacketRate = itm.originalPacketRate,
@@ -1562,8 +1836,15 @@ fun SalesScreen(
                             } else {
                                 Toast.makeText(context, "Sales logged successfully", Toast.LENGTH_SHORT).show()
                             }
-                            showAddEditScreen = false
-                            selectedSalesForEdit = null
+                            if (isQuickAddMode) {
+                                isQuickAddMode = false
+                                showAddEditScreen = false
+                                selectedSalesForEdit = null
+                                onBackToParent()
+                            } else {
+                                showAddEditScreen = false
+                                selectedSalesForEdit = null
+                            }
                         }
                     },
                     modifier = Modifier
@@ -1834,6 +2115,27 @@ fun SalesCard(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = textColor
+                    )
+                }
+            }
+
+            if (sale.status == "Partially Paid" || (sale.status == "Pending" && sale.actualPaidAmount > 0.0)) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Paid: ₹${"%.2f".format(sale.actualPaidAmount)}",
+                        fontSize = 11.sp,
+                        color = Color(0xFF2E7D32),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Balance: ₹${"%.2f".format(sale.pendingBalanceAmount)}",
+                        fontSize = 11.sp,
+                        color = Color(0xFFE65100),
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
