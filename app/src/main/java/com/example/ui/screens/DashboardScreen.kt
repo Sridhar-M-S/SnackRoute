@@ -1132,6 +1132,22 @@ fun DashboardScreen(
                 onDismiss = { showExportDialog = false },
                 onExportConfirmed = {
                     viewModel.exportAllUnifiedToExcel(context)
+                },
+                onNavigateToCategory = { category ->
+                    showExportDialog = false
+                    when (category) {
+                        "Sales" -> onNavigateToTab("Sales")
+                        "Locations" -> onNavigateToTab("Locations")
+                        "Shops" -> onNavigateToTab("Shops")
+                        "Products" -> onNavigateToTab("Products")
+                        "Expenses" -> onNavigateToTab("BusinessExpenses")
+                        "Daily Tasks", "Tasks" -> onOpenDailyTasks()
+                        "Shop Remarks", "Remarks" -> onNavigateToTab("Remarks")
+                        "Cost Engine", "Dynamic Cost" -> onNavigateToTab("CostEngine")
+                        "Weekly Timetable", "Timetable" -> onOpenTimetable()
+                        "Sales Targets", "Targets" -> onNavigateToTab("TodaySalesTarget")
+                        else -> onNavigateToTab("Sales")
+                    }
                 }
             )
         }

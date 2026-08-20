@@ -3978,9 +3978,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         var totalProductionCost = 0.0
         
         calcItems.forEach { item ->
-            val purchase = purchasesList
-                .filter { it.ingredientId == item.ingredientId && it.purchaseDate <= saleDateStr }
-                .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+            val purchase = com.example.ui.screens.UnitConverter.getEffectivePurchase(purchasesList, item.ingredientId, saleDateStr)
             
             val ingredientCost = if (purchase != null) {
                 val costPerUsageUnit = calculateCostPerUsageUnit(

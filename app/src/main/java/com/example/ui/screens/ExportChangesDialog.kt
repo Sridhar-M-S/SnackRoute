@@ -35,7 +35,8 @@ import java.util.*
 fun ExportChangesDialog(
     viewModel: AppViewModel,
     onDismiss: () -> Unit,
-    onExportConfirmed: () -> Unit
+    onExportConfirmed: () -> Unit,
+    onNavigateToCategory: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isExportNeeded by viewModel.isExportNeeded.collectAsState()
@@ -191,13 +192,28 @@ fun ExportChangesDialog(
                 } else {
                     // Unexported changes list
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Which changes need to be exported:",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Which changes need to be exported:",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (onNavigateToCategory != null) {
+                                Text(
+                                    text = "Tap to view live ↗",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
 
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -206,7 +222,15 @@ fun ExportChangesDialog(
                                 .testTag("list_export_pending_changes")
                         ) {
                             items(groupedSummaries) { summary ->
-                                ExportCategoryCard(summary = summary)
+                                ExportCategoryCard(
+                                    summary = summary,
+                                    onNavigate = if (onNavigateToCategory != null) {
+                                        {
+                                            onDismiss()
+                                            onNavigateToCategory(summary.category)
+                                        }
+                                    } else null
+                                )
                             }
                         }
                     }
@@ -261,7 +285,10 @@ fun ExportChangesDialog(
 }
 
 @Composable
-private fun ExportCategoryCard(summary: ExportCategorySummary) {
+private fun ExportCategoryCard(
+    summary: ExportCategorySummary,
+    onNavigate: (() -> Unit)? = null
+) {
     var isExpanded by remember { mutableStateOf(true) }
 
     val (icon, tint) = getCategoryVisuals(summary.category)
@@ -270,7 +297,13 @@ private fun ExportCategoryCard(summary: ExportCategorySummary) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable { isExpanded = !isExpanded }
+            .clickable {
+                if (onNavigate != null) {
+                    onNavigate()
+                } else {
+                    isExpanded = !isExpanded
+                }
+            }
             .testTag("category_card_${summary.category.lowercase().replace(" ", "_")}"),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -308,12 +341,32 @@ private fun ExportCategoryCard(summary: ExportCategorySummary) {
                     }
 
                     Column {
-                        Text(
-                            text = summary.category,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = tint
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = summary.category,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = tint
+                            )
+                            if (onNavigate != null) {
+                                Surface(
+                                    color = tint.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "View Live ↗",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = tint,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = summary.headlineSentence,
                             style = MaterialTheme.typography.titleSmall,
@@ -340,11 +393,16 @@ private fun ExportCategoryCard(summary: ExportCategorySummary) {
                         )
                     }
 
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = if (isExpanded) "Collapse" else "Expand",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    IconButton(
+                        onClick = { isExpanded = !isExpanded },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (isExpanded) "Collapse" else "Expand",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -365,38 +423,64 @@ private fun ExportCategoryCard(summary: ExportCategorySummary) {
                         val formattedTime = remember(item.timestamp) {
                             timeFormatter.format(Date(item.timestamp))
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    onNavigate?.invoke()
+                                }
                         ) {
-                            Text(
-                                text = "•",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = tint
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                                 Text(
-                                    text = item.summarySentence,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    text = "•",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = tint
                                 )
-                                if (!item.detailText.isNullOrBlank()) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = item.detailText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = item.summarySentence,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
+                                    if (!item.detailText.isNullOrBlank()) {
+                                        Text(
+                                            text = item.detailText,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = formattedTime,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        fontSize = 10.sp
+                                    )
+                                    if (onNavigate != null) {
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronRight,
+                                            contentDescription = "Go to item",
+                                            tint = tint.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
                                 }
                             }
-                            Text(
-                                text = formattedTime,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline,
-                                fontSize = 10.sp
-                            )
                         }
                     }
                 }
@@ -418,11 +502,11 @@ private fun getCategoryVisuals(category: String): Pair<ImageVector, Color> {
         "Shops" -> Pair(Icons.Default.Store, tertiaryColor)
         "Products" -> Pair(Icons.Default.Inventory2, primaryColor)
         "Expenses" -> Pair(Icons.Default.ReceiptLong, errorColor)
-        "Daily Tasks" -> Pair(Icons.Default.Checklist, secondaryColor)
-        "Shop Remarks" -> Pair(Icons.Default.Comment, tertiaryColor)
-        "Cost Engine" -> Pair(Icons.Default.Calculate, primaryColor)
-        "Weekly Timetable" -> Pair(Icons.Default.CalendarMonth, secondaryColor)
-        "Sales Targets" -> Pair(Icons.Default.TrackChanges, tertiaryColor)
+        "Daily Tasks", "Tasks" -> Pair(Icons.Default.Checklist, secondaryColor)
+        "Shop Remarks", "Remarks" -> Pair(Icons.Default.Comment, tertiaryColor)
+        "Cost Engine", "Dynamic Cost" -> Pair(Icons.Default.Calculate, primaryColor)
+        "Weekly Timetable", "Timetable" -> Pair(Icons.Default.CalendarMonth, secondaryColor)
+        "Sales Targets", "Targets" -> Pair(Icons.Default.TrackChanges, tertiaryColor)
         else -> Pair(Icons.Default.Sync, primaryColor)
     }
 }

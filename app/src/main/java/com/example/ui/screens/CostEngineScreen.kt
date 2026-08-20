@@ -41,6 +41,76 @@ object UnitConverter {
     val QuantityUnits = listOf("Piece", "Packet", "Roll", "Box", "Bundle")
     val AllUnits = WeightUnits + VolumeUnits + QuantityUnits
 
+    fun parseDateMillis(dateStr: String?): Long {
+        if (dateStr.isNullOrBlank()) return 0L
+        val clean = dateStr.trim()
+        val formats = listOf(
+            "yyyy-MM-dd",
+            "yyyy/MM/dd",
+            "dd-MM-yyyy",
+            "dd/MM/yyyy",
+            "d-M-yyyy",
+            "d/M/yyyy",
+            "yyyy-M-d",
+            "yyyy/M/d",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss"
+        )
+        for (fmt in formats) {
+            try {
+                val sdf = SimpleDateFormat(fmt, Locale.US)
+                sdf.isLenient = false
+                val d = sdf.parse(clean)
+                if (d != null) return d.time
+            } catch (_: Exception) {}
+        }
+        return try {
+            clean.toLong()
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    fun isDateOnOrBefore(dateStr: String?, targetDateStr: String?): Boolean {
+        if (dateStr.isNullOrBlank() || targetDateStr.isNullOrBlank()) return true
+        val t1 = parseDateMillis(dateStr)
+        val t2 = parseDateMillis(targetDateStr)
+        if (t1 > 0L && t2 > 0L) {
+            val d1Str = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t1))
+            val d2Str = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t2))
+            return t1 <= t2 || d1Str <= d2Str
+        }
+        return dateStr.trim() <= targetDateStr.trim()
+    }
+
+    fun getEffectivePurchase(
+        allPurchases: List<IngredientPurchase>,
+        ingredientId: Int,
+        effectiveDate: String?
+    ): IngredientPurchase? {
+        val ingredientPurchases = allPurchases.filter { it.ingredientId == ingredientId }
+        if (ingredientPurchases.isEmpty()) return null
+
+        // 1. Try to find the latest purchase on or before effectiveDate
+        val matchedPurchases = if (!effectiveDate.isNullOrBlank()) {
+            ingredientPurchases.filter { isDateOnOrBefore(it.purchaseDate, effectiveDate) }
+        } else {
+            ingredientPurchases
+        }
+        
+        val candidate = matchedPurchases.maxWithOrNull(
+            compareBy<IngredientPurchase> { parseDateMillis(it.purchaseDate) }.thenBy { it.purchaseId }
+        )
+        if (candidate != null) return candidate
+
+        // 2. Fallback: If no purchase was strictly on or before effectiveDate,
+        // use the earliest available purchase or most recent available purchase
+        // so that existing purchases are never ignored.
+        return ingredientPurchases.minByOrNull { parseDateMillis(it.purchaseDate) }
+            ?: ingredientPurchases.maxByOrNull { parseDateMillis(it.purchaseDate) }
+            ?: ingredientPurchases.firstOrNull()
+    }
+
     fun getUnitType(unit: String): String {
         return when (unit.lowercase(Locale.getDefault())) {
             "mg", "g", "kg" -> "Weight"
@@ -1055,10 +1125,7 @@ fun CalculateCostTabContent(
             val activeIngredients = ingredients.filter { it.status == "Active" }
             items(activeIngredients) { ingredient ->
                 val isChecked = checkedIngredients.contains(ingredient.id)
-                val ingredientPurchases = purchases.filter { it.ingredientId == ingredient.id }
-                val latestPurchase = ingredientPurchases
-                    .filter { it.purchaseDate <= effectiveDate }
-                    .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                val latestPurchase = UnitConverter.getEffectivePurchase(purchases, ingredient.id, effectiveDate)
 
                 // Usage quantity & unit local controls
                 val usageQty = ingredientUsages[ingredient.id] ?: 0.0
@@ -1238,9 +1305,7 @@ fun CalculateCostTabContent(
 
             checkedIngredients.forEach { id ->
                 val ingredientObj = ingredients.find { it.id == id } ?: return@forEach
-                val purchaseObj = purchases
-                    .filter { it.ingredientId == id && it.purchaseDate <= effectiveDate }
-                    .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                val purchaseObj = UnitConverter.getEffectivePurchase(purchases, id, effectiveDate)
                 val qty = ingredientUsages[id] ?: 0.0
                 val unit = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(purchaseObj?.unit)
                 
@@ -1349,9 +1414,7 @@ fun CalculateCostTabContent(
 
                                 val itemsList = checkedIngredients.map { id ->
                                     val ing = ingredients.find { it.id == id }!!
-                                    val p = purchases
-                                        .filter { it.ingredientId == id && it.purchaseDate <= effectiveDate }
-                                        .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                                    val p = UnitConverter.getEffectivePurchase(purchases, id, effectiveDate)
                                     val qty = ingredientUsages[id] ?: 0.0
                                     val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
                                     
@@ -1401,9 +1464,7 @@ fun CalculateCostTabContent(
 
                                 val itemsList = checkedIngredients.map { id ->
                                     val ing = ingredients.find { it.id == id }!!
-                                    val p = purchases
-                                        .filter { it.ingredientId == id && it.purchaseDate <= effectiveDate }
-                                        .maxWithOrNull(compareBy<IngredientPurchase> { it.purchaseDate }.thenBy { it.purchaseId })
+                                    val p = UnitConverter.getEffectivePurchase(purchases, id, effectiveDate)
                                     val qty = ingredientUsages[id] ?: 0.0
                                     val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
                                     
