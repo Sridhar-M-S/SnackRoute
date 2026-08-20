@@ -951,30 +951,61 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun insertProductCostIngredient(ingredient: ProductCostIngredient) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertProductCostIngredient(ingredient)
+            recordExportChange(
+                "Cost Engine",
+                "ADD",
+                1,
+                "1 recipe ingredient added: ${ingredient.name} (${ingredient.defaultUnitType})"
+            )
         }
     }
 
     fun updateProductCostIngredient(ingredient: ProductCostIngredient) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateProductCostIngredient(ingredient)
+            recordExportChange(
+                "Cost Engine",
+                "UPDATE",
+                1,
+                "1 recipe ingredient updated: ${ingredient.name} (${ingredient.defaultUnitType})"
+            )
         }
     }
 
     fun deleteProductCostIngredient(ingredient: ProductCostIngredient) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteProductCostIngredient(ingredient)
+            recordExportChange(
+                "Cost Engine",
+                "DELETE",
+                1,
+                "1 recipe ingredient deleted: ${ingredient.name}"
+            )
         }
     }
 
     fun insertProductCostCalculation(calculation: ProductCostCalculation) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertProductCostCalculation(calculation)
+            recordExportChange(
+                "Cost Engine",
+                "ADD",
+                1,
+                "1 product cost calculation saved: ${calculation.productName} (${calculation.category})",
+                "Selling: ₹${calculation.sellingPrice} • Cost: ₹${"%.2f".format(calculation.totalProductionCost)} • Profit/Pkt: ₹${"%.2f".format(calculation.profitPerPacket)}"
+            )
         }
     }
 
     fun deleteProductCostCalculation(calculation: ProductCostCalculation) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteProductCostCalculation(calculation)
+            recordExportChange(
+                "Cost Engine",
+                "DELETE",
+                1,
+                "1 product cost calculation deleted: ${calculation.productName}"
+            )
         }
     }
 
@@ -5595,6 +5626,20 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.saveCostCalculation(calculation, items)
+                val allPrices = repository.getAllPrices()
+                val priceObj = allPrices.find { it.priceId == calculation.productPriceId }
+                val productName = if (priceObj != null) {
+                    repository.allProducts.first().find { it.id == priceObj.productId }?.productName ?: "Price #${calculation.productPriceId}"
+                } else {
+                    "Price #${calculation.productPriceId}"
+                }
+                recordExportChange(
+                    "Cost Engine",
+                    "ADD",
+                    1,
+                    "Cost version v${calculation.version} saved for $productName (Total Cost: ₹${"%.2f".format(calculation.totalProductionCost)})",
+                    "Date: ${calculation.calculationDate} • Selling Price: ₹${"%.2f".format(calculation.sellingPriceSnapshot)} • Profit: ₹${"%.2f".format(calculation.profitSnapshot)}"
+                )
             } catch (e: Exception) {
                 triggerError("DynamicCost", "saveCostCalculation", "DatabaseError", e.message ?: "Failed to save calculation", "Check database connection", e)
             }
@@ -5605,6 +5650,20 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updateCostCalculation(calculation, items)
+                val allPrices = repository.getAllPrices()
+                val priceObj = allPrices.find { it.priceId == calculation.productPriceId }
+                val productName = if (priceObj != null) {
+                    repository.allProducts.first().find { it.id == priceObj.productId }?.productName ?: "Price #${calculation.productPriceId}"
+                } else {
+                    "Price #${calculation.productPriceId}"
+                }
+                recordExportChange(
+                    "Cost Engine",
+                    "UPDATE",
+                    1,
+                    "Cost version v${calculation.version} updated for $productName (Total Cost: ₹${"%.2f".format(calculation.totalProductionCost)})",
+                    "Date: ${calculation.calculationDate} • Selling Price: ₹${"%.2f".format(calculation.sellingPriceSnapshot)} • Profit: ₹${"%.2f".format(calculation.profitSnapshot)}"
+                )
             } catch (e: Exception) {
                 triggerError("DynamicCost", "updateCostCalculation", "DatabaseError", e.message ?: "Failed to update calculation", "Check database connection", e)
             }
@@ -5615,6 +5674,19 @@ User Question: $userQuestion
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteCalculation(calculation)
+                val allPrices = repository.getAllPrices()
+                val priceObj = allPrices.find { it.priceId == calculation.productPriceId }
+                val productName = if (priceObj != null) {
+                    repository.allProducts.first().find { it.id == priceObj.productId }?.productName ?: "Price #${calculation.productPriceId}"
+                } else {
+                    "Price #${calculation.productPriceId}"
+                }
+                recordExportChange(
+                    "Cost Engine",
+                    "DELETE",
+                    1,
+                    "Cost version v${calculation.version} deleted for $productName"
+                )
             } catch (e: Exception) {
                 triggerError("DynamicCost", "deleteCalculation", "DatabaseError", e.message ?: "Failed to delete calculation", "Check database connection", e)
             }
