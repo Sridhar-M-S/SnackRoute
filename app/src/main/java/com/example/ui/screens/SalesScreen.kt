@@ -2282,7 +2282,10 @@ fun SaleItemRow(
             val (productionCost, finalProfit) = if (isDynamicProfitEnabled && priceObj != null) {
                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(saleDate))
                 val applicableCalc = calculations
-                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .filter { 
+                        (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !availablePrices.any { p -> p.priceId == it.productPriceId })) && 
+                        it.calculationDate <= saleDateStr 
+                    }
                     .maxByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
@@ -2552,7 +2555,10 @@ fun SaleItemRow(
                                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
                                 val latestCalcForVariant = if (isDynamicProfitEnabled) {
                                     calculations
-                                        .filter { it.productPriceId == variant.priceId && it.calculationDate <= saleDateStr }
+                                        .filter { 
+                                            (it.productPriceId == variant.priceId || (Math.abs(it.sellingPriceSnapshot - variant.sellingPrice) < 0.01 && !availablePrices.any { p -> p.priceId == it.productPriceId })) && 
+                                            it.calculationDate <= saleDateStr 
+                                        }
                                         .maxByOrNull { it.calculationDate }
                                 } else null
                                 
@@ -2640,7 +2646,10 @@ fun SaleItemRow(
                                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
                                 val latestCalcForVariant = if (isDynamicProfitEnabled) {
                                     calculations
-                                        .filter { it.productPriceId == variant.priceId && it.calculationDate <= saleDateStr }
+                                        .filter { 
+                                            (it.productPriceId == variant.priceId || (Math.abs(it.sellingPriceSnapshot - variant.sellingPrice) < 0.01 && !availablePrices.any { p -> p.priceId == it.productPriceId })) && 
+                                            it.calculationDate <= saleDateStr 
+                                        }
                                         .maxByOrNull { it.calculationDate }
                                 } else null
                                 
@@ -2716,7 +2725,10 @@ fun SaleItemRow(
                             val dynamicCalc = if (isDynamicProfitEnabled) {
                                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(saleDate))
                                 calculations
-                                    .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
+                                    .filter { 
+                                        (it.productPriceId == price.priceId || (Math.abs(it.sellingPriceSnapshot - price.sellingPrice) < 0.01 && !availablePrices.any { p -> p.priceId == it.productPriceId })) && 
+                                        it.calculationDate <= saleDateStr 
+                                    }
                                     .maxByOrNull { it.calculationDate }
                             } else null
 

@@ -294,14 +294,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _inAppNotifications = MutableStateFlow<List<InAppNotification>>(emptyList())
     val inAppNotifications: StateFlow<List<InAppNotification>> = _inAppNotifications.asStateFlow()
 
-    private val _isExportNeeded = MutableStateFlow<Boolean>(prefs.getBoolean("has_unexported_changes", false))
+    private val _unexportedChanges = MutableStateFlow<List<com.example.data.UnexportedChange>>(loadUnexportedChanges())
+    val unexportedChanges: StateFlow<List<com.example.data.UnexportedChange>> = _unexportedChanges.asStateFlow()
+
+    private val _isExportNeeded = MutableStateFlow<Boolean>(_unexportedChanges.value.isNotEmpty())
     val isExportNeeded: StateFlow<Boolean> = _isExportNeeded.asStateFlow()
 
     private val _lastSuccessfulExportTime = MutableStateFlow<Long>(prefs.getLong("last_successful_export_time", 0L))
     val lastSuccessfulExportTime: StateFlow<Long> = _lastSuccessfulExportTime.asStateFlow()
-
-    private val _unexportedChanges = MutableStateFlow<List<com.example.data.UnexportedChange>>(loadUnexportedChanges())
-    val unexportedChanges: StateFlow<List<com.example.data.UnexportedChange>> = _unexportedChanges.asStateFlow()
 
     private fun loadUnexportedChanges(): List<com.example.data.UnexportedChange> {
         val serializedSet = prefs.getStringSet("unexported_changes_list_v2", emptySet()) ?: emptySet()
@@ -311,8 +311,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun saveUnexportedChanges(list: List<com.example.data.UnexportedChange>) {
         val serializedSet = list.map { it.toJsonString() }.toSet()
-        prefs.edit().putStringSet("unexported_changes_list_v2", serializedSet).apply()
+        prefs.edit()
+            .putStringSet("unexported_changes_list_v2", serializedSet)
+            .putBoolean("has_unexported_changes", list.isNotEmpty())
+            .apply()
         _unexportedChanges.value = list
+        _isExportNeeded.value = list.isNotEmpty()
     }
 
     fun recordExportChange(
@@ -332,28 +336,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val current = _unexportedChanges.value.toMutableList()
         current.add(newChange)
         saveUnexportedChanges(current)
-        markDataChanged()
     }
 
     fun getGroupedExportSummaries(changes: List<com.example.data.UnexportedChange>): List<com.example.data.ExportCategorySummary> {
         if (changes.isEmpty()) {
-            if (_isExportNeeded.value) {
-                return listOf(
-                    com.example.data.ExportCategorySummary(
-                        category = "Recent Changes",
-                        totalCount = 1,
-                        headlineSentence = "Database updates detected since last export",
-                        items = listOf(
-                            com.example.data.UnexportedChange(
-                                category = "Recent Changes",
-                                changeType = "UPDATE",
-                                count = 1,
-                                summarySentence = "Recent modifications are pending export to your Excel backup."
-                            )
-                        )
-                    )
-                )
-            }
             return emptyList()
         }
 
@@ -743,12 +729,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun saveTodaySalesTargets(targetDate: String, items: List<com.example.data.SalesTargetItem>) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.saveTodaySalesTargets(targetDate, items)
+            recordExportChange(
+                "Sales Targets",
+                "UPDATE",
+                items.size,
+                "Sales targets updated for $targetDate (${items.size} target${if (items.size != 1) "s" else ""})"
+            )
         }
     }
 
     fun deleteSalesTargetItem(item: com.example.data.SalesTargetItem) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteSalesTargetItem(item)
+            recordExportChange(
+                "Sales Targets",
+                "DELETE",
+                1,
+                "Sales target removed for ${item.productName ?: "Item"} (${item.targetDate})"
+            )
         }
     }
 
@@ -769,12 +767,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 salesEntryId = salesEntryId
             )
             repository.insertRemark(remark)
+            recordExportChange(
+                "Shop Remarks",
+                "ADD",
+                1,
+                "1 remark added for Shop $shopNumber - $shopName",
+                remarkText
+            )
         }
     }
 
     fun updateRemarkStatus(remark: ShopRemark, newStatus: String) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateRemark(remark.copy(status = newStatus))
+            recordExportChange(
+                "Shop Remarks",
+                "UPDATE",
+                1,
+                "Remark for Shop ${remark.shopNumber} marked as $newStatus"
+            )
         }
     }
 
@@ -788,6 +799,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
             val updatedHistory = remark.history.toMutableList().apply { add(newItem) }
             repository.updateRemark(remark.copy(history = updatedHistory))
+            recordExportChange(
+                "Shop Remarks",
+                "UPDATE",
+                1,
+                "Reply added to remark for Shop ${remark.shopNumber}",
+                replyText
+            )
         }
     }
 
@@ -801,6 +819,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     repository.updateSales(linkedSale.copy(remarks = newText.ifBlank { null }))
                 }
             }
+            recordExportChange(
+                "Shop Remarks",
+                "UPDATE",
+                1,
+                "Remark updated for Shop ${remark.shopNumber}",
+                newText
+            )
         }
     }
 
@@ -814,6 +839,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     repository.updateSales(linkedSale.copy(remarks = null))
                 }
             }
+            recordExportChange(
+                "Shop Remarks",
+                "DELETE",
+                1,
+                "Remark deleted for Shop ${remark.shopNumber}"
+            )
         }
     }
 
@@ -849,8 +880,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val (productionCost, profitPerPacket) = if (enabled && product != null && priceObj != null) {
                         val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
                         val applicableCalc = calculationsList
-                            .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                            .filter { (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !pricesList.any { p -> p.priceId == it.productPriceId })) && it.calculationDate <= saleDateStr }
                             .maxByOrNull { it.calculationDate }
+                            ?: calculationsList.filter { (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !pricesList.any { p -> p.priceId == it.productPriceId })) }.minByOrNull { it.calculationDate }
                         
                         if (applicableCalc != null) {
                             val pc = calculateDynamicProductionCost(
@@ -2731,6 +2763,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         loadInAppNotifications()
+        repairOrphanedCostCalculations()
 
         viewModelScope.launch(Dispatchers.Default) {
             combine(dueReminders, repository.allLocations) { reminders, locations ->
@@ -2803,29 +2836,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Register InvalidationTracker for real-time Export Needed detection across all tables
-        try {
-            repository.addDataChangeObserver {
-                if (isAppFullyInitialized) {
-                    markDataChanged()
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
         // Initialize export state check on startup
         viewModelScope.launch(Dispatchers.IO) {
-            val lastExport = prefs.getLong("last_successful_export_time", 0L)
-            val hasChanges = prefs.getBoolean("has_unexported_changes", false)
-            if (lastExport == 0L) {
-                if (repository.hasAnyData()) {
-                    _isExportNeeded.value = true
-                    prefs.edit().putBoolean("has_unexported_changes", true).apply()
-                }
-            } else {
-                _isExportNeeded.value = hasChanges
-            }
+            val changes = loadUnexportedChanges()
+            _unexportedChanges.value = changes
+            _isExportNeeded.value = changes.isNotEmpty()
+            prefs.edit().putBoolean("has_unexported_changes", changes.isNotEmpty()).apply()
             delay(1200L)
             isAppFullyInitialized = true
         }
@@ -2960,6 +2976,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateTimetableEntry(entry: TimetableEntry) = viewModelScope.launch(Dispatchers.IO) {
         repository.updateTimetableEntry(entry)
+        val locationsStr = if (entry.locationNumbers.isNotEmpty()) entry.locationNumbers.joinToString(", ") else "No locations"
+        recordExportChange(
+            "Weekly Timetable",
+            "UPDATE",
+            1,
+            "Timetable updated for ${entry.dayOfWeek} ($locationsStr)"
+        )
     }
 
     fun refreshNextShopNumber() {
@@ -4066,9 +4089,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     // Step 1: Find applicable Recipe Version (Effective Date <= Sale Date)
                     val calc = if (price != null) {
                         calculationsList
-                            .filter { it.productPriceId == price.priceId && it.calculationDate <= saleDateStr }
+                            .filter { (it.productPriceId == price.priceId || (Math.abs(it.sellingPriceSnapshot - price.sellingPrice) < 0.01 && !pricesList.any { p -> p.priceId == it.productPriceId })) && it.calculationDate <= saleDateStr }
                             .maxByOrNull { it.calculationDate }
-                            ?: calculationsList.filter { it.productPriceId == price.priceId }.minByOrNull { it.calculationDate }
+                            ?: calculationsList.filter { (it.productPriceId == price.priceId || (Math.abs(it.sellingPriceSnapshot - price.sellingPrice) < 0.01 && !pricesList.any { p -> p.priceId == it.productPriceId })) }.minByOrNull { it.calculationDate }
                     } else null
                     
                     if (calc != null) {
@@ -4129,6 +4152,63 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     exception = e,
                     possibleReason = "An error occurred while retroactively recalculating profit values."
                 )
+            }
+        }
+    }
+
+    suspend fun remapCalculationsToProductPrices(
+        calculations: List<CostCalculation>,
+        items: List<CostCalculationItem>
+    ): List<CostCalculation> {
+        val allPrices = repository.getAllPrices()
+        val allProducts = repository.allProducts.first()
+        if (allPrices.isEmpty() || calculations.isEmpty()) return calculations
+
+        return calculations.map { calc ->
+            val currentPrice = allPrices.find { it.priceId == calc.productPriceId }
+            if (currentPrice != null && Math.abs(currentPrice.sellingPrice - calc.sellingPriceSnapshot) < 0.01) {
+                calc
+            } else {
+                val matchingPrices = allPrices.filter { Math.abs(it.sellingPrice - calc.sellingPriceSnapshot) < 0.01 }
+                val calcItems = items.filter { it.costCalculationId == calc.calculationId }
+                val bestPrice = matchingPrices.find { price ->
+                    val prod = allProducts.find { it.id == price.productId }
+                    if (prod != null) {
+                        calcItems.any { item ->
+                            item.ingredientName.contains(prod.productName, ignoreCase = true) ||
+                            item.ingredientVariety.contains(prod.productName, ignoreCase = true) ||
+                            prod.productName.contains(item.ingredientVariety, ignoreCase = true) ||
+                            (item.ingredientVariety.isNotEmpty() && prod.productName.contains(item.ingredientVariety.trim(), ignoreCase = true))
+                        }
+                    } else false
+                } ?: matchingPrices.find { price ->
+                    Math.abs(price.profitPerPacket - calc.profitSnapshot) < 0.01
+                } ?: matchingPrices.firstOrNull()
+
+                if (bestPrice != null) {
+                    calc.copy(productPriceId = bestPrice.priceId)
+                } else {
+                    calc
+                }
+            }
+        }
+    }
+
+    fun repairOrphanedCostCalculations() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val calcs = repository.getAllCalculationsDirect()
+                if (calcs.isEmpty()) return@launch
+                val items = repository.getAllCalculationItemsDirect()
+                val remapped = remapCalculationsToProductPrices(calcs, items)
+                val changed = remapped.filterIndexed { index, remappedCalc ->
+                    remappedCalc.productPriceId != calcs[index].productPriceId
+                }
+                if (changed.isNotEmpty()) {
+                    repository.insertCalculations(changed)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
@@ -5024,6 +5104,8 @@ User Question: $userQuestion
                 val calculations = repository.getAllCalculationsDirect()
                 val calculationItems = repository.getAllCalculationItemsDirect()
                 val isEnabled = isDynamicProfitEnabled.value
+                val allPrices = repository.getAllPrices()
+                val products = repository.allProducts.first()
                 
                 com.example.utils.Exporter.exportDynamicCostEngine(
                     context = context,
@@ -5031,7 +5113,9 @@ User Question: $userQuestion
                     purchases = purchases,
                     calculations = calculations,
                     calculationItems = calculationItems,
-                    isDynamicProfitEnabled = isEnabled
+                    isDynamicProfitEnabled = isEnabled,
+                    allPrices = allPrices,
+                    products = products
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -5068,7 +5152,8 @@ User Question: $userQuestion
                 }
                 if (summary.parsedCalculations.isNotEmpty()) {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        repository.insertCalculations(summary.parsedCalculations)
+                        val remapped = remapCalculationsToProductPrices(summary.parsedCalculations, summary.parsedCalculationItems)
+                        repository.insertCalculations(remapped)
                     }
                 }
                 if (summary.parsedCalculationItems.isNotEmpty()) {
@@ -5352,7 +5437,8 @@ User Question: $userQuestion
                         repository.insertPurchases(summary.parsedPurchases)
                     }
                     if (summary.parsedCalculations.isNotEmpty()) {
-                        repository.insertCalculations(summary.parsedCalculations)
+                        val remapped = remapCalculationsToProductPrices(summary.parsedCalculations, summary.parsedCalculationItems)
+                        repository.insertCalculations(remapped)
                     }
                     if (summary.parsedCalculationItems.isNotEmpty()) {
                         repository.insertCalculationItems(summary.parsedCalculationItems)

@@ -395,7 +395,10 @@ fun ProductsScreen(
                     
                     priceConfigurations.forEach { price ->
                         val latestCalc = if (isDynamicProfitEnabled) {
-                            calculations.filter { it.productPriceId == price.priceId }.maxByOrNull { it.version }
+                            calculations.filter { 
+                                it.productPriceId == price.priceId || 
+                                (Math.abs(it.sellingPriceSnapshot - price.sellingPrice) < 0.01 && !priceConfigurations.any { p -> p.priceId == it.productPriceId })
+                            }.maxByOrNull { it.version }
                         } else null
                         
                         val displayedProfit = latestCalc?.profitSnapshot ?: price.profitPerPacket

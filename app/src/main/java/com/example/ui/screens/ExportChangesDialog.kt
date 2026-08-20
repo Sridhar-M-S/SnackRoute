@@ -139,7 +139,7 @@ fun ExportChangesDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Content area
-                if (groupedSummaries.isEmpty() && !isExportNeeded) {
+                if (groupedSummaries.isEmpty()) {
                     // Up to date state
                     Box(
                         modifier = Modifier

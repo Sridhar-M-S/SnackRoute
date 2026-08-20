@@ -212,6 +212,7 @@ fun CostEngineScreen(
 
     // Master flows from ViewModel
     val products by viewModel.products.collectAsState()
+    val allPrices by viewModel.allPrices.collectAsState()
     val ingredients by viewModel.allIngredients.collectAsState()
     val purchases by viewModel.allIngredientPurchases.collectAsState()
     val calculations by viewModel.allCostCalculations.collectAsState()
@@ -239,9 +240,16 @@ fun CostEngineScreen(
     var showAddPurchaseDialog by remember { mutableStateOf(false) }
     var selectedIngredientForPurchase by remember { mutableStateOf<Ingredient?>(null) }
 
-    LaunchedEffect(selectedPriceId, effectiveDate, calculations) {
+    LaunchedEffect(selectedPriceId, effectiveDate, calculations, allPrices) {
         if (selectedPriceId != null) {
-            val found = calculations.find { it.productPriceId == selectedPriceId && it.calculationDate == effectiveDate }
+            val selectedPriceObj = allPrices.find { it.priceId == selectedPriceId }
+            val found = calculations.find { calc ->
+                val matchesId = calc.productPriceId == selectedPriceId
+                val matchesFallback = selectedPriceObj != null && 
+                    Math.abs(calc.sellingPriceSnapshot - selectedPriceObj.sellingPrice) < 0.01 && 
+                    !allPrices.any { p -> p.priceId == calc.productPriceId }
+                (matchesId || matchesFallback) && calc.calculationDate == effectiveDate
+            }
             if (found != null) {
                 if (editingCalculation != found) {
                     editingCalculation = found
@@ -584,9 +592,20 @@ fun CalculateCostTabContent(
     }
 
     // Historical calculations for selected price variant
-    val variantCalculations = remember(calculations, selectedPriceId) {
-        if (selectedPriceId == null) emptyList()
-        else calculations.filter { it.productPriceId == selectedPriceId }.sortedByDescending { it.version }
+    val variantCalculations = remember(calculations, selectedPriceId, selectedPriceObj) {
+        if (selectedPriceId == null || selectedPriceObj == null) emptyList()
+        else {
+            val byId = calculations.filter { it.productPriceId == selectedPriceId }
+            if (byId.isNotEmpty()) {
+                byId.sortedByDescending { it.version }
+            } else {
+                val fallback = calculations.filter { calc ->
+                    Math.abs(calc.sellingPriceSnapshot - selectedPriceObj.sellingPrice) < 0.01 &&
+                    !allPricesForSelectedProduct.any { p -> p.priceId == calc.productPriceId }
+                }
+                fallback.sortedByDescending { it.version }
+            }
+        }
     }
 
     val activeCalculation = variantCalculations.firstOrNull()
@@ -672,9 +691,9 @@ fun CalculateCostTabContent(
     }
 
     // Auto-load existing version if calculation already exists for Category + Variety + Selling Price Variant on selected date
-    LaunchedEffect(selectedPriceId, effectiveDate, calculations) {
+    LaunchedEffect(selectedPriceId, effectiveDate, variantCalculations) {
         if (selectedPriceId != null) {
-            val existing = calculations.find { it.productPriceId == selectedPriceId && it.calculationDate == effectiveDate }
+            val existing = variantCalculations.find { it.calculationDate == effectiveDate }
             if (existing != null) {
                 if (editingCalculation?.calculationId != existing.calculationId) {
                     onEditingCalculationChange(existing)

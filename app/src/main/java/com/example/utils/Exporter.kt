@@ -2305,7 +2305,9 @@ object Exporter {
         purchases: List<com.example.data.IngredientPurchase>,
         calculations: List<com.example.data.CostCalculation>,
         calculationItems: List<com.example.data.CostCalculationItem>,
-        isDynamicProfitEnabled: Boolean
+        isDynamicProfitEnabled: Boolean,
+        allPrices: List<com.example.data.ProductPrice> = emptyList(),
+        products: List<com.example.data.ProductMaster> = emptyList()
     ) {
         val fileName = "Cost_Engine_Export_${System.currentTimeMillis()}.xlsx"
         val file = File(context.cacheDir, fileName)
@@ -2390,7 +2392,7 @@ object Exporter {
             // 3. Cost Calculations Sheet
             val calcsSheet = workbook.createSheet("Cost Calculations")
             val calcsHeaders = listOf(
-                "Calculation ID", "Product Price ID", "Version", "Calculation Date", 
+                "Calculation ID", "Product Price ID", "Product Name", "Category", "Selling Price", "Version", "Calculation Date", 
                 "Total Production Cost", "Selling Price Snapshot", "Profit Snapshot", "Remarks"
             )
             val calcsHeaderRow = calcsSheet.createRow(0)
@@ -2401,15 +2403,20 @@ object Exporter {
             }
             rowIdx = 1
             for (item in calculations) {
+                val priceObj = allPrices.find { it.priceId == item.productPriceId }
+                val prodObj = products.find { it.id == priceObj?.productId }
                 val row = calcsSheet.createRow(rowIdx++)
                 row.createCell(0).setCellValue(safeDouble(item.calculationId))
                 row.createCell(1).setCellValue(safeDouble(item.productPriceId))
-                row.createCell(2).setCellValue(safeDouble(item.version))
-                row.createCell(3).setCellValue(item.calculationDate)
-                row.createCell(4).setCellValue(safeDouble(item.totalProductionCost))
-                row.createCell(5).setCellValue(safeDouble(item.sellingPriceSnapshot))
-                row.createCell(6).setCellValue(safeDouble(item.profitSnapshot))
-                row.createCell(7).setCellValue(item.remarks ?: "")
+                row.createCell(2).setCellValue(prodObj?.productName ?: "")
+                row.createCell(3).setCellValue(prodObj?.productCategory ?: "")
+                row.createCell(4).setCellValue(safeDouble(priceObj?.sellingPrice ?: item.sellingPriceSnapshot))
+                row.createCell(5).setCellValue(safeDouble(item.version))
+                row.createCell(6).setCellValue(item.calculationDate)
+                row.createCell(7).setCellValue(safeDouble(item.totalProductionCost))
+                row.createCell(8).setCellValue(safeDouble(item.sellingPriceSnapshot))
+                row.createCell(9).setCellValue(safeDouble(item.profitSnapshot))
+                row.createCell(10).setCellValue(item.remarks ?: "")
             }
             for (i in calcsHeaders.indices) {
                 calcsSheet.setColumnWidth(i, 5000)
@@ -2640,7 +2647,7 @@ object Exporter {
 
                 // --- Parsing Sheet 3: Cost Calculations ---
                 val calcRequired = listOf("Calculation ID", "Product Price ID", "Version", "Calculation Date", "Total Production Cost", "Selling Price Snapshot", "Profit Snapshot")
-                val calcOptional = listOf("Remarks")
+                val calcOptional = listOf("Remarks", "Product Name", "Category", "Selling Price")
                 val calcIndices = getHeaderIndices(calcsSheet, calcRequired, calcOptional)
 
                 for (rowIdx in 1..calcsSheet.lastRowNum) {
@@ -3089,7 +3096,7 @@ object Exporter {
             // --- 9. Cost Calculations Sheet ---
             val calcsSheet = workbook.createSheet("Cost Calculations")
             val calcsHeaders = listOf(
-                "Calculation ID", "Product Price ID", "Version", "Calculation Date", 
+                "Calculation ID", "Product Price ID", "Product Name", "Category", "Selling Price", "Version", "Calculation Date", 
                 "Total Production Cost", "Selling Price Snapshot", "Profit Snapshot", "Remarks"
             )
             val calcsHeaderRow = calcsSheet.createRow(0)
@@ -3100,15 +3107,20 @@ object Exporter {
             }
             rowIdx = 1
             for (item in calculations) {
+                val priceObj = allPrices.find { it.priceId == item.productPriceId }
+                val prodObj = products.find { it.id == priceObj?.productId }
                 val row = calcsSheet.createRow(rowIdx++)
                 row.createCell(0).setCellValue(item.calculationId.toDouble())
                 row.createCell(1).setCellValue(item.productPriceId.toDouble())
-                row.createCell(2).setCellValue(item.version.toDouble())
-                row.createCell(3).setCellValue(item.calculationDate)
-                row.createCell(4).setCellValue(item.totalProductionCost)
-                row.createCell(5).setCellValue(item.sellingPriceSnapshot)
-                row.createCell(6).setCellValue(item.profitSnapshot)
-                row.createCell(7).setCellValue(item.remarks ?: "")
+                row.createCell(2).setCellValue(prodObj?.productName ?: "")
+                row.createCell(3).setCellValue(prodObj?.productCategory ?: "")
+                row.createCell(4).setCellValue(priceObj?.sellingPrice ?: item.sellingPriceSnapshot)
+                row.createCell(5).setCellValue(item.version.toDouble())
+                row.createCell(6).setCellValue(item.calculationDate)
+                row.createCell(7).setCellValue(item.totalProductionCost)
+                row.createCell(8).setCellValue(item.sellingPriceSnapshot)
+                row.createCell(9).setCellValue(item.profitSnapshot)
+                row.createCell(10).setCellValue(item.remarks ?: "")
             }
             for (i in calcsHeaders.indices) {
                 calcsSheet.setColumnWidth(i, 5000)
