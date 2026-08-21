@@ -1705,8 +1705,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val (productionCost, finalProfitPerPacket) = if (dynamicEnabled && product != null && priceObj != null) {
                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
                 val applicableCalc = calcs
-                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .filter { (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !prices.any { p -> p.priceId == it.productPriceId })) && it.calculationDate <= saleDateStr }
                     .maxByOrNull { it.calculationDate }
+                    ?: calcs.filter { (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !prices.any { p -> p.priceId == it.productPriceId })) }.minByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
                     val pc = calculateDynamicProductionCost(
@@ -5726,6 +5727,7 @@ User Question: $userQuestion
                     "Cost version v${calculation.version} saved for $productName (Total Cost: ₹${"%.2f".format(calculation.totalProductionCost)})",
                     "Date: ${calculation.calculationDate} • Selling Price: ₹${"%.2f".format(calculation.sellingPriceSnapshot)} • Profit: ₹${"%.2f".format(calculation.profitSnapshot)}"
                 )
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "saveCostCalculation", "DatabaseError", e.message ?: "Failed to save calculation", "Check database connection", e)
             }
@@ -5750,6 +5752,7 @@ User Question: $userQuestion
                     "Cost version v${calculation.version} updated for $productName (Total Cost: ₹${"%.2f".format(calculation.totalProductionCost)})",
                     "Date: ${calculation.calculationDate} • Selling Price: ₹${"%.2f".format(calculation.sellingPriceSnapshot)} • Profit: ₹${"%.2f".format(calculation.profitSnapshot)}"
                 )
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "updateCostCalculation", "DatabaseError", e.message ?: "Failed to update calculation", "Check database connection", e)
             }
@@ -5773,6 +5776,7 @@ User Question: $userQuestion
                     1,
                     "Cost version v${calculation.version} deleted for $productName"
                 )
+                recalculateHistoricalSales("", true)
             } catch (e: Exception) {
                 triggerError("DynamicCost", "deleteCalculation", "DatabaseError", e.message ?: "Failed to delete calculation", "Check database connection", e)
             }
@@ -5812,8 +5816,9 @@ User Question: $userQuestion
             val (productionCost, profitPerPacket) = if (dynamicEnabled && product != null && priceObj != null) {
                 val saleDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(sale.entryDate))
                 val applicableCalc = calcs
-                    .filter { it.productPriceId == priceObj.priceId && it.calculationDate <= saleDateStr }
+                    .filter { (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !prices.any { p -> p.priceId == it.productPriceId })) && it.calculationDate <= saleDateStr }
                     .maxByOrNull { it.calculationDate }
+                    ?: calcs.filter { (it.productPriceId == priceObj.priceId || (Math.abs(it.sellingPriceSnapshot - priceObj.sellingPrice) < 0.01 && !prices.any { p -> p.priceId == it.productPriceId })) }.minByOrNull { it.calculationDate }
                 
                 if (applicableCalc != null) {
                     val purchasesList = repository.getAllPurchasesDirect()
