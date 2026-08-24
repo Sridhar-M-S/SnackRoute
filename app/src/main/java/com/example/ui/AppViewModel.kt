@@ -750,6 +750,241 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- Payment Invoices State & Operations ---
+    val allInvoices: StateFlow<List<PaymentInvoice>> = repository.allInvoices
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun generateNextInvoiceNumber(): String {
+        val invoices = allInvoices.value
+        var maxNum = 0
+        for (inv in invoices) {
+            val digits = inv.invoiceNumber.replace("INV-", "").replace("INV", "").trim()
+            val n = digits.toIntOrNull()
+            if (n != null && n > maxNum) {
+                maxNum = n
+            }
+        }
+        val next = maxNum + 1
+        return "INV-%06d".format(Locale.US, next)
+    }
+
+    fun getInvoicedSalesIds(excludeInvoiceId: Int? = null): Set<Int> {
+        val invoices = allInvoices.value
+        return invoices
+            .filter { excludeInvoiceId == null || it.id != excludeInvoiceId }
+            .flatMap { it.salesEntryIds }
+            .toSet()
+    }
+
+    fun calculateInvoiceStatus(totalAmount: Double, paidAmount: Double): String {
+        val cleanTotal = totalAmount.coerceAtLeast(0.0)
+        val cleanPaid = paidAmount.coerceAtLeast(0.0)
+        return when {
+            cleanPaid <= 0.0 -> "UNPAID"
+            cleanPaid < cleanTotal -> "PARTIALLY PAID"
+            else -> "PAID"
+        }
+    }
+
+    fun savePaymentInvoice(
+        id: Int = 0,
+        invoiceNumber: String = "",
+        invoiceDate: Long = System.currentTimeMillis(),
+        shopNumber: String,
+        shopName: String,
+        locationNumber: String,
+        selectedSalesIds: List<Int>,
+        paidAmount: Double,
+        notes: String? = null,
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (shopNumber.isBlank()) {
+                    withContext(Dispatchers.Main) { onComplete?.invoke(false, "Please select a shop") }
+                    return@launch
+                }
+                if (selectedSalesIds.isEmpty()) {
+                    withContext(Dispatchers.Main) { onComplete?.invoke(false, "Please select at least one sales record") }
+                    return@launch
+                }
+
+                val allSalesList = repository.allSales.first()
+                val selectedSales = allSalesList.filter { it.id in selectedSalesIds }
+                if (selectedSales.isEmpty()) {
+                    withContext(Dispatchers.Main) { onComplete?.invoke(false, "Selected sales records not found") }
+                    return@launch
+                }
+
+                val totalAmount = selectedSales.sumOf { it.totalAmount }
+                val cleanPaid = paidAmount.coerceAtLeast(0.0)
+                val balanceAmount = (totalAmount - cleanPaid).coerceAtLeast(0.0)
+                val status = calculateInvoiceStatus(totalAmount, cleanPaid)
+
+                val finalInvoiceNumber = if (id > 0 && invoiceNumber.isNotBlank()) {
+                    invoiceNumber
+                } else if (invoiceNumber.isNotBlank()) {
+                    invoiceNumber
+                } else {
+                    generateNextInvoiceNumber()
+                }
+
+                val invoice = PaymentInvoice(
+                    id = id,
+                    invoiceNumber = finalInvoiceNumber,
+                    invoiceDate = invoiceDate,
+                    shopNumber = shopNumber,
+                    shopName = shopName,
+                    locationNumber = locationNumber,
+                    salesEntryIds = selectedSalesIds,
+                    totalAmount = totalAmount,
+                    paidAmount = cleanPaid,
+                    balanceAmount = balanceAmount,
+                    status = status,
+                    notes = notes?.ifBlank { null }
+                )
+
+                if (id > 0) {
+                    repository.updateInvoice(invoice)
+                    recordExportChange(
+                        "Payment Invoices",
+                        "UPDATE",
+                        1,
+                        "Invoice $finalInvoiceNumber updated for $shopName (Total: ₹${"%.2f".format(totalAmount)}, Paid: ₹${"%.2f".format(cleanPaid)})"
+                    )
+                } else {
+                    repository.insertInvoice(invoice)
+                    recordExportChange(
+                        "Payment Invoices",
+                        "ADD",
+                        1,
+                        "Invoice $finalInvoiceNumber created for $shopName (Total: ₹${"%.2f".format(totalAmount)})"
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(true, "Invoice $finalInvoiceNumber saved successfully")
+                }
+            } catch (e: Exception) {
+                triggerError(
+                    "PaymentInvoice",
+                    "savePaymentInvoice",
+                    "DatabaseError",
+                    e.message ?: "Failed to save payment invoice",
+                    "Database operation failure",
+                    e
+                )
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(false, e.message ?: "Error saving invoice")
+                }
+            }
+        }
+    }
+
+    fun deletePaymentInvoice(invoice: PaymentInvoice, onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.deleteInvoice(invoice)
+                recordExportChange(
+                    "Payment Invoices",
+                    "DELETE",
+                    1,
+                    "Invoice ${invoice.invoiceNumber} deleted for ${invoice.shopName}"
+                )
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(true)
+                }
+            } catch (e: Exception) {
+                triggerError(
+                    "PaymentInvoice",
+                    "deletePaymentInvoice",
+                    "DatabaseError",
+                    e.message ?: "Failed to delete payment invoice",
+                    "Database operation failure",
+                    e
+                )
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(false)
+                }
+            }
+        }
+    }
+
+    fun exportPaymentInvoicesToExcel(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val invoices = repository.getAllInvoicesDirect()
+                if (invoices.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "No payment invoices to export", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+                val success = com.example.utils.Exporter.exportPaymentInvoicesToExcel(context, invoices)
+                if (success) {
+                    markExportSuccessful()
+                }
+            } catch (e: Exception) {
+                triggerError(
+                    "PaymentInvoice",
+                    "exportPaymentInvoices",
+                    "ExportError",
+                    e.message ?: "Failed to export payment invoices",
+                    "Export operation failure",
+                    e
+                )
+            }
+        }
+    }
+
+    fun sharePaymentInvoice(context: Context, invoice: PaymentInvoice, salesEntries: List<SalesEntry>) {
+        val invoiceSales = salesEntries.filter { it.id in invoice.salesEntryIds }
+        val sb = StringBuilder()
+        sb.appendLine("================================")
+        sb.appendLine("        PAYMENT INVOICE         ")
+        sb.appendLine("================================")
+        sb.appendLine("Invoice No : ${invoice.invoiceNumber}")
+        sb.appendLine("Date       : ${invoice.invoiceDateFormatted}")
+        sb.appendLine("Status     : ${invoice.status}")
+        sb.appendLine("")
+        sb.appendLine("--- SHOP DETAILS ---")
+        sb.appendLine("Shop Name  : ${invoice.shopName}")
+        sb.appendLine("Shop ID    : ${invoice.shopNumber}")
+        sb.appendLine("Location   : ${invoice.locationNumber}")
+        sb.appendLine("")
+        sb.appendLine("--- SALES DETAILS ---")
+        if (invoiceSales.isEmpty()) {
+            sb.appendLine("No sales records listed.")
+        } else {
+            invoiceSales.forEachIndexed { index, sale ->
+                val rate = sale.customSellingPrice ?: sale.ratePerPacket
+                sb.appendLine("${index + 1}. ${sale.productName}")
+                sb.appendLine("   Date: ${sale.entryDateFormatted} | Rate: ₹${"%.2f".format(rate)} | Pkts: ${sale.packetsSold}")
+                sb.appendLine("   Amount: ₹${"%.2f".format(sale.totalAmount)}")
+            }
+        }
+        sb.appendLine("")
+        sb.appendLine("--- AMOUNT SUMMARY ---")
+        sb.appendLine("Total Amount   : ₹${"%.2f".format(invoice.totalAmount)}")
+        sb.appendLine("Amount Paid    : ₹${"%.2f".format(invoice.paidAmount)}")
+        sb.appendLine("Balance Amount : ₹${"%.2f".format(invoice.balanceAmount)}")
+        if (!invoice.notes.isNullOrBlank()) {
+            sb.appendLine("")
+            sb.appendLine("Notes: ${invoice.notes}")
+        }
+        sb.appendLine("================================")
+        sb.appendLine("Generated by SnackRoute Pro")
+
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Payment Invoice - ${invoice.invoiceNumber} (${invoice.shopName})")
+            putExtra(Intent.EXTRA_TEXT, sb.toString())
+        }
+        val chooserIntent = Intent.createChooser(sendIntent, "Share Invoice ${invoice.invoiceNumber}")
+        chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooserIntent)
+    }
+
     // --- Shop Remarks State & Flows ---
     val allRemarks: StateFlow<List<ShopRemark>> = repository.allRemarks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -4709,6 +4944,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val pCostCalculations = repository.getAllProductCostCalculationsDirect()
             val timetableList = repository.getDirectTimetableEntries()
             val salesTargetsList = repository.getAllSalesTargetsDirect()
+            val invoicesList = repository.getAllInvoicesDirect()
 
             // 1. Create Unified Excel File
             val excelFileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
@@ -4731,7 +4967,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 productCostIngredients = pCostIngredients,
                 productCostCalculations = pCostCalculations,
                 timetableEntries = timetableList,
-                salesTargets = salesTargetsList
+                salesTargets = salesTargetsList,
+                paymentInvoices = invoicesList
             )
 
             // Copy to fixed name for quick local restore
@@ -5220,6 +5457,7 @@ User Question: $userQuestion
                 val pCostCalculations = repository.getAllProductCostCalculationsDirect()
                 val timetableList = repository.getDirectTimetableEntries()
                 val salesTargetsList = repository.getAllSalesTargetsDirect()
+                val invoicesList = repository.getAllInvoicesDirect()
 
                 val success = com.example.utils.Exporter.exportAllUnified(
                     context = context,
@@ -5239,7 +5477,8 @@ User Question: $userQuestion
                     productCostIngredients = pCostIngredients,
                     productCostCalculations = pCostCalculations,
                     timetableEntries = timetableList,
-                    salesTargets = salesTargetsList
+                    salesTargets = salesTargetsList,
+                    paymentInvoices = invoicesList
                 )
                 if (success) {
                     markExportSuccessful()
@@ -5528,6 +5767,20 @@ User Question: $userQuestion
                             repository.insertSalesTargets(list)
                         }
                         sheetMessages.add("Sales Targets: Imported ${list.size}")
+                    }
+                }
+
+                // 8f. Payment Invoices Sheet
+                val invoicesSheet = com.example.utils.Exporter.getSheetIgnoreCaseAnyOf(workbook, listOf("Payment Invoices", "Payment_Invoices", "PaymentInvoices", "Invoices", "Payment Invoice"))
+                if (invoicesSheet != null) {
+                    val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.utils.Exporter.importPaymentInvoices(context, workbook, invoicesSheet)
+                    }
+                    if (list.isNotEmpty()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            repository.insertInvoices(list)
+                        }
+                        sheetMessages.add("Payment Invoices: Imported ${list.size}")
                     }
                 }
 

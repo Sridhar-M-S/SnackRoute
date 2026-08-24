@@ -25,8 +25,22 @@ class AppRepository(
     private val shopRemarkDao: ShopRemarkDao,
     private val businessExpenseDao: BusinessExpenseDao,
     private val productCostDao: ProductCostDao,
-    private val salesTargetDao: SalesTargetDao = database.salesTargetDao()
+    private val salesTargetDao: SalesTargetDao = database.salesTargetDao(),
+    private val paymentInvoiceDao: PaymentInvoiceDao = database.paymentInvoiceDao()
 ) {
+    // --- Payment Invoice Queries ---
+    val allInvoices: Flow<List<PaymentInvoice>> = paymentInvoiceDao.getAllInvoices()
+    fun getInvoicesForShop(shopNumber: String): Flow<List<PaymentInvoice>> = paymentInvoiceDao.getInvoicesForShop(shopNumber)
+    suspend fun insertInvoice(invoice: PaymentInvoice): Long = paymentInvoiceDao.insertInvoice(invoice)
+    suspend fun updateInvoice(invoice: PaymentInvoice) = paymentInvoiceDao.updateInvoice(invoice)
+    suspend fun deleteInvoice(invoice: PaymentInvoice) = paymentInvoiceDao.deleteInvoice(invoice)
+    suspend fun deleteInvoiceById(id: Int) = paymentInvoiceDao.deleteInvoiceById(id)
+    suspend fun getInvoiceById(id: Int): PaymentInvoice? = paymentInvoiceDao.getInvoiceById(id)
+    suspend fun getInvoiceByNumber(number: String): PaymentInvoice? = paymentInvoiceDao.getInvoiceByNumber(number)
+    suspend fun getAllInvoicesDirect(): List<PaymentInvoice> = paymentInvoiceDao.getAllInvoicesDirect()
+    suspend fun insertInvoices(invoices: List<PaymentInvoice>) = paymentInvoiceDao.insertInvoices(invoices)
+    suspend fun deleteAllInvoices() = paymentInvoiceDao.deleteAllInvoices()
+
     // --- Sales Target Queries ---
     fun getSalesTargetsForDate(date: String): Flow<List<SalesTargetItem>> = salesTargetDao.getTargetsForDate(date)
     fun getAllSalesTargets(): Flow<List<SalesTargetItem>> = salesTargetDao.getAllTargets()

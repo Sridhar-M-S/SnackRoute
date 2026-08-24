@@ -143,7 +143,8 @@ fun SettingsScreen(
     onOpenCostEngine: () -> Unit,
     onOpenRemarks: () -> Unit = {},
     onOpenExpenses: () -> Unit = {},
-    onOpenProductCostCalculator: () -> Unit = {}
+    onOpenProductCostCalculator: () -> Unit = {},
+    onOpenInvoices: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val userApiKey by viewModel.userGeminiApiKey.collectAsState()
@@ -921,6 +922,40 @@ fun SettingsScreen(
                             onClick = onOpenExpenses,
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             modifier = Modifier.testTag("btn_settings_open_expenses")
+                        ) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open", fontSize = 12.sp)
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    // Payment Invoices
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ReceiptLong,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text("Payment Invoices", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Create & manage shop invoices, track total/paid/balance amounts, and share slips.", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                        Button(
+                            onClick = onOpenInvoices,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.testTag("btn_settings_open_invoices")
                         ) {
                             Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))

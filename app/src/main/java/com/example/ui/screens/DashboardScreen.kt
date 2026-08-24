@@ -118,6 +118,7 @@ fun DashboardScreen(
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
     val allRemarks by viewModel.allRemarks.collectAsStateWithLifecycle()
+    val allInvoices by viewModel.allInvoices.collectAsStateWithLifecycle()
     val todayTargets by viewModel.todaySalesTargets.collectAsStateWithLifecycle()
     val reminderCount = dueReminders.size + inAppNotifications.count { !it.isRead }
 
@@ -853,6 +854,15 @@ fun DashboardScreen(
                 BentoExpensesCard(
                     thisMonthExpense = thisMonthExpense,
                     onClick = { onNavigateToTab("BusinessExpenses") }
+                )
+            }
+
+            // --- Payment Invoices Shortcut Card ---
+            item {
+                BentoInvoicesCard(
+                    invoicesCount = allInvoices.size,
+                    pendingBalance = allInvoices.filter { it.status != "PAID" }.sumOf { it.balanceAmount },
+                    onClick = { onNavigateToTab("PaymentInvoices") }
                 )
             }
 
@@ -3599,3 +3609,123 @@ fun BentoRemarksCard(
         }
     }
 }
+
+@Composable
+fun BentoInvoicesCard(
+    invoicesCount: Int,
+    pendingBalance: Double,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Payment Invoices & Collections",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .testTag("dashboard_bento_invoices_card"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
+            border = CardDefaults.outlinedCardBorder()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(14.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ReceiptLong,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Shop Payment Invoices",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (pendingBalance > 0) "Pending Balance: ₹${"%.2f".format(pendingBalance)}" else "All invoices settled",
+                            fontSize = 12.sp,
+                            color = if (pendingBalance > 0) Color(0xFFC62828) else Color(0xFF2E7D32),
+                            fontWeight = if (pendingBalance > 0) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "$invoicesCount",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Invoices",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = onClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("btn_open_invoices_manager"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ReceiptLong,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Manage Payment Invoices",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+}
+

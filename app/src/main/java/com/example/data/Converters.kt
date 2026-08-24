@@ -15,6 +15,17 @@ class Converters {
     }
 
     @TypeConverter
+    fun fromIntList(value: List<Int>?): String? {
+        return value?.joinToString(",")
+    }
+
+    @TypeConverter
+    fun toIntList(value: String?): List<Int>? {
+        if (value.isNullOrEmpty()) return emptyList()
+        return value.split(",").mapNotNull { it.trim().toIntOrNull() }
+    }
+
+    @TypeConverter
     fun fromHistoryList(value: List<RemarkHistoryItem>?): String? {
         if (value == null) return null
         val array = org.json.JSONArray()

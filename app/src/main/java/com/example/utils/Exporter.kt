@@ -2829,7 +2829,8 @@ object Exporter {
         productCostIngredients: List<com.example.data.ProductCostIngredient> = emptyList(),
         productCostCalculations: List<com.example.data.ProductCostCalculation> = emptyList(),
         timetableEntries: List<com.example.data.TimetableEntry> = emptyList(),
-        salesTargets: List<com.example.data.SalesTargetItem> = emptyList()
+        salesTargets: List<com.example.data.SalesTargetItem> = emptyList(),
+        paymentInvoices: List<com.example.data.PaymentInvoice> = emptyList()
     ): Boolean {
         val fileName = "Unified_Backup_${System.currentTimeMillis()}.xlsx"
         val file = File(context.cacheDir, fileName)
@@ -3289,6 +3290,38 @@ object Exporter {
                 salesTargetsSheet.setColumnWidth(i, 5000)
             }
 
+            // --- 11f. Payment Invoices Sheet ---
+            val invoicesSheet = workbook.createSheet("Payment Invoices")
+            val invoicesHeaders = listOf(
+                "Invoice Number", "Invoice Date", "Shop Number", "Shop Name", "Location Number",
+                "Sales Entry IDs", "Total Amount", "Paid Amount", "Balance Amount", "Status", "Notes", "Timestamp"
+            )
+            val invoicesHeaderRow = invoicesSheet.createRow(0)
+            for (i in invoicesHeaders.indices) {
+                val cell = invoicesHeaderRow.createCell(i)
+                cell.setCellValue(invoicesHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            rowIdx = 1
+            for (inv in paymentInvoices) {
+                val row = invoicesSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(inv.invoiceNumber)
+                row.createCell(1).setCellValue(inv.invoiceDateFormatted)
+                row.createCell(2).setCellValue(inv.shopNumber)
+                row.createCell(3).setCellValue(inv.shopName)
+                row.createCell(4).setCellValue(inv.locationNumber)
+                row.createCell(5).setCellValue(inv.salesEntryIds.joinToString(","))
+                row.createCell(6).setCellValue(inv.totalAmount)
+                row.createCell(7).setCellValue(inv.paidAmount)
+                row.createCell(8).setCellValue(inv.balanceAmount)
+                row.createCell(9).setCellValue(inv.status)
+                row.createCell(10).setCellValue(inv.notes ?: "")
+                row.createCell(11).setCellValue(inv.invoiceDate.toDouble())
+            }
+            for (i in invoicesHeaders.indices) {
+                invoicesSheet.setColumnWidth(i, 5000)
+            }
+
             // --- 12. Settings Sheet ---
             val settingsSheet = workbook.createSheet("Settings")
             val settingsHeaders = listOf("Setting Key", "Setting Value")
@@ -3687,6 +3720,151 @@ object Exporter {
             e.printStackTrace()
         }
         return list
+    }
+
+    fun importPaymentInvoices(context: Context, workbook: Workbook, sheet: Sheet): List<com.example.data.PaymentInvoice> {
+        val list = mutableListOf<com.example.data.PaymentInvoice>()
+        try {
+            val headerRow = sheet.getRow(0) ?: return emptyList()
+            val headerMap = mutableMapOf<String, Int>()
+            for (c in 0 until headerRow.lastCellNum.toInt()) {
+                val cell = headerRow.getCell(c)
+                val headerVal = cell?.stringCellValue?.trim()
+                if (!headerVal.isNullOrEmpty()) {
+                    headerMap[headerVal.lowercase(Locale.getDefault())] = c
+                }
+            }
+            val invNumIdx = headerMap["invoice number"] ?: headerMap["invoicenumber"] ?: headerMap["inv number"] ?: 0
+            val dateIdx = headerMap["invoice date"] ?: headerMap["date"] ?: headerMap["invoicedate"] ?: 1
+            val shopNumIdx = headerMap["shop number"] ?: headerMap["shopnumber"] ?: 2
+            val shopNameIdx = headerMap["shop name"] ?: headerMap["shopname"] ?: 3
+            val locNumIdx = headerMap["location number"] ?: headerMap["locationnumber"] ?: 4
+            val salesIdsIdx = headerMap["sales entry ids"] ?: headerMap["sales ids"] ?: headerMap["salesentryids"] ?: 5
+            val totalIdx = headerMap["total amount"] ?: headerMap["totalamount"] ?: 6
+            val paidIdx = headerMap["paid amount"] ?: headerMap["paidamount"] ?: 7
+            val balanceIdx = headerMap["balance amount"] ?: headerMap["balanceamount"] ?: 8
+            val statusIdx = headerMap["status"] ?: 9
+            val notesIdx = headerMap["notes"] ?: headerMap["remark"] ?: 10
+            val timestampIdx = headerMap["timestamp"]
+
+            for (r in 1..sheet.lastRowNum) {
+                val row = sheet.getRow(r) ?: continue
+                val invoiceNumber = getCellValueAsString(row, invNumIdx)?.trim() ?: ""
+                val shopNumber = getCellValueAsString(row, shopNumIdx)?.trim() ?: ""
+                val shopName = getCellValueAsString(row, shopNameIdx)?.trim() ?: ""
+                if (invoiceNumber.isEmpty() || shopNumber.isEmpty()) continue
+
+                val locationNumber = getCellValueAsString(row, locNumIdx)?.trim() ?: ""
+                val salesIdsStr = getCellValueAsString(row, salesIdsIdx)?.trim() ?: ""
+                val salesIds = salesIdsStr.split(",").mapNotNull { it.trim().toIntOrNull() }
+                val totalAmount = getCellValueAsString(row, totalIdx)?.toDoubleOrNull() ?: 0.0
+                val paidAmount = getCellValueAsString(row, paidIdx)?.toDoubleOrNull() ?: 0.0
+                val balanceAmount = getCellValueAsString(row, balanceIdx)?.toDoubleOrNull() ?: (totalAmount - paidAmount).coerceAtLeast(0.0)
+                val status = getCellValueAsString(row, statusIdx)?.trim() ?: when {
+                    paidAmount <= 0.0 -> "UNPAID"
+                    paidAmount < totalAmount -> "PARTIALLY PAID"
+                    else -> "PAID"
+                }
+                val notes = getCellValueAsString(row, notesIdx)?.trim()
+                
+                var invoiceDateTimestamp = System.currentTimeMillis()
+                val tsVal = timestampIdx?.let { getCellValueAsString(row, it)?.toDoubleOrNull()?.toLong() }
+                if (tsVal != null && tsVal > 0) {
+                    invoiceDateTimestamp = tsVal
+                } else {
+                    val dateStr = getCellValueAsString(row, dateIdx)?.trim()
+                    if (!dateStr.isNullOrEmpty()) {
+                        try {
+                            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+                            val d = sdf.parse(dateStr)
+                            if (d != null) invoiceDateTimestamp = d.time
+                        } catch (_: Exception) {}
+                    }
+                }
+
+                list.add(
+                    com.example.data.PaymentInvoice(
+                        invoiceNumber = invoiceNumber,
+                        invoiceDate = invoiceDateTimestamp,
+                        shopNumber = shopNumber,
+                        shopName = shopName,
+                        locationNumber = locationNumber,
+                        salesEntryIds = salesIds,
+                        totalAmount = totalAmount,
+                        paidAmount = paidAmount,
+                        balanceAmount = balanceAmount,
+                        status = status,
+                        notes = if (notes.isNullOrEmpty()) null else notes
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun exportPaymentInvoicesToExcel(
+        context: Context,
+        invoices: List<com.example.data.PaymentInvoice>
+    ): Boolean {
+        val fileName = "Payment_Invoices_${System.currentTimeMillis()}.xlsx"
+        val file = File(context.cacheDir, fileName)
+
+        return try {
+            val workbook = XSSFWorkbook()
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.getIndex()
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                fillForegroundColor = IndexedColors.DARK_BLUE.getIndex()
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.CENTER
+            }
+
+            val invoicesSheet = workbook.createSheet("Payment Invoices")
+            val invoicesHeaders = listOf(
+                "Invoice Number", "Invoice Date", "Shop Number", "Shop Name", "Location Number",
+                "Sales Records Count", "Total Amount (₹)", "Paid Amount (₹)", "Balance Amount (₹)", "Status", "Notes"
+            )
+            val invoicesHeaderRow = invoicesSheet.createRow(0)
+            for (i in invoicesHeaders.indices) {
+                val cell = invoicesHeaderRow.createCell(i)
+                cell.setCellValue(invoicesHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            var rowIdx = 1
+            for (inv in invoices) {
+                val row = invoicesSheet.createRow(rowIdx++)
+                row.createCell(0).setCellValue(inv.invoiceNumber)
+                row.createCell(1).setCellValue(inv.invoiceDateFormatted)
+                row.createCell(2).setCellValue(inv.shopNumber)
+                row.createCell(3).setCellValue(inv.shopName)
+                row.createCell(4).setCellValue(inv.locationNumber)
+                row.createCell(5).setCellValue(inv.salesEntryIds.size.toDouble())
+                row.createCell(6).setCellValue(inv.totalAmount)
+                row.createCell(7).setCellValue(inv.paidAmount)
+                row.createCell(8).setCellValue(inv.balanceAmount)
+                row.createCell(9).setCellValue(inv.status)
+                row.createCell(10).setCellValue(inv.notes ?: "")
+            }
+            for (i in invoicesHeaders.indices) {
+                invoicesSheet.setColumnWidth(i, 5500)
+            }
+
+            val fos = FileOutputStream(file)
+            workbook.write(fos)
+            fos.close()
+            workbook.close()
+
+            shareFile(context, file, "Share Payment Invoices")
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 
     private fun addImageToRow(context: Context, workbook: XSSFWorkbook, drawing: org.apache.poi.xssf.usermodel.XSSFDrawing, row: Row, colIndex: Int, imagePath: String?) {

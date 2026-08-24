@@ -502,6 +502,16 @@ fun SalesScreen(
                             )
                         }
                         IconButton(
+                            onClick = { onNavigateToTab("PaymentInvoices") },
+                            modifier = Modifier.testTag("sales_invoices_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ReceiptLong,
+                                contentDescription = "Payment Invoices",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        IconButton(
                             onClick = { filterExpanded = !filterExpanded },
                             modifier = Modifier.testTag("sales_filter_toggle")
                         ) {

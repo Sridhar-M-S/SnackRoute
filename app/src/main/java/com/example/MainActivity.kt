@@ -274,7 +274,16 @@ class MainActivity : ComponentActivity() {
                                             onOpenCostEngine = { navigateToChildTab("CostEngine") },
                                             onOpenRemarks = { navigateToChildTab("Remarks") },
                                             onOpenExpenses = { navigateToChildTab("BusinessExpenses") },
-                                            onOpenProductCostCalculator = { navigateToChildTab("ProductCostCalculator") }
+                                            onOpenProductCostCalculator = { navigateToChildTab("ProductCostCalculator") },
+                                            onOpenInvoices = { navigateToChildTab("PaymentInvoices") }
+                                        )
+                                    }
+                                }
+                                if (navigationHistory.contains("PaymentInvoices")) {
+                                    Box(modifier = if (currentTab == "PaymentInvoices") Modifier.fillMaxSize() else Modifier.size(0.dp).graphicsLayer { alpha = 0f }) {
+                                        PaymentInvoicesScreen(
+                                            viewModel = viewModel,
+                                            onBack = { navigateBack() }
                                         )
                                     }
                                 }

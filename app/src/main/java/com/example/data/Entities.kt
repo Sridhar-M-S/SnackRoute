@@ -279,6 +279,27 @@ data class SalesTargetItem(
     val targetAmount: Double = sellingPrice * targetPackets
 )
 
+@Entity(tableName = "payment_invoices")
+data class PaymentInvoice(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val invoiceNumber: String, // e.g. "INV-000001"
+    val invoiceDate: Long = System.currentTimeMillis(),
+    val shopNumber: String,
+    val shopName: String,
+    val locationNumber: String,
+    val salesEntryIds: List<Int> = emptyList(),
+    val totalAmount: Double,
+    val paidAmount: Double = 0.0,
+    val balanceAmount: Double = (totalAmount - paidAmount).coerceAtLeast(0.0),
+    val status: String = "UNPAID", // "UNPAID", "PARTIALLY PAID", "PAID"
+    val notes: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    val invoiceDateFormatted: String
+        get() = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date(invoiceDate))
+}
+
+
 
 
 

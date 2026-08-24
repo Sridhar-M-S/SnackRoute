@@ -599,6 +599,16 @@ fun ShopsScreen(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
+                        IconButton(
+                            onClick = { onNavigateToTab("PaymentInvoices") },
+                            modifier = Modifier.testTag("shops_invoices_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ReceiptLong,
+                                contentDescription = "Payment Invoices",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         // Import Excel Button
                         IconButton(
                             onClick = {

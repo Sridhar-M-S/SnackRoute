@@ -467,6 +467,43 @@ interface SalesTargetDao {
     suspend fun getAllTargetsDirect(): List<SalesTargetItem>
 }
 
+@Dao
+interface PaymentInvoiceDao {
+    @Query("SELECT * FROM payment_invoices ORDER BY invoiceDate DESC, id DESC")
+    fun getAllInvoices(): Flow<List<PaymentInvoice>>
+
+    @Query("SELECT * FROM payment_invoices ORDER BY invoiceDate DESC, id DESC")
+    suspend fun getAllInvoicesDirect(): List<PaymentInvoice>
+
+    @Query("SELECT * FROM payment_invoices WHERE id = :id LIMIT 1")
+    suspend fun getInvoiceById(id: Int): PaymentInvoice?
+
+    @Query("SELECT * FROM payment_invoices WHERE invoiceNumber = :invoiceNumber LIMIT 1")
+    suspend fun getInvoiceByNumber(invoiceNumber: String): PaymentInvoice?
+
+    @Query("SELECT * FROM payment_invoices WHERE shopNumber = :shopNumber ORDER BY invoiceDate DESC")
+    fun getInvoicesForShop(shopNumber: String): Flow<List<PaymentInvoice>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertInvoice(invoice: PaymentInvoice): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertInvoices(invoices: List<PaymentInvoice>)
+
+    @Update
+    suspend fun updateInvoice(invoice: PaymentInvoice)
+
+    @Delete
+    suspend fun deleteInvoice(invoice: PaymentInvoice)
+
+    @Query("DELETE FROM payment_invoices WHERE id = :id")
+    suspend fun deleteInvoiceById(id: Int)
+
+    @Query("DELETE FROM payment_invoices")
+    suspend fun deleteAllInvoices()
+}
+
+
 
 
 
