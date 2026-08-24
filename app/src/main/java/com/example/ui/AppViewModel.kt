@@ -990,12 +990,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sharePaymentInvoice(context: Context, invoice: PaymentInvoice, salesEntries: List<SalesEntry>) {
+    fun sharePaymentInvoice(
+        context: Context,
+        invoice: PaymentInvoice,
+        salesEntries: List<SalesEntry>,
+        style: com.example.utils.InvoicePdfStyle = com.example.utils.InvoicePdfStyle.RECEIPT_STYLE
+    ) {
         com.example.utils.InvoicePdfGenerator.shareInvoicePdf(
             context = context,
             invoice = invoice,
             salesEntries = salesEntries,
-            profile = _businessProfile.value
+            profile = _businessProfile.value,
+            style = style
         )
     }
 

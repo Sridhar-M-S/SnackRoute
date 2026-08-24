@@ -40,6 +40,7 @@ import com.example.data.PaymentInvoice
 import com.example.data.SalesEntry
 import com.example.data.ShopMaster
 import com.example.ui.AppViewModel
+import com.example.utils.InvoicePdfStyle
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -389,8 +390,11 @@ fun PaymentInvoicesScreen(
             allSales = allSales,
             businessProfile = businessProfile,
             onDismiss = { viewingInvoice = null },
-            onShare = {
-                viewModel.sharePaymentInvoice(context, viewingInvoice!!, allSales)
+            onSharePdf = { style ->
+                viewModel.sharePaymentInvoice(context, viewingInvoice!!, allSales, style)
+            },
+            onShareText = {
+                viewModel.sharePaymentInvoiceAsText(context, viewingInvoice!!, allSales)
             },
             onEdit = {
                 val inv = viewingInvoice
@@ -1835,7 +1839,7 @@ fun InvoiceDetailDialog(
     allSales: List<SalesEntry>,
     businessProfile: AppViewModel.BusinessProfile,
     onDismiss: () -> Unit,
-    onShare: () -> Unit,
+    onSharePdf: (InvoicePdfStyle) -> Unit,
     onShareText: () -> Unit = {},
     onEdit: () -> Unit,
     onEditBusinessProfile: () -> Unit
@@ -1844,19 +1848,22 @@ fun InvoiceDetailDialog(
         allSales.filter { it.id in invoice.salesEntryIds }
     }
 
+    var selectedFormatTab by remember { mutableIntStateOf(0) } // 0: Receipt Bill, 1: Executive Invoice
+    var showShareMenu by remember { mutableStateOf(false) }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .fillMaxHeight(0.94f)
                 .testTag("invoice_detail_dialog")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
+                    .padding(14.dp)
             ) {
                 // Dialog Header
                 Row(
@@ -1882,7 +1889,7 @@ fun InvoiceDetailDialog(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = "Exact print & PDF layout",
+                                text = "2 Bill Layout Formats Available",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.Gray
                             )
@@ -1893,7 +1900,45 @@ fun InvoiceDetailDialog(
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Format Selector TabRow
+                TabRow(
+                    selectedTabIndex = selectedFormatTab,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                ) {
+                    Tab(
+                        selected = selectedFormatTab == 0,
+                        onClick = { selectedFormatTab = 0 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("Receipt Bill", fontWeight = if (selectedFormatTab == 0) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                    )
+                    Tab(
+                        selected = selectedFormatTab == 1,
+                        onClick = { selectedFormatTab = 1 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("Executive Invoice", fontWeight = if (selectedFormatTab == 1) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Scrollable Bill Paper Preview
                 Column(
@@ -1902,288 +1947,556 @@ fun InvoiceDetailDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Authentic White Paper Bill Card
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White,
-                        shadowElevation = 4.dp,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD1D5DB)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp)
+                    if (selectedFormatTab == 0) {
+                        // ================= FORMAT 1: THERMAL / RECEIPT PAPER =================
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White,
+                            shadowElevation = 4.dp,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            val brandName = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName.uppercase() else "POP CRAZE"
-                            val companyName = businessProfile.companyName
-                            val address = businessProfile.address
-                            val phone = businessProfile.phoneNumber
-                            val fssai = businessProfile.fssaiNumber
-                            val dividerText = "=================================================="
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp)
+                            ) {
+                                val brandName = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName.uppercase() else "POP CRAZE"
+                                val companyName = businessProfile.companyName
+                                val address = businessProfile.address
+                                val phone = businessProfile.phoneNumber
+                                val fssai = businessProfile.fssaiNumber
+                                val dividerText = "=================================================="
 
-                            // Top Double Line
-                            Text(
-                                text = dividerText,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            // Centered Brand Name
-                            Text(
-                                text = brandName,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.Black,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            // Centered Company Name
-                            if (companyName.isNotBlank()) {
+                                // Top Double Line
                                 Text(
-                                    text = companyName,
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.Black,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-
-                            // Centered Address
-                            if (address.isNotBlank()) {
-                                Text(
-                                    text = "Address: $address",
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    fontSize = 10.sp,
-                                    color = Color.Black,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-
-                            // Centered Phone
-                            if (phone.isNotBlank()) {
-                                Text(
-                                    text = "Phone: $phone",
+                                    text = dividerText,
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                     fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = Color.Black,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth()
                                 )
-                            }
 
-                            // Centered FSSAI
-                            if (fssai.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // Centered Brand Name
                                 Text(
-                                    text = "FSSAI Lic No: $fssai",
+                                    text = brandName,
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.ExtraBold,
                                     color = Color.Black,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    textAlign = TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth()
                                 )
-                            }
 
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            // Header Bottom Line
-                            Text(
-                                text = dividerText,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
-                            // PAYMENT INVOICE TITLE
-                            Text(
-                                text = "PAYMENT INVOICE",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
-                            Text(
-                                text = dividerText,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // INVOICE METADATA
-                            Text(
-                                text = "Invoice No : ${invoice.invoiceNumber}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Date       : ${invoice.invoiceDateFormatted}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Status     : ${invoice.status.uppercase()}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // SHOP DETAILS
-                            Text(
-                                text = "--- SHOP DETAILS ---",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Shop Name  : ${invoice.shopName}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Shop ID    : ${invoice.shopNumber}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Location   : ${invoice.locationNumber}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color.Black
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // SALES DETAILS
-                            Text(
-                                text = "--- SALES DETAILS ---",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-
-                            if (invoiceSales.isEmpty()) {
-                                Text(
-                                    text = "No linked sales items.",
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    color = Color.DarkGray
-                                )
-                            } else {
-                                invoiceSales.forEachIndexed { index, sale ->
-                                    val rate = sale.customSellingPrice ?: sale.ratePerPacket
+                                // Centered Company Name
+                                if (companyName.isNotBlank()) {
                                     Text(
-                                        text = "${index + 1}. ${sale.productName} | Date: ${sale.entryDateFormatted} | Rate: ₹${"%.2f".format(rate)} | Pkts: ${sale.packetsSold} | Amount: ₹${"%.2f".format(sale.totalAmount)}",
+                                        text = companyName,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.Black,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                // Centered Address
+                                if (address.isNotBlank()) {
+                                    Text(
+                                        text = "Address: $address",
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        color = Color.Black,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                // Centered Phone
+                                if (phone.isNotBlank()) {
+                                    Text(
+                                        text = "Phone: $phone",
                                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                         fontSize = 11.sp,
                                         color = Color.Black,
-                                        modifier = Modifier.padding(vertical = 2.dp)
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
                                     )
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                                // Centered FSSAI
+                                if (fssai.isNotBlank()) {
+                                    Text(
+                                        text = "FSSAI Lic No: $fssai",
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.Black,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
 
-                            // AMOUNT SUMMARY
-                            Text(
-                                text = "--- AMOUNT SUMMARY ---",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Total Amount   : ₹${"%.2f".format(invoice.totalAmount)}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Amount Paid    : ₹${"%.2f".format(invoice.paidAmount)}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Balance Amount : ₹${"%.2f".format(invoice.balanceAmount)}",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
+                                Spacer(modifier = Modifier.height(4.dp))
 
-                            if (!invoice.notes.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.height(6.dp))
+                                // Header Bottom Line
                                 Text(
-                                    text = "Notes: ${invoice.notes}",
+                                    text = dividerText,
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                     fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Spacer(modifier = Modifier.height(2.dp))
+
+                                // PAYMENT INVOICE TITLE
+                                Text(
+                                    text = "PAYMENT INVOICE",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Spacer(modifier = Modifier.height(2.dp))
+
+                                Text(
+                                    text = dividerText,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // INVOICE METADATA
+                                Text(
+                                    text = "Invoice No : ${invoice.invoiceNumber}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Date       : ${invoice.invoiceDateFormatted}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Status     : ${invoice.status.uppercase()}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // SHOP DETAILS
+                                Text(
+                                    text = "--- SHOP DETAILS ---",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Shop Name  : ${invoice.shopName}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Shop ID    : ${invoice.shopNumber}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Location   : ${invoice.locationNumber}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    color = Color.Black
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // SALES DETAILS
+                                Text(
+                                    text = "--- SALES DETAILS ---",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+
+                                if (invoiceSales.isEmpty()) {
+                                    Text(
+                                        text = "No linked sales items.",
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = Color.DarkGray
+                                    )
+                                } else {
+                                    invoiceSales.forEachIndexed { index, sale ->
+                                        val rate = sale.customSellingPrice ?: sale.ratePerPacket
+                                        Text(
+                                            text = "${index + 1}. ${sale.productName} | Date: ${sale.entryDateFormatted} | Rate: ₹${"%.2f".format(rate)} | Pkts: ${sale.packetsSold} | Amount: ₹${"%.2f".format(sale.totalAmount)}",
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            color = Color.Black,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // AMOUNT SUMMARY
+                                Text(
+                                    text = "--- AMOUNT SUMMARY ---",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Total Amount   : ₹${"%.2f".format(invoice.totalAmount)}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Amount Paid    : ₹${"%.2f".format(invoice.paidAmount)}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Balance Amount : ₹${"%.2f".format(invoice.balanceAmount)}",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+
+                                if (!invoice.notes.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Notes: ${invoice.notes}",
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = Color.Black
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Bottom Divider
+                                Text(
+                                    text = dividerText,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                val issuer = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName else if (businessProfile.companyName.isNotBlank()) businessProfile.companyName else "Pop Craze"
+                                Text(
+                                    text = "Issued by $issuer",
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = Color.Black
                                 )
                             }
+                        }
+                    } else {
+                        // ================= FORMAT 2: EXECUTIVE CORPORATE INVOICE =================
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White,
+                            shadowElevation = 4.dp,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp)
+                            ) {
+                                // Top Navy Accent Bar
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .background(Color(0xFF1E3A8A), RoundedCornerShape(2.dp))
+                                )
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
 
-                            // Bottom Divider
-                            Text(
-                                text = dividerText,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                                // Header: Brand on left, Invoice title & meta on right
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val brand = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName else "POP CRAZE"
+                                        Text(
+                                            text = brand,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF1E3A8A)
+                                        )
+                                        if (businessProfile.companyName.isNotBlank()) {
+                                            Text(
+                                                text = businessProfile.companyName,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF334155)
+                                            )
+                                        }
+                                        if (businessProfile.address.isNotBlank()) {
+                                            Text(
+                                                text = businessProfile.address,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF64748B)
+                                            )
+                                        }
+                                        val phFssai = buildString {
+                                            if (businessProfile.phoneNumber.isNotBlank()) append("Ph: ${businessProfile.phoneNumber}")
+                                            if (businessProfile.phoneNumber.isNotBlank() && businessProfile.fssaiNumber.isNotBlank()) append(" • ")
+                                            if (businessProfile.fssaiNumber.isNotBlank()) append("FSSAI: ${businessProfile.fssaiNumber}")
+                                        }
+                                        if (phFssai.isNotBlank()) {
+                                            Text(
+                                                text = phFssai,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF64748B)
+                                            )
+                                        }
+                                    }
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "PAYMENT INVOICE",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF1E3A8A)
+                                        )
+                                        Text(
+                                            text = invoice.invoiceNumber,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "Date: ${invoice.invoiceDateFormatted}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF64748B)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        InvoiceStatusBadge(status = invoice.status)
+                                    }
+                                }
 
-                            val issuer = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName else if (businessProfile.companyName.isNotBlank()) businessProfile.companyName else "Pop Craze"
-                            Text(
-                                text = "Issued by $issuer",
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                // Billed To / Shop Box
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFFF8FAFC),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "BILLED TO / SHOP DETAILS",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF1E3A8A)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = invoice.shopName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "Shop ID: ${invoice.shopNumber}  •  Location: ${invoice.locationNumber}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF475569)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                // Itemized Table Header
+                                Surface(
+                                    color = Color(0xFFF1F5F9),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("#", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B), modifier = Modifier.width(20.dp))
+                                        Text("Product", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B), modifier = Modifier.weight(2f))
+                                        Text("Rate", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B), modifier = Modifier.width(55.dp), textAlign = TextAlign.End)
+                                        Text("Qty", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B), modifier = Modifier.width(45.dp), textAlign = TextAlign.End)
+                                        Text("Amount", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B), modifier = Modifier.width(65.dp), textAlign = TextAlign.End)
+                                    }
+                                }
+
+                                // Table Rows
+                                if (invoiceSales.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(1.dp, Color(0xFFE2E8F0))
+                                            .padding(10.dp)
+                                    ) {
+                                        Text("No itemized sales attached.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                    }
+                                } else {
+                                    invoiceSales.forEachIndexed { index, sale ->
+                                        val rate = sale.customSellingPrice ?: sale.ratePerPacket
+                                        val rowBg = if (index % 2 == 1) Color(0xFFF8FAFC) else Color.White
+                                        Surface(
+                                            color = rowBg,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("${index + 1}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF475569), modifier = Modifier.width(20.dp))
+                                                Column(modifier = Modifier.weight(2f)) {
+                                                    Text(sale.productName, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = Color(0xFF0F172A))
+                                                    Text(sale.entryDateFormatted, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = Color(0xFF64748B))
+                                                }
+                                                Text("₹${"%.2f".format(rate)}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF475569), modifier = Modifier.width(55.dp), textAlign = TextAlign.End)
+                                                Text("${sale.packetsSold}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF475569), modifier = Modifier.width(45.dp), textAlign = TextAlign.End)
+                                                Text("₹${"%.2f".format(sale.totalAmount)}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.End)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                // Totals & Remarks Block
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    // Notes Column
+                                    Column(modifier = Modifier.weight(1.2f).padding(end = 8.dp)) {
+                                        if (!invoice.notes.isNullOrBlank()) {
+                                            Text(
+                                                text = "PAYMENT REMARKS:",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF1E3A8A)
+                                            )
+                                            Text(
+                                                text = invoice.notes,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(0xFF334155)
+                                            )
+                                        }
+                                    }
+
+                                    // Summary Box
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFFF8FAFC),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                        modifier = Modifier.weight(1.4f)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text("Total Amount:", style = MaterialTheme.typography.labelSmall, color = Color(0xFF64748B))
+                                                Text("₹${"%.2f".format(invoice.totalAmount)}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                            }
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text("Amount Paid:", style = MaterialTheme.typography.labelSmall, color = Color(0xFF64748B))
+                                                Text("₹${"%.2f".format(invoice.paidAmount)}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF0F172A))
+                                            }
+                                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp), color = Color(0xFFCBD5E1))
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(
+                                                    text = "Balance Due:",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (invoice.balanceAmount > 0) Color(0xFFB91C1C) else Color(0xFF1E3A8A)
+                                                )
+                                                Text(
+                                                    text = "₹${"%.2f".format(invoice.balanceAmount)}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (invoice.balanceAmount > 0) Color(0xFFB91C1C) else Color(0xFF1E3A8A)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                // Signatory
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.End
+                                ) {
+                                    Box(modifier = Modifier.width(140.dp).height(1.dp).background(Color(0xFF94A3B8)))
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val issuerTitle = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName else "Authorized Signatory"
+                                    Text(
+                                        text = "For $issuerTitle",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF475569)
+                                    )
+                                    Text(
+                                        text = "Authorized Signatory",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 // Bottom Action Buttons
                 Row(
@@ -2202,15 +2515,33 @@ fun InvoiceDetailDialog(
                         Text("Edit")
                     }
 
-                    Button(
-                        onClick = onShare,
+                    // Share Text Button
+                    FilledTonalButton(
+                        onClick = onShareText,
                         modifier = Modifier
-                            .weight(2f)
-                            .testTag("dialog_share_invoice_button")
+                            .weight(1.1f)
+                            .testTag("dialog_share_text_button")
                     ) {
-                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Share PDF Bill")
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Text")
+                    }
+
+                    // Share PDF Button (Matches the currently selected format tab)
+                    Box(modifier = Modifier.weight(1.8f)) {
+                        Button(
+                            onClick = {
+                                val style = if (selectedFormatTab == 0) InvoicePdfStyle.RECEIPT_STYLE else InvoicePdfStyle.EXECUTIVE_STYLE
+                                onSharePdf(style)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("dialog_share_invoice_button")
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (selectedFormatTab == 0) "Share Receipt PDF" else "Share Executive PDF")
+                        }
                     }
                 }
             }
