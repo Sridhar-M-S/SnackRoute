@@ -198,6 +198,113 @@ fun SettingsScreen(
         }
     }
 
+    val businessProfile by viewModel.businessProfile.collectAsState()
+    var showBusinessProfileSettingsDialog by remember { mutableStateOf(false) }
+
+    if (showBusinessProfileSettingsDialog) {
+        var companyName by remember(businessProfile) { mutableStateOf(businessProfile.companyName) }
+        var brandName by remember(businessProfile) { mutableStateOf(businessProfile.brandName) }
+        var address by remember(businessProfile) { mutableStateOf(businessProfile.address) }
+        var phoneNumber by remember(businessProfile) { mutableStateOf(businessProfile.phoneNumber) }
+        var fssaiNumber by remember(businessProfile) { mutableStateOf(businessProfile.fssaiNumber) }
+
+        AlertDialog(
+            onDismissRequest = { showBusinessProfileSettingsDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Business,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("Business Profile & FSSAI", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "Stored once and automatically included in all Payment Invoices, shareable slips, and unified Excel backups.",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+
+                    OutlinedTextField(
+                        value = brandName,
+                        onValueChange = { brandName = it },
+                        label = { Text("Brand Name") },
+                        placeholder = { Text("e.g. SnackRoute / CrispyKing") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("settings_brand_name_input")
+                    )
+
+                    OutlinedTextField(
+                        value = companyName,
+                        onValueChange = { companyName = it },
+                        label = { Text("Company / Firm Name") },
+                        placeholder = { Text("e.g. Sri Lakshmi Foods Pvt Ltd") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("settings_company_name_input")
+                    )
+
+                    OutlinedTextField(
+                        value = phoneNumber,
+                        onValueChange = { phoneNumber = it },
+                        label = { Text("Phone Number") },
+                        placeholder = { Text("e.g. +91 9876543210") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("settings_company_phone_input")
+                    )
+
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = { Text("Address") },
+                        placeholder = { Text("e.g. 12/4 Market Road, Salem, Tamil Nadu - 636001") },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth().testTag("settings_company_address_input")
+                    )
+
+                    OutlinedTextField(
+                        value = fssaiNumber,
+                        onValueChange = { fssaiNumber = it },
+                        label = { Text("FSSAI License Number") },
+                        placeholder = { Text("e.g. 12423004000123") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("settings_fssai_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.saveBusinessProfile(companyName, brandName, address, phoneNumber, fssaiNumber)
+                        showBusinessProfileSettingsDialog = false
+                        Toast.makeText(context, "Business Profile updated!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.testTag("btn_settings_save_business_profile")
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBusinessProfileSettingsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -319,6 +426,72 @@ fun SettingsScreen(
                             keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
                         )
                     )
+                }
+            }
+
+            // --- Business Profile Settings ---
+            val isConfigured = businessProfile.companyName.isNotBlank() || businessProfile.brandName.isNotBlank() || businessProfile.fssaiNumber.isNotBlank()
+            Text("Business Profile & Invoicing", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("settings_business_profile_card"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Business,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text(
+                                    text = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName else "Company & Brand Details",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = if (isConfigured) {
+                                        listOfNotNull(
+                                            businessProfile.companyName.takeIf { it.isNotBlank() },
+                                            businessProfile.phoneNumber.takeIf { it.isNotBlank() }?.let { "Ph: $it" },
+                                            businessProfile.fssaiNumber.takeIf { it.isNotBlank() }?.let { "FSSAI: $it" }
+                                        ).joinToString(" • ")
+                                    } else {
+                                        "Set company name, address, phone & FSSAI license"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = { showBusinessProfileSettingsDialog = true },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_edit_settings_business_profile")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (isConfigured) "Edit" else "Setup", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
 

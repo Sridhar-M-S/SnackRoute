@@ -3322,6 +3322,32 @@ object Exporter {
                 invoicesSheet.setColumnWidth(i, 5000)
             }
 
+            // --- 11g. Business Profile Sheet ---
+            val profileSheet = workbook.createSheet("Business Profile")
+            val profileHeaders = listOf("Company Name", "Brand Name", "Address", "Phone Number", "FSSAI License Number")
+            val profileHeaderRow = profileSheet.createRow(0)
+            for (i in profileHeaders.indices) {
+                val cell = profileHeaderRow.createCell(i)
+                cell.setCellValue(profileHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+            val companyName = prefs.getString("business_company_name", "") ?: ""
+            val brandName = prefs.getString("business_brand_name", "") ?: ""
+            val companyAddress = prefs.getString("business_company_address", "") ?: ""
+            val companyPhone = prefs.getString("business_company_phone", "") ?: ""
+            val fssaiNumber = prefs.getString("business_fssai_number", "") ?: ""
+
+            val profileRow = profileSheet.createRow(1)
+            profileRow.createCell(0).setCellValue(companyName)
+            profileRow.createCell(1).setCellValue(brandName)
+            profileRow.createCell(2).setCellValue(companyAddress)
+            profileRow.createCell(3).setCellValue(companyPhone)
+            profileRow.createCell(4).setCellValue(fssaiNumber)
+            for (i in profileHeaders.indices) {
+                profileSheet.setColumnWidth(i, 6500)
+            }
+
             // --- 12. Settings Sheet ---
             val settingsSheet = workbook.createSheet("Settings")
             val settingsHeaders = listOf("Setting Key", "Setting Value")
@@ -3332,7 +3358,6 @@ object Exporter {
                 cell.cellStyle = headerStyle
             }
             
-            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
             val reminderEnabled = prefs.getBoolean("sales_reminder_enabled", true)
             val reminderInterval = prefs.getInt("sales_reminder_interval", 7)
             val reminderTime = prefs.getString("sales_reminder_time", "20:00") ?: "20:00"
@@ -3367,6 +3392,26 @@ object Exporter {
             val row7 = settingsSheet.createRow(7)
             row7.createCell(0).setCellValue("max_image_upload_size_kb")
             row7.createCell(1).setCellValue(maxImageUploadSizeKb.toDouble())
+
+            val row8 = settingsSheet.createRow(8)
+            row8.createCell(0).setCellValue("business_company_name")
+            row8.createCell(1).setCellValue(companyName)
+
+            val row9 = settingsSheet.createRow(9)
+            row9.createCell(0).setCellValue("business_brand_name")
+            row9.createCell(1).setCellValue(brandName)
+
+            val row10 = settingsSheet.createRow(10)
+            row10.createCell(0).setCellValue("business_company_address")
+            row10.createCell(1).setCellValue(companyAddress)
+
+            val row11 = settingsSheet.createRow(11)
+            row11.createCell(0).setCellValue("business_company_phone")
+            row11.createCell(1).setCellValue(companyPhone)
+
+            val row12 = settingsSheet.createRow(12)
+            row12.createCell(0).setCellValue("business_fssai_number")
+            row12.createCell(1).setCellValue(fssaiNumber)
 
             for (i in settingsHeaders.indices) {
                 settingsSheet.setColumnWidth(i, 8000)
@@ -3804,6 +3849,83 @@ object Exporter {
         return list
     }
 
+    fun importBusinessProfile(context: Context, workbook: Workbook): Boolean {
+        try {
+            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            var modified = false
+
+            // Check 1: Dedicated "Business Profile" sheet
+            val profileSheet = getSheetIgnoreCaseAnyOf(workbook, listOf("Business Profile", "BusinessProfile", "Business_Profile", "Company Profile", "CompanyProfile"))
+            if (profileSheet != null && profileSheet.lastRowNum >= 1) {
+                val headerRow = profileSheet.getRow(0)
+                val dataRow = profileSheet.getRow(1)
+                if (headerRow != null && dataRow != null) {
+                    val headerMap = mutableMapOf<String, Int>()
+                    for (c in 0 until headerRow.lastCellNum.toInt()) {
+                        val cell = headerRow.getCell(c)
+                        val headerVal = cell?.stringCellValue?.trim()?.lowercase(Locale.getDefault())
+                        if (!headerVal.isNullOrEmpty()) {
+                            headerMap[headerVal] = c
+                        }
+                    }
+                    val compIdx = headerMap["company name"] ?: headerMap["companyname"] ?: headerMap["company"] ?: 0
+                    val brandIdx = headerMap["brand name"] ?: headerMap["brandname"] ?: headerMap["brand"] ?: 1
+                    val addrIdx = headerMap["address"] ?: headerMap["company address"] ?: 2
+                    val phoneIdx = headerMap["phone number"] ?: headerMap["phone"] ?: headerMap["mobile"] ?: 3
+                    val fssaiIdx = headerMap["fssai license number"] ?: headerMap["fssai number"] ?: headerMap["fssai"] ?: headerMap["fssai license"] ?: 4
+
+                    val companyName = getCellValueAsString(dataRow, compIdx)?.trim()
+                    val brandName = getCellValueAsString(dataRow, brandIdx)?.trim()
+                    val address = getCellValueAsString(dataRow, addrIdx)?.trim()
+                    val phone = getCellValueAsString(dataRow, phoneIdx)?.trim()
+                    val fssai = getCellValueAsString(dataRow, fssaiIdx)?.trim()
+
+                    if (!companyName.isNullOrEmpty()) { editor.putString("business_company_name", companyName); modified = true }
+                    if (!brandName.isNullOrEmpty()) { editor.putString("business_brand_name", brandName); modified = true }
+                    if (!address.isNullOrEmpty()) { editor.putString("business_company_address", address); modified = true }
+                    if (!phone.isNullOrEmpty()) { editor.putString("business_company_phone", phone); modified = true }
+                    if (!fssai.isNullOrEmpty()) { editor.putString("business_fssai_number", fssai); modified = true }
+                }
+            }
+
+            // Check 2: Settings sheet key-values
+            val settingsSheet = getSheetIgnoreCaseAnyOf(workbook, listOf("Settings", "App Settings", "Configurations"))
+            if (settingsSheet != null) {
+                for (r in 1..settingsSheet.lastRowNum) {
+                    val row = settingsSheet.getRow(r) ?: continue
+                    val key = getCellValueAsString(row, 0)?.trim()?.lowercase(Locale.getDefault()) ?: continue
+                    val value = getCellValueAsString(row, 1)?.trim() ?: ""
+                    when (key) {
+                        "business_company_name", "company_name", "companyname" -> {
+                            if (value.isNotEmpty()) { editor.putString("business_company_name", value); modified = true }
+                        }
+                        "business_brand_name", "brand_name", "brandname" -> {
+                            if (value.isNotEmpty()) { editor.putString("business_brand_name", value); modified = true }
+                        }
+                        "business_company_address", "company_address", "companyaddress", "address" -> {
+                            if (value.isNotEmpty()) { editor.putString("business_company_address", value); modified = true }
+                        }
+                        "business_company_phone", "company_phone", "phone_number", "phone" -> {
+                            if (value.isNotEmpty()) { editor.putString("business_company_phone", value); modified = true }
+                        }
+                        "business_fssai_number", "fssai_number", "fssai_license_number", "fssai" -> {
+                            if (value.isNotEmpty()) { editor.putString("business_fssai_number", value); modified = true }
+                        }
+                    }
+                }
+            }
+
+            if (modified) {
+                editor.apply()
+                return true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return false
+    }
+
     fun exportPaymentInvoicesToExcel(
         context: Context,
         invoices: List<com.example.data.PaymentInvoice>
@@ -3824,6 +3946,33 @@ object Exporter {
                 alignment = HorizontalAlignment.CENTER
             }
 
+            // 1. Business Profile Sheet
+            val prefs = context.getSharedPreferences("snackroute_prefs", Context.MODE_PRIVATE)
+            val companyName = prefs.getString("business_company_name", "") ?: ""
+            val brandName = prefs.getString("business_brand_name", "") ?: ""
+            val companyAddress = prefs.getString("business_company_address", "") ?: ""
+            val companyPhone = prefs.getString("business_company_phone", "") ?: ""
+            val fssaiNumber = prefs.getString("business_fssai_number", "") ?: ""
+
+            val profileSheet = workbook.createSheet("Business Profile")
+            val profileHeaders = listOf("Company Name", "Brand Name", "Address", "Phone Number", "FSSAI License Number")
+            val profileHeaderRow = profileSheet.createRow(0)
+            for (i in profileHeaders.indices) {
+                val cell = profileHeaderRow.createCell(i)
+                cell.setCellValue(profileHeaders[i])
+                cell.cellStyle = headerStyle
+            }
+            val profileRow = profileSheet.createRow(1)
+            profileRow.createCell(0).setCellValue(companyName)
+            profileRow.createCell(1).setCellValue(brandName)
+            profileRow.createCell(2).setCellValue(companyAddress)
+            profileRow.createCell(3).setCellValue(companyPhone)
+            profileRow.createCell(4).setCellValue(fssaiNumber)
+            for (i in profileHeaders.indices) {
+                profileSheet.setColumnWidth(i, 6500)
+            }
+
+            // 2. Invoices Sheet
             val invoicesSheet = workbook.createSheet("Payment Invoices")
             val invoicesHeaders = listOf(
                 "Invoice Number", "Invoice Date", "Shop Number", "Shop Name", "Location Number",

@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -15,12 +16,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -52,11 +56,13 @@ fun PaymentInvoicesScreen(
     val allInvoices by viewModel.allInvoices.collectAsStateWithLifecycle()
     val allShops by viewModel.shops.collectAsStateWithLifecycle()
     val allSales by viewModel.sales.collectAsStateWithLifecycle()
+    val businessProfile by viewModel.businessProfile.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedStatusFilter by remember { mutableStateOf("ALL") } // ALL, UNPAID, PARTIALLY PAID, PAID
 
     var showCreateEditDialog by remember { mutableStateOf(false) }
+    var showBusinessProfileDialog by remember { mutableStateOf(false) }
     var invoiceToEdit by remember { mutableStateOf<PaymentInvoice?>(null) }
     var viewingInvoice by remember { mutableStateOf<PaymentInvoice?>(null) }
     var invoiceToDelete by remember { mutableStateOf<PaymentInvoice?>(null) }
@@ -118,6 +124,16 @@ fun PaymentInvoicesScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = { showBusinessProfileDialog = true },
+                        modifier = Modifier.testTag("btn_top_business_profile")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Storefront,
+                            contentDescription = "Company Profile & FSSAI",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
                         onClick = { viewModel.exportPaymentInvoicesToExcel(context) },
                         modifier = Modifier.testTag("export_invoices_excel_button")
                     ) {
@@ -153,6 +169,14 @@ fun PaymentInvoicesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 88.dp, top = 8.dp)
         ) {
+            // --- Business Profile Banner Card ---
+            item {
+                BusinessProfileHeaderCard(
+                    profile = businessProfile,
+                    onEditClick = { showBusinessProfileDialog = true }
+                )
+            }
+
             // --- Summary Cards Row ---
             item {
                 Card(
@@ -326,6 +350,18 @@ fun PaymentInvoicesScreen(
         }
     }
 
+    // --- Business Profile Dialog ---
+    if (showBusinessProfileDialog) {
+        BusinessProfileDialog(
+            currentProfile = businessProfile,
+            onDismiss = { showBusinessProfileDialog = false },
+            onSave = { company, brand, addr, phone, fssai ->
+                viewModel.saveBusinessProfile(company, brand, addr, phone, fssai)
+                showBusinessProfileDialog = false
+            }
+        )
+    }
+
     // --- Create / Edit Dialog ---
     if (showCreateEditDialog) {
         CreateEditInvoiceDialog(
@@ -351,6 +387,7 @@ fun PaymentInvoicesScreen(
         InvoiceDetailDialog(
             invoice = viewingInvoice!!,
             allSales = allSales,
+            businessProfile = businessProfile,
             onDismiss = { viewingInvoice = null },
             onShare = {
                 viewModel.sharePaymentInvoice(context, viewingInvoice!!, allSales)
@@ -360,6 +397,9 @@ fun PaymentInvoicesScreen(
                 viewingInvoice = null
                 invoiceToEdit = inv
                 showCreateEditDialog = true
+            },
+            onEditBusinessProfile = {
+                showBusinessProfileDialog = true
             }
         )
     }
@@ -697,6 +737,7 @@ private fun CreateEditInvoiceDialog(
 ) {
     val context = LocalContext.current
     val isEditMode = invoiceToEdit != null
+    val sdfDayKey = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
 
     // Shop Selection
     var selectedShop by remember {
@@ -710,34 +751,14 @@ private fun CreateEditInvoiceDialog(
             }
         )
     }
-    var shopDropdownExpanded by remember { mutableStateOf(false) }
-    var shopSearchText by remember { mutableStateOf("") }
+    var isShopSelectionDialogOpen by remember { mutableStateOf(false) }
 
-    // Date
+    // Invoice Date - Defaults to Today
     var invoiceDateTimestamp by remember {
         mutableStateOf(invoiceToEdit?.invoiceDate ?: System.currentTimeMillis())
     }
     val formattedInvoiceDate = remember(invoiceDateTimestamp) {
         SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date(invoiceDateTimestamp))
-    }
-
-    // Selected Sales IDs
-    val selectedSalesIds = remember {
-        mutableStateListOf<Int>().apply {
-            if (isEditMode) {
-                addAll(invoiceToEdit!!.salesEntryIds)
-            }
-        }
-    }
-
-    // Amount Paid & Notes
-    var paidAmountText by remember {
-        mutableStateOf(
-            if (isEditMode && invoiceToEdit!!.paidAmount > 0) invoiceToEdit.paidAmount.toString() else "0"
-        )
-    }
-    var notesText by remember {
-        mutableStateOf(invoiceToEdit?.notes ?: "")
     }
 
     // Invoiced Sales filter for DUPLICATE PREVENTION:
@@ -750,6 +771,73 @@ private fun CreateEditInvoiceDialog(
     val availableSalesForShop = remember(selectedShop, allSales) {
         if (selectedShop == null) emptyList()
         else allSales.filter { it.shopNumber == selectedShop!!.shopNumber }
+    }
+
+    // Group available sales by date key (yyyy-MM-dd)
+    val salesByDay = remember(availableSalesForShop) {
+        availableSalesForShop.groupBy { sdfDayKey.format(Date(it.entryDate)) }
+    }
+
+    // Selected Sale Date Key (e.g., "2026-07-26")
+    var selectedSaleDateKey by remember(selectedShop) {
+        mutableStateOf(
+            if (isEditMode && invoiceToEdit != null) {
+                val firstSale = allSales.find { it.id in invoiceToEdit.salesEntryIds }
+                if (firstSale != null) sdfDayKey.format(Date(firstSale.entryDate))
+                else salesByDay.keys.maxOrNull()
+            } else {
+                // Default to latest sales date for this shop
+                salesByDay.keys.maxOrNull()
+            }
+        )
+    }
+
+    // Selected Sales IDs for the invoice
+    val selectedSalesIds = remember {
+        mutableStateListOf<Int>().apply {
+            if (isEditMode) {
+                addAll(invoiceToEdit!!.salesEntryIds)
+            } else if (selectedSaleDateKey != null) {
+                val salesOnDay = salesByDay[selectedSaleDateKey] ?: emptyList()
+                val validIds = salesOnDay
+                    .filter { it.id !in alreadyInvoicedSalesIds }
+                    .map { it.id }
+                addAll(validIds)
+            }
+        }
+    }
+
+    // Amount Paid & Notes
+    var paidAmountText by remember {
+        mutableStateOf(
+            if (isEditMode && invoiceToEdit!!.paidAmount > 0) {
+                invoiceToEdit.paidAmount.toString()
+            } else if (selectedSaleDateKey != null) {
+                val salesOnDay = salesByDay[selectedSaleDateKey] ?: emptyList()
+                val totalPaid = salesOnDay.filter { it.id in selectedSalesIds }.sumOf { it.actualPaidAmount }
+                if (totalPaid > 0) "%.2f".format(totalPaid) else "0"
+            } else {
+                "0"
+            }
+        )
+    }
+    var notesText by remember {
+        mutableStateOf(invoiceToEdit?.notes ?: "")
+    }
+
+    // Update sales selection and paid amount when sale date is picked
+    fun onSelectSaleDate(dateKey: String) {
+        selectedSaleDateKey = dateKey
+        val salesOnDay = salesByDay[dateKey] ?: emptyList()
+        val validIds = salesOnDay
+            .filter { it.id !in alreadyInvoicedSalesIds || (isEditMode && it.id in (invoiceToEdit?.salesEntryIds ?: emptyList())) }
+            .map { it.id }
+        selectedSalesIds.clear()
+        selectedSalesIds.addAll(validIds)
+
+        // Automatically pre-fill the verified paid amount from the sales entries of that date
+        val totalRecordedPaid = salesOnDay.filter { it.id in validIds }.sumOf { it.actualPaidAmount }
+        paidAmountText = if (totalRecordedPaid > 0) "%.2f".format(totalRecordedPaid) else "0"
     }
 
     // Live calculation of total from selected sales
@@ -766,13 +854,42 @@ private fun CreateEditInvoiceDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isSaving by remember { mutableStateOf(false) }
 
+    if (isShopSelectionDialogOpen) {
+        SearchableShopPickerDialog(
+            shops = allShops,
+            selectedShopNumber = selectedShop?.shopNumber,
+            onShopSelected = { shop ->
+                if (selectedShop?.shopNumber != shop.shopNumber) {
+                    selectedShop = shop
+                    selectedSalesIds.clear()
+                    val shopSales = allSales.filter { it.shopNumber == shop.shopNumber }
+                    val shopSalesByDay = shopSales.groupBy { sdfDayKey.format(Date(it.entryDate)) }
+                    val latestDateKey = shopSalesByDay.keys.maxOrNull()
+                    selectedSaleDateKey = latestDateKey
+                    if (latestDateKey != null) {
+                        val validIds = (shopSalesByDay[latestDateKey] ?: emptyList())
+                            .filter { it.id !in alreadyInvoicedSalesIds }
+                            .map { it.id }
+                        selectedSalesIds.addAll(validIds)
+                        val totalRecordedPaid = (shopSalesByDay[latestDateKey] ?: emptyList())
+                            .filter { it.id in validIds }
+                            .sumOf { it.actualPaidAmount }
+                        paidAmountText = if (totalRecordedPaid > 0) "%.2f".format(totalRecordedPaid) else "0"
+                    }
+                }
+                isShopSelectionDialogOpen = false
+            },
+            onDismiss = { isShopSelectionDialogOpen = false }
+        )
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .fillMaxHeight(0.94f)
                 .testTag("create_edit_invoice_dialog")
         ) {
             Column(
@@ -792,13 +909,39 @@ private fun CreateEditInvoiceDialog(
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        if (isEditMode) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Text(
-                                text = invoiceToEdit!!.invoiceNumber,
+                                text = "Invoice Date: $formattedInvoiceDate",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
                             )
+                            TextButton(
+                                onClick = {
+                                    val cal = Calendar.getInstance().apply { timeInMillis = invoiceDateTimestamp }
+                                    DatePickerDialog(
+                                        context,
+                                        { _, year, month, dayOfMonth ->
+                                            val selectedCal = Calendar.getInstance().apply {
+                                                set(Calendar.YEAR, year)
+                                                set(Calendar.MONTH, month)
+                                                set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                                            }
+                                            invoiceDateTimestamp = selectedCal.timeInMillis
+                                        },
+                                        cal.get(Calendar.YEAR),
+                                        cal.get(Calendar.MONTH),
+                                        cal.get(Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
+                                Text("Edit Date", fontSize = 11.sp)
+                            }
                         }
                     }
                     IconButton(onClick = onDismiss) {
@@ -806,7 +949,7 @@ private fun CreateEditInvoiceDialog(
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
 
                 Column(
                     modifier = Modifier
@@ -822,301 +965,341 @@ private fun CreateEditInvoiceDialog(
                             fontWeight = FontWeight.Bold
                         )
 
-                        ExposedDropdownMenuBox(
-                            expanded = shopDropdownExpanded,
-                            onExpandedChange = { shopDropdownExpanded = it }
-                        ) {
-                            OutlinedTextField(
-                                value = selectedShop?.let { "${it.storeName} (${it.shopNumber})" } ?: "",
-                                onValueChange = {},
-                                readOnly = true,
-                                placeholder = { Text("Choose shop from Shop Master") },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = shopDropdownExpanded) },
-                                leadingIcon = { Icon(Icons.Default.Storefront, contentDescription = null) },
+                        if (selectedShop == null) {
+                            OutlinedCard(
+                                onClick = { isShopSelectionDialogOpen = true },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .menuAnchor()
                                     .testTag("invoice_shop_selector"),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-
-                            ExposedDropdownMenu(
-                                expanded = shopDropdownExpanded,
-                                onDismissRequest = { shopDropdownExpanded = false }
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.outlinedCardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                )
                             ) {
-                                OutlinedTextField(
-                                    value = shopSearchText,
-                                    onValueChange = { shopSearchText = it },
-                                    placeholder = { Text("Search shop...") },
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(8.dp),
-                                    singleLine = true
-                                )
-                                val filteredShopList = allShops.filter {
-                                    shopSearchText.isBlank() ||
-                                            it.storeName.contains(shopSearchText, ignoreCase = true) ||
-                                            it.shopNumber.contains(shopSearchText, ignoreCase = true) ||
-                                            it.locationNumber.contains(shopSearchText, ignoreCase = true)
-                                }
-                                if (filteredShopList.isEmpty()) {
-                                    DropdownMenuItem(
-                                        text = { Text("No shops found") },
-                                        onClick = {}
-                                    )
-                                } else {
-                                    filteredShopList.forEach { shop ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Column {
-                                                    Text(shop.storeName, fontWeight = FontWeight.Bold)
-                                                    Text(
-                                                        "ID: ${shop.shopNumber} • Loc: ${shop.locationNumber}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            },
-                                            onClick = {
-                                                if (selectedShop?.shopNumber != shop.shopNumber) {
-                                                    selectedShop = shop
-                                                    selectedSalesIds.clear()
-                                                }
-                                                shopDropdownExpanded = false
-                                            }
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
                                         )
+                                        Column {
+                                            Text(
+                                                text = "Search and select shop",
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = "Tap to search by name, ID or route",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        } else {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("invoice_selected_shop_card"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                ),
+                                border = CardDefaults.outlinedCardBorder()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Storefront,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        Column {
+                                            Text(
+                                                text = selectedShop!!.storeName,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Shop ID: ${selectedShop!!.shopNumber}  •  Route: ${selectedShop!!.locationNumber}",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    OutlinedButton(
+                                        onClick = { isShopSelectionDialogOpen = true },
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.testTag("btn_change_selected_shop")
+                                    ) {
+                                        Text("Change", fontSize = 12.sp)
                                     }
                                 }
                             }
                         }
+                    }
 
-                        // Auto-populated shop details
-                        if (selectedShop != null) {
+                    // Step 2: Select Sale Date (Monthly Sales Calendar)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "2. Select Sale Date *",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        if (selectedShop == null) {
                             Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(
-                                        text = "Shop: ${selectedShop!!.storeName}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.SemiBold
+                                    Icon(
+                                        Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
                                     )
                                     Text(
-                                        text = "Location: ${selectedShop!!.locationNumber}",
+                                        text = "Please select a shop first to view its sales dates on the calendar.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                        }
-                    }
-
-                    // Step 2: Invoice Date
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "2. Invoice Date",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        OutlinedCard(
-                            onClick = {
-                                val cal = Calendar.getInstance().apply { timeInMillis = invoiceDateTimestamp }
-                                DatePickerDialog(
-                                    context,
-                                    { _, year, month, dayOfMonth ->
-                                        val selectedCal = Calendar.getInstance().apply {
-                                            set(Calendar.YEAR, year)
-                                            set(Calendar.MONTH, month)
-                                            set(Calendar.DAY_OF_MONTH, dayOfMonth)
-                                        }
-                                        invoiceDateTimestamp = selectedCal.timeInMillis
-                                    },
-                                    cal.get(Calendar.YEAR),
-                                    cal.get(Calendar.MONTH),
-                                    cal.get(Calendar.DAY_OF_MONTH)
-                                ).show()
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.CalendarToday,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = formattedInvoiceDate,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                Text(
-                                    text = "Change",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-
-                    // Step 3: Select Sales Records (with Duplicate Prevention)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "3. Select Sales Records *",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (availableSalesForShop.isNotEmpty()) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton(
-                                        onClick = {
-                                            val validIds = availableSalesForShop
-                                                .filter { it.id !in alreadyInvoicedSalesIds || it.id in selectedSalesIds }
-                                                .map { it.id }
-                                            selectedSalesIds.clear()
-                                            selectedSalesIds.addAll(validIds)
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 6.dp)
-                                    ) {
-                                        Text("Select All", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    TextButton(
-                                        onClick = { selectedSalesIds.clear() },
-                                        contentPadding = PaddingValues(horizontal = 6.dp)
-                                    ) {
-                                        Text("Clear", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-                        }
-
-                        if (selectedShop == null) {
-                            Text(
-                                text = "Please select a shop above to view and attach sales records.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         } else if (availableSalesForShop.isEmpty()) {
                             Surface(
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = "No sales records found for this shop in Sales Master.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                Column(
                                     modifier = Modifier.padding(16.dp),
-                                    textAlign = TextAlign.Center
-                                )
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.EventBusy,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Text(
+                                        text = "No sales records found for ${selectedShop!!.storeName} in Sales Master.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
                             }
                         } else {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                availableSalesForShop.forEach { sale ->
-                                    val isAlreadyInvoicedElsewhere = sale.id in alreadyInvoicedSalesIds && (!isEditMode || sale.id !in (invoiceToEdit?.salesEntryIds ?: emptyList()))
-                                    val isChecked = sale.id in selectedSalesIds
-                                    val rate = sale.customSellingPrice ?: sale.ratePerPacket
+                            // Monthly Sales Calendar
+                            ShopSalesMonthlyCalendar(
+                                sales = availableSalesForShop,
+                                selectedDateKey = selectedSaleDateKey,
+                                onDateSelected = { dateKey, _ ->
+                                    onSelectSaleDate(dateKey)
+                                }
+                            )
+                        }
+                    }
 
-                                    Card(
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                                            else if (isAlreadyInvoicedElsewhere) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                                        ),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable(enabled = !isAlreadyInvoicedElsewhere) {
-                                                if (isChecked) {
-                                                    selectedSalesIds.remove(sale.id)
-                                                } else {
-                                                    selectedSalesIds.add(sale.id)
-                                                }
-                                            }
-                                            .testTag("invoice_sale_item_${sale.id}")
-                                    ) {
-                                        Row(
+                    // Step 3: Verified Sales on Selected Date & Payment Status
+                    if (selectedShop != null && selectedSaleDateKey != null) {
+                        val salesOnSelectedDate = salesByDay[selectedSaleDateKey] ?: emptyList()
+                        val formattedSelectedDay = try {
+                            val parsedDate = sdfDayKey.parse(selectedSaleDateKey!!)
+                            if (parsedDate != null) SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(parsedDate)
+                            else selectedSaleDateKey!!
+                        } catch (_: Exception) {
+                            selectedSaleDateKey!!
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "3. Verified Sales on $formattedSelectedDay",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "${salesOnSelectedDate.size} product sale${if (salesOnSelectedDate.size != 1) "s" else ""} found",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                if (salesOnSelectedDate.isNotEmpty()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TextButton(
+                                            onClick = {
+                                                val validIds = salesOnSelectedDate
+                                                    .filter { it.id !in alreadyInvoicedSalesIds || it.id in selectedSalesIds }
+                                                    .map { it.id }
+                                                selectedSalesIds.clear()
+                                                selectedSalesIds.addAll(validIds)
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 6.dp)
+                                        ) {
+                                            Text("Select All", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                        TextButton(
+                                            onClick = { selectedSalesIds.clear() },
+                                            contentPadding = PaddingValues(horizontal = 6.dp)
+                                        ) {
+                                            Text("Clear", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (salesOnSelectedDate.isEmpty()) {
+                                Text(
+                                    text = "No sales recorded on this date.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    salesOnSelectedDate.forEach { sale ->
+                                        val isAlreadyInvoicedElsewhere = sale.id in alreadyInvoicedSalesIds && (!isEditMode || sale.id !in (invoiceToEdit?.salesEntryIds ?: emptyList()))
+                                        val isChecked = sale.id in selectedSalesIds
+                                        val rate = sale.customSellingPrice ?: sale.ratePerPacket
+
+                                        Card(
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                                else if (isAlreadyInvoicedElsewhere) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                            ),
+                                            border = if (isChecked) CardDefaults.outlinedCardBorder() else null,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            Checkbox(
-                                                checked = isChecked,
-                                                onCheckedChange = { checked ->
-                                                    if (checked) selectedSalesIds.add(sale.id)
-                                                    else selectedSalesIds.remove(sale.id)
-                                                },
-                                                enabled = !isAlreadyInvoicedElsewhere,
-                                                modifier = Modifier.testTag("checkbox_sale_${sale.id}")
-                                            )
-
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Text(
-                                                        text = sale.productName,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = "₹${"%.2f".format(sale.totalAmount)}",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.primary
-                                                    )
+                                                .clickable(enabled = !isAlreadyInvoicedElsewhere) {
+                                                    if (isChecked) {
+                                                        selectedSalesIds.remove(sale.id)
+                                                    } else {
+                                                        selectedSalesIds.add(sale.id)
+                                                    }
                                                 }
+                                                .testTag("invoice_sale_item_${sale.id}")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Checkbox(
+                                                    checked = isChecked,
+                                                    onCheckedChange = { checked ->
+                                                        if (checked) selectedSalesIds.add(sale.id)
+                                                        else selectedSalesIds.remove(sale.id)
+                                                    },
+                                                    enabled = !isAlreadyInvoicedElsewhere,
+                                                    modifier = Modifier.testTag("checkbox_sale_${sale.id}")
+                                                )
 
-                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = sale.productName,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = "₹${"%.2f".format(sale.totalAmount)}",
+                                                            style = MaterialTheme.typography.titleSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
 
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+
                                                     Text(
-                                                        text = "Date: ${sale.entryDateFormatted} • Pkts: ${sale.packetsSold} @ ₹${"%.2f".format(rate)}",
+                                                        text = "Packets: ${sale.packetsSold} sold @ ₹${"%.2f".format(rate)}",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
-                                                }
 
-                                                if (isAlreadyInvoicedElsewhere) {
-                                                    Text(
-                                                        text = "Already attached to another active invoice",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = Color(0xFFC62828),
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                                    // Payment Status of this Sale Entry
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        SaleEntryStatusChip(sale = sale)
+
+                                                        if (isAlreadyInvoicedElsewhere) {
+                                                            Text(
+                                                                text = "Already in another invoice",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = Color(0xFFC62828),
+                                                                fontWeight = FontWeight.SemiBold
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -1126,10 +1309,10 @@ private fun CreateEditInvoiceDialog(
                         }
                     }
 
-                    // Step 4: Amount Summary & Paid Entry
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Step 4: Amount Summary & Invoice Generation
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "4. Amount Summary & Payment",
+                            text = "4. Payment Summary",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
@@ -1147,9 +1330,10 @@ private fun CreateEditInvoiceDialog(
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Total Invoice Amount:", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Total Sale Amount:", style = MaterialTheme.typography.bodyMedium)
                                     Text(
                                         "₹${"%.2f".format(calculatedTotalAmount)}",
                                         style = MaterialTheme.typography.titleMedium,
@@ -1162,7 +1346,7 @@ private fun CreateEditInvoiceDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Payment Status:", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Invoice Status:", style = MaterialTheme.typography.bodyMedium)
                                     InvoiceStatusBadge(status = calculatedStatus)
                                 }
                             }
@@ -1212,12 +1396,12 @@ private fun CreateEditInvoiceDialog(
                             value = notesText,
                             onValueChange = { notesText = it },
                             label = { Text("Remarks / Notes (Optional)") },
-                            placeholder = { Text("Add any note or payment reference...") },
+                            placeholder = { Text("Add payment mode, reference or remarks...") },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("invoice_notes_input"),
-                            maxLines = 3
+                            maxLines = 2
                         )
                     }
 
@@ -1231,7 +1415,7 @@ private fun CreateEditInvoiceDialog(
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
 
                 // Bottom Dialog Buttons
                 Row(
@@ -1250,7 +1434,7 @@ private fun CreateEditInvoiceDialog(
                                 return@Button
                             }
                             if (selectedSalesIds.isEmpty()) {
-                                errorMessage = "Please select at least one sales record"
+                                errorMessage = "Please select at least one sales record from the verified date"
                                 return@Button
                             }
 
@@ -1287,9 +1471,354 @@ private fun CreateEditInvoiceDialog(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text(if (isEditMode) "Update Invoice" else "Create Invoice")
+                            Text(if (isEditMode) "Update Invoice" else "Generate Invoice")
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaleEntryStatusChip(sale: SalesEntry) {
+    val (bg, textColor, label) = when (sale.status) {
+        "Paid" -> Triple(
+            Color(0xFFE8F5E9),
+            Color(0xFF2E7D32),
+            "Paid (₹${"%.2f".format(sale.actualPaidAmount)})"
+        )
+        "Partially Paid" -> Triple(
+            Color(0xFFFFF3E0),
+            Color(0xFFE65100),
+            "Partial (Paid: ₹${"%.2f".format(sale.actualPaidAmount)} • Due: ₹${"%.2f".format(sale.pendingBalanceAmount)})"
+        )
+        else -> Triple(
+            Color(0xFFFFEBEE),
+            Color(0xFFC62828),
+            "Pending Due (₹${"%.2f".format(sale.totalAmount)})"
+        )
+    }
+
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = bg
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(textColor, CircleShape)
+            )
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = textColor
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShopSalesMonthlyCalendar(
+    sales: List<SalesEntry>,
+    selectedDateKey: String?,
+    onDateSelected: (dateKey: String, dateMillis: Long) -> Unit
+) {
+    val sdfKey = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val monthTitleFmt = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
+    val chipDateFmt = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+
+    // Group sales by yyyy-MM-dd
+    val salesByDay = remember(sales) {
+        sales.groupBy { sdfKey.format(Date(it.entryDate)) }
+    }
+    val uniqueDates = remember(salesByDay) {
+        salesByDay.keys.sortedDescending()
+    }
+
+    // Default viewed month & year
+    val initialCal = remember(selectedDateKey, uniqueDates) {
+        val cal = Calendar.getInstance()
+        val targetKey = selectedDateKey ?: uniqueDates.firstOrNull()
+        if (targetKey != null) {
+            try {
+                val parsed = sdfKey.parse(targetKey)
+                if (parsed != null) {
+                    cal.time = parsed
+                }
+            } catch (_: Exception) {}
+        }
+        cal
+    }
+
+    var viewedYear by remember(selectedDateKey) { mutableIntStateOf(initialCal.get(Calendar.YEAR)) }
+    var viewedMonth by remember(selectedDateKey) { mutableIntStateOf(initialCal.get(Calendar.MONTH)) }
+
+    val viewedCal = remember(viewedYear, viewedMonth) {
+        Calendar.getInstance().apply {
+            set(Calendar.YEAR, viewedYear)
+            set(Calendar.MONTH, viewedMonth)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }
+    }
+
+    val daysInMonth = viewedCal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val firstDayOfWeek = viewedCal.get(Calendar.DAY_OF_WEEK) // 1 = Sunday
+    val prevMonthPadding = firstDayOfWeek - Calendar.SUNDAY
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        ),
+        border = CardDefaults.outlinedCardBorder(),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Quick Date Chips
+            if (uniqueDates.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Quick Select Sale Dates (${uniqueDates.size} dates with sales):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(uniqueDates) { dateKey ->
+                            val isSelected = dateKey == selectedDateKey
+                            val itemsOnDate = salesByDay[dateKey] ?: emptyList()
+                            val totalAmountOnDate = itemsOnDate.sumOf { it.totalAmount }
+                            val chipLabel = try {
+                                val d = sdfKey.parse(dateKey)
+                                if (d != null) chipDateFmt.format(d) else dateKey
+                            } catch (_: Exception) {
+                                dateKey
+                            }
+
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    try {
+                                        val d = sdfKey.parse(dateKey)
+                                        if (d != null) {
+                                            val c = Calendar.getInstance().apply { time = d }
+                                            viewedYear = c.get(Calendar.YEAR)
+                                            viewedMonth = c.get(Calendar.MONTH)
+                                            onDateSelected(dateKey, d.time)
+                                        }
+                                    } catch (_: Exception) {
+                                        onDateSelected(dateKey, System.currentTimeMillis())
+                                    }
+                                },
+                                label = {
+                                    Text(
+                                        text = "$chipLabel (${itemsOnDate.size} • ₹${"%.0f".format(totalAmountOnDate)})",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                } else null
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Month Navigation Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        if (viewedMonth == 0) {
+                            viewedMonth = 11
+                            viewedYear -= 1
+                        } else {
+                            viewedMonth -= 1
+                        }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous Month")
+                }
+
+                Text(
+                    text = monthTitleFmt.format(viewedCal.time),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+
+                IconButton(
+                    onClick = {
+                        if (viewedMonth == 11) {
+                            viewedMonth = 0
+                            viewedYear += 1
+                        } else {
+                            viewedMonth += 1
+                        }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next Month")
+                }
+            }
+
+            // Day of Week Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa").forEach { dayLabel ->
+                    Text(
+                        text = dayLabel,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // Calendar Days Grid (Rows of 7 days)
+            val totalSlots = prevMonthPadding + daysInMonth
+            val totalRows = (totalSlots + 6) / 7
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                for (row in 0 until totalRows) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        for (col in 0 until 7) {
+                            val slotIndex = row * 7 + col
+                            val dayNumber = slotIndex - prevMonthPadding + 1
+
+                            if (dayNumber in 1..daysInMonth) {
+                                val dayKey = String.format(Locale.US, "%04d-%02d-%02d", viewedYear, viewedMonth + 1, dayNumber)
+                                val salesOnThisDay = salesByDay[dayKey] ?: emptyList()
+                                val hasSales = salesOnThisDay.isNotEmpty()
+                                val isSelected = dayKey == selectedDateKey
+
+                                val dayCal = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, viewedYear)
+                                    set(Calendar.MONTH, viewedMonth)
+                                    set(Calendar.DAY_OF_MONTH, dayNumber)
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .padding(2.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            when {
+                                                isSelected -> MaterialTheme.colorScheme.primary
+                                                hasSales -> MaterialTheme.colorScheme.primaryContainer
+                                                else -> Color.Transparent
+                                            }
+                                        )
+                                        .border(
+                                            width = if (hasSales && !isSelected) 1.dp else 0.dp,
+                                            color = if (hasSales && !isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else Color.Transparent,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            onDateSelected(dayKey, dayCal.timeInMillis)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = "$dayNumber",
+                                            fontSize = 12.sp,
+                                            fontWeight = if (hasSales || isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = when {
+                                                isSelected -> MaterialTheme.colorScheme.onPrimary
+                                                hasSales -> MaterialTheme.colorScheme.onPrimaryContainer
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+                                        if (hasSales) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .background(
+                                                        if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                                        CircleShape
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Empty padding slot
+                                Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Legend / Info
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(2.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
+                    )
+                    Text("Days with sales", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                if (selectedDateKey != null) {
+                    val count = (salesByDay[selectedDateKey] ?: emptyList()).size
+                    Text(
+                        text = "Selected: $count sale item${if (count != 1) "s" else ""}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
@@ -1300,9 +1829,11 @@ private fun CreateEditInvoiceDialog(
 private fun InvoiceDetailDialog(
     invoice: PaymentInvoice,
     allSales: List<SalesEntry>,
+    businessProfile: AppViewModel.BusinessProfile,
     onDismiss: () -> Unit,
     onShare: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onEditBusinessProfile: () -> Unit
 ) {
     val invoiceSales = remember(invoice, allSales) {
         allSales.filter { it.id in invoice.salesEntryIds }
@@ -1314,7 +1845,7 @@ private fun InvoiceDetailDialog(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.9f)
+                .fillMaxHeight(0.92f)
                 .testTag("invoice_detail_dialog")
         ) {
             Column(
@@ -1352,8 +1883,123 @@ private fun InvoiceDetailDialog(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // Company & Branding Section
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (businessProfile.brandName.isNotBlank()) businessProfile.brandName.uppercase() else "SNACKROUTE",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                IconButton(
+                                    onClick = onEditBusinessProfile,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Business Details",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            if (businessProfile.companyName.isNotBlank()) {
+                                Text(
+                                    text = businessProfile.companyName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            if (businessProfile.address.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = businessProfile.address,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            if (businessProfile.phoneNumber.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Phone,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Phone: ${businessProfile.phoneNumber}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            if (businessProfile.fssaiNumber.isNotBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                    modifier = Modifier.padding(top = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Verified,
+                                            contentDescription = "FSSAI Verified",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = "FSSAI Lic. No: ${businessProfile.fssaiNumber}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Top Info Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1598,3 +2244,539 @@ private fun InvoiceDetailDialog(
         }
     }
 }
+
+@Composable
+fun BusinessProfileHeaderCard(
+    profile: AppViewModel.BusinessProfile,
+    onEditClick: () -> Unit
+) {
+    val isConfigured = profile.companyName.isNotBlank() || profile.brandName.isNotBlank() || profile.fssaiNumber.isNotBlank()
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isConfigured) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (isConfigured) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("business_profile_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Business,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Business / Company Profile",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                FilledTonalButton(
+                    onClick = onEditClick,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier
+                        .height(30.dp)
+                        .testTag("btn_edit_profile_header")
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (isConfigured) "Edit" else "Setup", fontSize = 12.sp)
+                }
+            }
+
+            if (!isConfigured) {
+                Text(
+                    text = "Add your Company Name, Brand, Address, Phone & FSSAI License Number. These will automatically appear on all payment invoices, shareable slips, and unified Excel backups.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                if (profile.brandName.isNotBlank()) {
+                    Text(
+                        text = profile.brandName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+                if (profile.companyName.isNotBlank()) {
+                    Text(
+                        text = profile.companyName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                if (profile.address.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = profile.address,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (profile.phoneNumber.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Phone,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = profile.phoneNumber,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (profile.fssaiNumber.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Verified,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "FSSAI Lic No: ${profile.fssaiNumber}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BusinessProfileDialog(
+    currentProfile: AppViewModel.BusinessProfile,
+    onDismiss: () -> Unit,
+    onSave: (companyName: String, brandName: String, address: String, phone: String, fssai: String) -> Unit
+) {
+    var companyName by remember(currentProfile) { mutableStateOf(currentProfile.companyName) }
+    var brandName by remember(currentProfile) { mutableStateOf(currentProfile.brandName) }
+    var address by remember(currentProfile) { mutableStateOf(currentProfile.address) }
+    var phoneNumber by remember(currentProfile) { mutableStateOf(currentProfile.phoneNumber) }
+    var fssaiNumber by remember(currentProfile) { mutableStateOf(currentProfile.fssaiNumber) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("business_profile_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Business,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Company & Brand Details",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Text(
+                    text = "Enter your details once. They will automatically be included on all payment invoices, shareable receipts, and unified Excel backups (import & export).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Brand Name
+                OutlinedTextField(
+                    value = brandName,
+                    onValueChange = { brandName = it },
+                    label = { Text("Brand Name") },
+                    placeholder = { Text("e.g. CrispyKing / SnackRoute") },
+                    leadingIcon = { Icon(Icons.Default.Storefront, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_brand_name"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Company Name
+                OutlinedTextField(
+                    value = companyName,
+                    onValueChange = { companyName = it },
+                    label = { Text("Company / Firm Name") },
+                    placeholder = { Text("e.g. Sri Lakshmi Foods Pvt Ltd") },
+                    leadingIcon = { Icon(Icons.Default.Business, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_company_name"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Phone Number
+                OutlinedTextField(
+                    value = phoneNumber,
+                    onValueChange = { phoneNumber = it },
+                    label = { Text("Phone Number") },
+                    placeholder = { Text("e.g. +91 9876543210") },
+                    leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_company_phone"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Address
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Address") },
+                    placeholder = { Text("e.g. 12/4 Market Road, Salem, Tamil Nadu - 636001") },
+                    leadingIcon = { Icon(Icons.Default.LocationOn, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_company_address"),
+                    minLines = 2,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // FSSAI License Number
+                OutlinedTextField(
+                    value = fssaiNumber,
+                    onValueChange = { fssaiNumber = it },
+                    label = { Text("FSSAI License Number") },
+                    placeholder = { Text("e.g. 12423004000123") },
+                    leadingIcon = { Icon(Icons.Default.Verified, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_fssai_license"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            onSave(companyName, brandName, address, phoneNumber, fssaiNumber)
+                        },
+                        modifier = Modifier.testTag("btn_save_business_profile")
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Details")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SearchableShopPickerDialog(
+    shops: List<ShopMaster>,
+    selectedShopNumber: String?,
+    onShopSelected: (ShopMaster) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        try {
+            focusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Storefront,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("Select Shop", fontWeight = FontWeight.Bold)
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search shop name, ID or route...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .testTag("dialog_search_shop_input"),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                val filteredShops = remember(shops, searchQuery) {
+                    if (searchQuery.isBlank()) {
+                        shops
+                    } else {
+                        val q = searchQuery.trim().lowercase(Locale.getDefault())
+                        shops.filter { s ->
+                            s.storeName.lowercase(Locale.getDefault()).contains(q) ||
+                            s.shopNumber.lowercase(Locale.getDefault()).contains(q) ||
+                            s.locationNumber.lowercase(Locale.getDefault()).contains(q)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (searchQuery.isNotBlank()) {
+                            "Showing ${filteredShops.size} matching shop${if (filteredShops.size != 1) "s" else ""}"
+                        } else {
+                            "Total ${shops.size} shops (type to search)"
+                        },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                if (filteredShops.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SearchOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(36.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                            Text(
+                                "No shops match \"$searchQuery\"",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filteredShops, key = { it.shopNumber }) { shop ->
+                            val isSelected = shop.shopNumber == selectedShopNumber
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onShopSelected(shop) }
+                                    .testTag("shop_picker_item_${shop.shopNumber}"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected)
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                ),
+                                border = if (isSelected) CardDefaults.outlinedCardBorder() else null
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Storefront,
+                                            contentDescription = null,
+                                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = shop.storeName,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "ID: ${shop.shopNumber}",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "•",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Route / Loc: ${shop.locationNumber}",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
