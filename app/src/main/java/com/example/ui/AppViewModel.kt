@@ -991,6 +991,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sharePaymentInvoice(context: Context, invoice: PaymentInvoice, salesEntries: List<SalesEntry>) {
+        com.example.utils.InvoicePdfGenerator.shareInvoicePdf(
+            context = context,
+            invoice = invoice,
+            salesEntries = salesEntries,
+            profile = _businessProfile.value
+        )
+    }
+
+    fun sharePaymentInvoiceAsText(context: Context, invoice: PaymentInvoice, salesEntries: List<SalesEntry>) {
         val invoiceSales = salesEntries.filter { it.id in invoice.salesEntryIds }
         val profile = _businessProfile.value
         val sb = StringBuilder()

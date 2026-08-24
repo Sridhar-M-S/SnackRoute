@@ -170,6 +170,7 @@ class ExportActivity : ComponentActivity() {
                 type = when (extension) {
                     "zip" -> "application/zip"
                     "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    "pdf" -> "application/pdf"
                     else -> "*/*"
                 }
                 putExtra(Intent.EXTRA_STREAM, uri)

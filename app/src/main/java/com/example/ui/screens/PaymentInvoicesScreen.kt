@@ -633,8 +633,8 @@ private fun InvoiceListItemCard(
                         .testTag("share_invoice_${invoice.invoiceNumber}")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = "Share Invoice",
+                        imageVector = Icons.Default.PictureAsPdf,
+                        contentDescription = "Share PDF Invoice",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
@@ -2235,9 +2235,9 @@ private fun InvoiceDetailDialog(
                         onClick = onShare,
                         modifier = Modifier.testTag("dialog_share_invoice_button")
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Share Invoice")
+                        Text("Share PDF Invoice")
                     }
                 }
             }
