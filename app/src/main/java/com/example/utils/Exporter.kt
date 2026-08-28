@@ -459,8 +459,8 @@ object Exporter {
             val headers = listOf(
                 "Date", "Shop Number", "Shop Name", "Location Number", "Product Name",
                 "Packets Given", "Packets Returned", "Packets Sold", "Rate", "Total Amount",
-                "Profit Per Packet", "Total Profit", "Status", "Remarks",
-                "Original Packet Rate", "Custom Selling Price", "Production Cost Used"
+                "Profit Per Packet", "Total Profit", "Status", "Paid Amount", "Balance Amount", "Remarks",
+                "Original Packet Rate", "Custom Selling Price", "Production Cost Used", "Session ID", "Entry Timestamp"
             )
             val headerRow = sheet.createRow(0)
             for (i in headers.indices) {
@@ -487,17 +487,23 @@ object Exporter {
                 row.createCell(10).setCellValue(safeDouble(sales.profitPerPacket))
                 row.createCell(11).setCellValue(safeDouble(sales.totalProfit))
                 row.createCell(12).setCellValue(sales.status)
-                row.createCell(13).setCellValue(sales.remarks ?: "")
+                
+                val paidVal = sales.paidAmount ?: if (sales.status.equals("Paid", ignoreCase = true)) sales.totalAmount else if (sales.status.equals("Pending", ignoreCase = true)) 0.0 else sales.actualPaidAmount
+                row.createCell(13).setCellValue(safeDouble(paidVal))
+                row.createCell(14).setCellValue(safeDouble(sales.pendingBalanceAmount))
+                row.createCell(15).setCellValue(sales.remarks ?: "")
                 
                 if (sales.originalPacketRate != null) {
-                    row.createCell(14).setCellValue(safeDouble(sales.originalPacketRate))
+                    row.createCell(16).setCellValue(safeDouble(sales.originalPacketRate))
                 }
                 if (sales.customSellingPrice != null) {
-                    row.createCell(15).setCellValue(safeDouble(sales.customSellingPrice))
+                    row.createCell(17).setCellValue(safeDouble(sales.customSellingPrice))
                 }
                 if (sales.productionCostUsed != null) {
-                    row.createCell(16).setCellValue(safeDouble(sales.productionCostUsed))
+                    row.createCell(18).setCellValue(safeDouble(sales.productionCostUsed))
                 }
+                row.createCell(19).setCellValue(sales.sessionId ?: "")
+                row.createCell(20).setCellValue(sales.entryDate.toDouble())
             }
             
             // Set fixed column widths
@@ -514,10 +520,14 @@ object Exporter {
             sheet.setColumnWidth(10, 4500) // Profit Per Packet
             sheet.setColumnWidth(11, 4500) // Total Profit
             sheet.setColumnWidth(12, 4000) // Status
-            sheet.setColumnWidth(13, 8000) // Remarks
-            sheet.setColumnWidth(14, 5000) // Original Packet Rate
-            sheet.setColumnWidth(15, 5000) // Custom Selling Price
-            sheet.setColumnWidth(16, 5000) // Production Cost Used
+            sheet.setColumnWidth(13, 4500) // Paid Amount
+            sheet.setColumnWidth(14, 4500) // Balance Amount
+            sheet.setColumnWidth(15, 8000) // Remarks
+            sheet.setColumnWidth(16, 5000) // Original Packet Rate
+            sheet.setColumnWidth(17, 5000) // Custom Selling Price
+            sheet.setColumnWidth(18, 5000) // Production Cost Used
+            sheet.setColumnWidth(19, 5000) // Session ID
+            sheet.setColumnWidth(20, 5000) // Entry Timestamp
             
             FileOutputStream(file).use { out ->
                 workbook.write(out)
@@ -1608,12 +1618,16 @@ object Exporter {
             val rateIdx = headerMap["rate per packet (₹)"] ?: headerMap["rate per packet"] ?: headerMap["rate"]
             val totalAmountIdx = headerMap["total amount (₹)"] ?: headerMap["total amount"] ?: headerMap["amount"]
             val statusIdx = headerMap["status"]
+            val paidAmountIdx = headerMap["paid amount (₹)"] ?: headerMap["paid amount"] ?: headerMap["paidamount"] ?: headerMap["amount paid"] ?: headerMap["paid"]
+            val balanceAmountIdx = headerMap["balance amount (₹)"] ?: headerMap["balance amount"] ?: headerMap["balanceamount"] ?: headerMap["balance"] ?: headerMap["pending amount"] ?: headerMap["pending amount (₹)"]
             val remarksIdx = headerMap["remarks"] ?: headerMap["notes"]
             val profitPerPacketIdx = headerMap["profit per packet"] ?: headerMap["profitperpacket"] ?: headerMap["profit per unit"] ?: headerMap["profitperunit"]
             val totalProfitIdx = headerMap["total profit"] ?: headerMap["totalprofit"] ?: headerMap["profit"]
             val originalPacketRateIdx = headerMap["original packet rate"] ?: headerMap["originalpacketrate"]
             val customSellingPriceIdx = headerMap["custom selling price"] ?: headerMap["customsellingprice"]
             val productionCostUsedIdx = headerMap["production cost used"] ?: headerMap["productioncostused"]
+            val sessionIdIdx = headerMap["session id"] ?: headerMap["sessionid"] ?: headerMap["session"]
+            val entryTimestampIdx = headerMap["entry timestamp"] ?: headerMap["entrytimestamp"] ?: headerMap["timestamp"]
             
             if (shopNoIdx == null || productTypeIdx == null || packetsGivenIdx == null || rateIdx == null) {
                 throw Exception("Missing required column headers: Shop No, Product Type, Packets Given, and Rate per Packet are required.")
@@ -1635,12 +1649,17 @@ object Exporter {
                 val rateStr = getCellValueAsString(row, rateIdx)?.trim() ?: ""
                 val totalAmountStr = if (totalAmountIdx != null) getCellValueAsString(row, totalAmountIdx)?.trim() ?: "" else ""
                 val statusStr = if (statusIdx != null) getCellValueAsString(row, statusIdx)?.trim() ?: "" else ""
+                val paidAmountStr = if (paidAmountIdx != null) getCellValueAsString(row, paidAmountIdx)?.trim() ?: "" else ""
+                val balanceAmountStr = if (balanceAmountIdx != null) getCellValueAsString(row, balanceAmountIdx)?.trim() ?: "" else ""
                 val remarksStr = if (remarksIdx != null) getCellValueAsString(row, remarksIdx)?.trim() ?: "" else ""
                 val profitPerPacketStr = if (profitPerPacketIdx != null) getCellValueAsString(row, profitPerPacketIdx)?.trim() ?: "" else ""
                 val totalProfitStr = if (totalProfitIdx != null) getCellValueAsString(row, totalProfitIdx)?.trim() ?: "" else ""
                 val originalPacketRateStr = if (originalPacketRateIdx != null) getCellValueAsString(row, originalPacketRateIdx)?.trim() ?: "" else ""
                 val customSellingPriceStr = if (customSellingPriceIdx != null) getCellValueAsString(row, customSellingPriceIdx)?.trim() ?: "" else ""
                 val productionCostUsedStr = if (productionCostUsedIdx != null) getCellValueAsString(row, productionCostUsedIdx)?.trim() ?: "" else ""
+                val sessionId = if (sessionIdIdx != null) getCellValueAsString(row, sessionIdIdx)?.trim()?.ifEmpty { null } else null
+                val entryTimestampStr = if (entryTimestampIdx != null) getCellValueAsString(row, entryTimestampIdx)?.trim() ?: "" else ""
+                val parsedTimestamp = entryTimestampStr.toDoubleOrNull()?.toLong() ?: entryTimestampStr.toLongOrNull()
                 
                 val originalPacketRate = originalPacketRateStr.toDoubleOrNull()
                 val customSellingPrice = customSellingPriceStr.toDoubleOrNull()
@@ -1682,12 +1701,14 @@ object Exporter {
                 // Parse optional/derived fields
                 val entryDate = if (entryDateIdx != null) parseStartingDate(row, entryDateIdx) else null
                 
-                if (entryDate == null) {
+                if (entryDate == null && parsedTimestamp == null) {
                     invalidDatesCount++
                     failedRowsCount++
                     errorRows.add(listOf("${r + 1}", shopNo, prodType, "Missing or Invalid Entry Date") + originalRowData)
                     continue
                 }
+                
+                val effectiveEntryDate = parsedTimestamp ?: entryDate ?: System.currentTimeMillis()
                 
                 val packetsGiven = packetsGivenStr.toIntOrNull()
                 val ratePerPacket = rateStr.toDoubleOrNull()
@@ -1706,7 +1727,7 @@ object Exporter {
                 }
                 
                 // 4. Duplicate Sales record check (all fields match: Shop Number, Entry Date, Product, Selling Price, Packets Given, Packets Returned)
-                val incomingDateFormatted = sdf.format(Date(entryDate))
+                val incomingDateFormatted = sdf.format(Date(effectiveEntryDate))
                 val isDuplicate = existingSales.any { existing ->
                     existing.shopNumber.equals(shopNo, ignoreCase = true) &&
                     existing.productName.equals(prodType, ignoreCase = true) &&
@@ -1760,10 +1781,65 @@ object Exporter {
                 android.util.Log.d("SalesImport", "Row ${r + 1}: Read excelProfitPerPacket=$excelProfitPerPacket, excelTotalProfit=$excelTotalProfit from Excel. Storing profitPerPacket=$profitPerPacket, totalProfit=$totalProfit in database.")
                 
                 val totalAmount = totalAmountStr.toDoubleOrNull() ?: (packetsSold * ratePerPacket)
-                val status = if (statusStr.isNotEmpty()) statusStr else "Paid"
+                val rawPaidAmount = paidAmountStr.toDoubleOrNull()
+                val rawBalanceAmount = balanceAmountStr.toDoubleOrNull()
+
+                val effectiveStatus: String
+                val effectivePaidAmount: Double?
+
+                if (statusStr.isNotEmpty()) {
+                    effectiveStatus = when {
+                        statusStr.equals("Paid", ignoreCase = true) -> "Paid"
+                        statusStr.equals("Partially Paid", ignoreCase = true) || statusStr.equals("Partial", ignoreCase = true) -> "Partially Paid"
+                        statusStr.equals("Pending", ignoreCase = true) || statusStr.equals("Unpaid", ignoreCase = true) -> "Pending"
+                        else -> statusStr
+                    }
+                    effectivePaidAmount = when {
+                        rawPaidAmount != null -> rawPaidAmount
+                        effectiveStatus == "Paid" -> totalAmount
+                        effectiveStatus == "Pending" -> 0.0
+                        effectiveStatus == "Partially Paid" && rawBalanceAmount != null -> (totalAmount - rawBalanceAmount).coerceAtLeast(0.0)
+                        else -> null
+                    }
+                } else {
+                    if (rawPaidAmount != null) {
+                        when {
+                            rawPaidAmount >= totalAmount -> {
+                                effectiveStatus = "Paid"
+                                effectivePaidAmount = totalAmount
+                            }
+                            rawPaidAmount <= 0.0 -> {
+                                effectiveStatus = "Pending"
+                                effectivePaidAmount = 0.0
+                            }
+                            else -> {
+                                effectiveStatus = "Partially Paid"
+                                effectivePaidAmount = rawPaidAmount
+                            }
+                        }
+                    } else if (rawBalanceAmount != null) {
+                        when {
+                            rawBalanceAmount <= 0.0 -> {
+                                effectiveStatus = "Paid"
+                                effectivePaidAmount = totalAmount
+                            }
+                            rawBalanceAmount >= totalAmount -> {
+                                effectiveStatus = "Pending"
+                                effectivePaidAmount = 0.0
+                            }
+                            else -> {
+                                effectiveStatus = "Partially Paid"
+                                effectivePaidAmount = (totalAmount - rawBalanceAmount).coerceAtLeast(0.0)
+                            }
+                        }
+                    } else {
+                        effectiveStatus = "Paid"
+                        effectivePaidAmount = totalAmount
+                    }
+                }
                 
                 val salesEntry = SalesEntry(
-                    entryDate = entryDate,
+                    entryDate = effectiveEntryDate,
                     shopNumber = shop.shopNumber,
                     shopName = shop.storeName,
                     locationNumber = shop.locationNumber,
@@ -1775,8 +1851,10 @@ object Exporter {
                     totalAmount = totalAmount,
                     profitPerPacket = profitPerPacket ?: 0.0,
                     totalProfit = totalProfit ?: 0.0,
-                    status = status,
+                    status = effectiveStatus,
+                    paidAmount = effectivePaidAmount,
                     remarks = remarksStr.ifEmpty { null },
+                    sessionId = sessionId,
                     originalPacketRate = originalPacketRate,
                     customSellingPrice = customSellingPrice,
                     productionCostUsed = productionCostUsed
@@ -2941,8 +3019,8 @@ object Exporter {
             val salesHeaders = listOf(
                 "Date", "Shop Number", "Shop Name", "Location Number", "Product Name",
                 "Packets Given", "Packets Returned", "Packets Sold", "Rate", "Total Amount",
-                "Profit Per Packet", "Total Profit", "Status", "Remarks",
-                "Original Packet Rate", "Custom Selling Price", "Production Cost Used"
+                "Profit Per Packet", "Total Profit", "Status", "Paid Amount", "Balance Amount", "Remarks",
+                "Original Packet Rate", "Custom Selling Price", "Production Cost Used", "Session ID", "Entry Timestamp"
             )
             val salesHeaderRow = salesSheet.createRow(0)
             for (i in salesHeaders.indices) {
@@ -2966,16 +3044,22 @@ object Exporter {
                 row.createCell(10).setCellValue(sales.profitPerPacket)
                 row.createCell(11).setCellValue(sales.totalProfit)
                 row.createCell(12).setCellValue(sales.status)
-                row.createCell(13).setCellValue(sales.remarks ?: "")
+                
+                val paidVal = sales.paidAmount ?: if (sales.status.equals("Paid", ignoreCase = true)) sales.totalAmount else if (sales.status.equals("Pending", ignoreCase = true)) 0.0 else sales.actualPaidAmount
+                row.createCell(13).setCellValue(paidVal)
+                row.createCell(14).setCellValue(sales.pendingBalanceAmount)
+                row.createCell(15).setCellValue(sales.remarks ?: "")
                 if (sales.originalPacketRate != null) {
-                    row.createCell(14).setCellValue(sales.originalPacketRate)
+                    row.createCell(16).setCellValue(sales.originalPacketRate)
                 }
                 if (sales.customSellingPrice != null) {
-                    row.createCell(15).setCellValue(sales.customSellingPrice)
+                    row.createCell(17).setCellValue(sales.customSellingPrice)
                 }
                 if (sales.productionCostUsed != null) {
-                    row.createCell(16).setCellValue(sales.productionCostUsed)
+                    row.createCell(18).setCellValue(sales.productionCostUsed)
                 }
+                row.createCell(19).setCellValue(sales.sessionId ?: "")
+                row.createCell(20).setCellValue(sales.entryDate.toDouble())
             }
             for (i in salesHeaders.indices) {
                 salesSheet.setColumnWidth(i, 5000)
