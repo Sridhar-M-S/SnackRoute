@@ -1186,6 +1186,21 @@ fun CalculateCostTabContent(
                                         checkedIngredients - ingredient.id
                                     }
                                     onCheckedIngredientsChange(nextChecked)
+                                    if (checked) {
+                                        val currentQty = ingredientUsages[ingredient.id] ?: 0.0
+                                        val isCoverOrPiece = ingredient.category.lowercase(Locale.getDefault()).contains("cover") ||
+                                                             ingredient.name.lowercase(Locale.getDefault()).contains("cover") ||
+                                                             ingredient.category.lowercase(Locale.getDefault()).contains("sticker") ||
+                                                             ingredient.category.lowercase(Locale.getDefault()).contains("cup") ||
+                                                             UnitConverter.getUnitType(latestPurchase?.unit ?: "Piece") == "Quantity"
+                                        if (currentQty == 0.0) {
+                                            val defaultQty = if (isCoverOrPiece) 1.0 else 0.0
+                                            if (defaultQty > 0.0) {
+                                                onIngredientUsagesChange(ingredientUsages + (ingredient.id to defaultQty))
+                                                typedUsages = typedUsages + (ingredient.id to "1.0")
+                                            }
+                                        }
+                                    }
                                 },
                                 modifier = Modifier.testTag("checkbox_ingredient_${ingredient.id}")
                             )
@@ -1206,18 +1221,61 @@ fun CalculateCostTabContent(
                                 }
                             }
                             if (isChecked) {
-                                Text(
-                                    text = "₹${String.format("%.2f", calculatedUsageCost)}",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.testTag("usage_cost_${ingredient.id}")
-                                )
+                                val isCoverCategory = ingredient.category.lowercase(Locale.getDefault()).contains("cover") ||
+                                                      ingredient.name.lowercase(Locale.getDefault()).contains("cover")
+                                val formattedCost = if (calculatedUsageCost > 0.0 && calculatedUsageCost < 1.0) {
+                                    "₹" + String.format("%.4f", calculatedUsageCost).trimEnd('0').trimEnd('.')
+                                } else {
+                                    "₹" + String.format("%.2f", calculatedUsageCost)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = formattedCost,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.testTag("usage_cost_${ingredient.id}")
+                                    )
+                                    if (isCoverCategory && usageQty > 0.0) {
+                                        Text(
+                                            text = if (usageQty == 1.0) "1 Cover" else "${usageQty} Covers",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
                             }
                         }
 
                         if (isChecked) {
                             Divider()
+                            val isCoverCategory = ingredient.category.lowercase(Locale.getDefault()).contains("cover") ||
+                                                  ingredient.name.lowercase(Locale.getDefault()).contains("cover")
+                            
+                            // Quick 1-Cover helper button if usage is not 1.0
+                            if (isCoverCategory && costPerUsageUnit > 0.0 && usageQty != 1.0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Standard 1 Cover: ₹${String.format("%.4f", costPerUsageUnit).trimEnd('0').trimEnd('.')}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    AssistChip(
+                                        onClick = {
+                                            typedUsages = typedUsages + (ingredient.id to "1.0")
+                                            onIngredientUsagesChange(ingredientUsages + (ingredient.id to 1.0))
+                                        },
+                                        label = { Text("Set 1 Cover (1.0)", fontSize = 11.sp) },
+                                        leadingIcon = { Icon(Icons.Default.Check, null, modifier = Modifier.size(12.dp)) }
+                                    )
+                                }
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),

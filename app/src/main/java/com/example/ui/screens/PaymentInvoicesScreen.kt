@@ -2119,12 +2119,6 @@ fun InvoiceDetailDialog(
                                     color = Color.Black
                                 )
                                 Text(
-                                    text = "Shop ID    : ${invoice.shopNumber}",
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    color = Color.Black
-                                )
-                                Text(
                                     text = "Location   : ${invoice.locationNumber}",
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                     fontSize = 12.sp,
@@ -2341,7 +2335,7 @@ fun InvoiceDetailDialog(
                                             color = Color(0xFF0F172A)
                                         )
                                         Text(
-                                            text = "Shop ID: ${invoice.shopNumber}  •  Location: ${invoice.locationNumber}",
+                                            text = "Location: ${invoice.locationNumber}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = Color(0xFF475569)
                                         )

@@ -73,7 +73,6 @@ object InvoicePdfGenerator {
 
         sb.appendLine("--- SHOP DETAILS ---")
         sb.appendLine("Shop Name  : ${invoice.shopName}")
-        sb.appendLine("Shop ID    : ${invoice.shopNumber}")
         sb.appendLine("Location   : ${invoice.locationNumber}")
         sb.appendLine()
 
@@ -282,8 +281,6 @@ object InvoicePdfGenerator {
         canvas.drawText("--- SHOP DETAILS ---", MARGIN_X, currentY, boldPaint)
         currentY += lineHeight
         canvas.drawText("Shop Name  : ${invoice.shopName}", MARGIN_X, currentY, boldPaint)
-        currentY += lineHeight
-        canvas.drawText("Shop ID    : ${invoice.shopNumber}", MARGIN_X, currentY, blackPaint)
         currentY += lineHeight
         canvas.drawText("Location   : ${invoice.locationNumber}", MARGIN_X, currentY, blackPaint)
         currentY += lineHeight + 6f
@@ -563,7 +560,7 @@ object InvoicePdfGenerator {
             textSize = 9.5f
             isAntiAlias = true
         }
-        canvas.drawText("Shop ID: ${invoice.shopNumber}   •   Location / Route: ${invoice.locationNumber}", cardPadX + 180f, cardInnerY, shopMetaPaint)
+        canvas.drawText("Location / Route: ${invoice.locationNumber}", cardPadX + 180f, cardInnerY, shopMetaPaint)
 
         currentY += cardHeight + 20f
 

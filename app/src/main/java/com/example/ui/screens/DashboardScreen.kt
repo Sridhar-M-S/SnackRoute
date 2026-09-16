@@ -114,6 +114,7 @@ fun DashboardScreen(
     var showReturnReductionDialog by remember { mutableStateOf(false) }
     var showCustomPriceDialog by remember { mutableStateOf(false) }
     var showPacketsSoldDialog by remember { mutableStateOf(false) }
+    var showAmountInHandDialog by remember { mutableStateOf(false) }
 
     val dueReminders by viewModel.dueReminders.collectAsStateWithLifecycle()
     val inAppNotifications by viewModel.inAppNotifications.collectAsStateWithLifecycle()
@@ -159,6 +160,8 @@ fun DashboardScreen(
 
         val todaySalesCountVal = todaySalesEntries.sumOf { it.packetsSold }
         val todayRevenueVal = todaySalesEntries.sumOf { it.totalAmount }
+        val todayPendingAmountVal = todaySalesEntries.sumOf { it.pendingBalanceAmount }
+        val todayCollectedAmountVal = (todayRevenueVal - todayPendingAmountVal).coerceAtLeast(0.0)
         val todayProfitValCalc = todaySalesEntries.sumOf { it.totalProfit }
         val todayPacketsReturnedVal = todaySalesEntries.sumOf { it.packetsReturned }
         val todayReturnReductionVal = todaySalesEntries.sumOf { it.packetsReturned * it.ratePerPacket }
@@ -219,6 +222,8 @@ fun DashboardScreen(
             totalProducts = totalProductsVal,
             todaySalesCount = todaySalesCountVal,
             todayRevenue = todayRevenueVal,
+            todayCollectedAmount = todayCollectedAmountVal,
+            todayPendingAmount = todayPendingAmountVal,
             todayProfit = todayProfitValCalc,
             monthlyProfit = monthlyProfitVal,
             pendingCollections = pendingCollectionsVal,
@@ -237,7 +242,9 @@ fun DashboardScreen(
             todayCustomPriceEntries = todaySalesEntries.filter { sale ->
                 sale.originalPacketRate != null && sale.ratePerPacket < sale.originalPacketRate
             },
-            todaySoldEntries = todaySalesEntries.filter { it.packetsSold > 0 }
+            todaySoldEntries = todaySalesEntries.filter { it.packetsSold > 0 },
+            todayPaidEntries = todaySalesEntries.filter { it.actualPaidAmount > 0 },
+            todayPendingEntries = todaySalesEntries.filter { it.pendingBalanceAmount > 0 }
         )
     }
 
@@ -246,12 +253,16 @@ fun DashboardScreen(
     val totalProducts = stats.totalProducts
     val todaySalesCount = stats.todaySalesCount
     val todayRevenue = stats.todayRevenue
+    val todayCollectedAmount = stats.todayCollectedAmount
+    val todayPendingAmount = stats.todayPendingAmount
     val todayPacketsReturned = stats.todayPacketsReturned
     val todayReturnReduction = stats.todayReturnReduction
     val todayCustomPriceReduction = stats.todayCustomPriceReduction
     val todayReturnedEntries = stats.todayReturnedEntries
     val todayCustomPriceEntries = stats.todayCustomPriceEntries
     val todaySoldEntries = stats.todaySoldEntries
+    val todayPaidEntries = stats.todayPaidEntries
+    val todayPendingEntries = stats.todayPendingEntries
     val todayProfit = stats.todayProfit
     val monthlyProfit = stats.monthlyProfit
     val pendingCollections = stats.pendingCollections
@@ -768,6 +779,8 @@ fun DashboardScreen(
                     BentoSalesCard(
                         salesCount = todaySalesCount,
                         revenue = todayRevenue,
+                        collectedAmount = todayCollectedAmount,
+                        pendingAmount = todayPendingAmount,
                         packetsReturned = todayPacketsReturned,
                         returnReduction = todayReturnReduction,
                         customPriceReduction = todayCustomPriceReduction,
@@ -786,6 +799,9 @@ fun DashboardScreen(
                         },
                         onPacketsSoldClick = {
                             showPacketsSoldDialog = true
+                        },
+                        onCollectedAmountClick = {
+                            showAmountInHandDialog = true
                         }
                     )
 
@@ -1483,35 +1499,140 @@ fun DashboardScreen(
         }
 
         if (showPacketsSoldDialog) {
+            var breakdownViewMode by remember { mutableStateOf(0) } // 0 = Grouped by Price (Default), 1 = By Shop
+            val groupedBreakdown = remember(todaySoldEntries, products) {
+                val groupedByCategory = todaySoldEntries.groupBy { entry ->
+                    products.firstOrNull { it.productName.equals(entry.productName, ignoreCase = true) }?.productCategory ?: "Popcorn"
+                }
+                groupedByCategory.map { (category, entriesInCat) ->
+                    val groupedByVariety = entriesInCat.groupBy { it.productName }
+                    val varieties = groupedByVariety.map { (variety, entriesInVar) ->
+                        val groupedByPrice = entriesInVar.groupBy { it.ratePerPacket }
+                        val prices = groupedByPrice.map { (price, entriesInPrice) ->
+                            val totalQty = entriesInPrice.sumOf { it.packetsSold }
+                            val totalAmt = entriesInPrice.sumOf { it.totalAmount }
+                            Triple(price, totalQty, totalAmt)
+                        }.sortedBy { it.first }
+                        Pair(variety, prices)
+                    }.sortedBy { it.first }
+                    Pair(category, varieties)
+                }.sortedBy { it.first }
+            }
+
             AlertDialog(
                 onDismissRequest = { showPacketsSoldDialog = false },
                 title = {
-                    Text("Packets Sold Breakdown", fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Packets Sold Breakdown", fontWeight = FontWeight.Bold)
                         Text(
                             text = "Total Packets Sold Today: $todaySalesCount",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 440.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Toggle between Grouped Summary & By Shop
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            SegmentedButton(
+                                selected = breakdownViewMode == 0,
+                                onClick = { breakdownViewMode = 0 },
+                                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                            ) {
+                                Text("By Item & Price", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            SegmentedButton(
+                                selected = breakdownViewMode == 1,
+                                onClick = { breakdownViewMode = 1 },
+                                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                            ) {
+                                Text("By Shop (${todaySoldEntries.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
                         HorizontalDivider()
+
                         if (todaySoldEntries.isEmpty()) {
                             Text(
                                 text = "No packets sold today.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        } else if (breakdownViewMode == 0) {
+                            // Grouped by Category -> Item (Snack) -> Price -> Quantity
+                            groupedBreakdown.forEach { (categoryName, varieties) ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text(
+                                            text = "Category: $categoryName",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
+                                        varieties.forEach { (varietyName, priceGroups) ->
+                                            Column(
+                                                modifier = Modifier.padding(start = 4.dp),
+                                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "• $varietyName",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+
+                                                priceGroups.forEach { (price, totalQty, totalAmt) ->
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(start = 12.dp)
+                                                            .padding(vertical = 2.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "  - ₹${"%,.2f".format(price)} → $totalQty Packets Sold",
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        Text(
+                                                            text = "₹${"%,.2f".format(totalAmt)}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.secondary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         } else {
+                            // By Shop List
                             todaySoldEntries.forEach { entry ->
-                                val category = products.firstOrNull { it.productName == entry.productName }?.productCategory ?: "General"
+                                val category = products.firstOrNull { it.productName.equals(entry.productName, ignoreCase = true) }?.productCategory ?: "Popcorn"
                                 val shopName = shops.firstOrNull { it.shopNumber == entry.shopNumber }?.storeName ?: "Shop ${entry.shopNumber}"
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1581,6 +1702,127 @@ fun DashboardScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = { showPacketsSoldDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+
+        if (showAmountInHandDialog) {
+            AlertDialog(
+                onDismissRequest = { showAmountInHandDialog = false },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text("Amount in Hand Breakdown", fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Today's Total Sales:", style = MaterialTheme.typography.bodyMedium)
+                                    Text("₹${"%,.2f".format(todayRevenue)}", fontWeight = FontWeight.Bold)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Today's Pending Amount:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                                    Text("-₹${"%,.2f".format(todayPendingAmount)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Amount in Hand (Net Cash):", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "₹${"%,.2f".format(todayCollectedAmount)}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+
+                        if (todayPendingEntries.isNotEmpty()) {
+                            Text(
+                                text = "Today's Pending Balances (${todayPendingEntries.size}):",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            todayPendingEntries.forEach { entry ->
+                                val shopName = shops.firstOrNull { it.shopNumber == entry.shopNumber }?.storeName ?: "Shop ${entry.shopNumber}"
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                                            Text(shopName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                            Text(entry.productName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text("Pending: ₹${"%,.2f".format(entry.pendingBalanceAmount)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                                            Text("Total: ₹${"%,.2f".format(entry.totalAmount)}", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (todaySalesCount > 0) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Text(
+                                    text = "All sales today have been fully collected! No pending balances.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(12.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showAmountInHandDialog = false }) {
                         Text("Close")
                     }
                 }
@@ -1899,6 +2141,8 @@ fun RecentSaleRow(sale: SalesEntry) {
 fun BentoSalesCard(
     salesCount: Int,
     revenue: Double,
+    collectedAmount: Double = revenue,
+    pendingAmount: Double = 0.0,
     packetsReturned: Int,
     returnReduction: Double,
     customPriceReduction: Double,
@@ -1908,6 +2152,7 @@ fun BentoSalesCard(
     onReturnReductionClick: () -> Unit = {},
     onCustomPriceReductionClick: () -> Unit = {},
     onPacketsSoldClick: () -> Unit = {},
+    onCollectedAmountClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val targetPackets = todayTargets.sumOf { it.targetPackets }
@@ -1931,19 +2176,62 @@ fun BentoSalesCard(
                 .padding(24.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "TODAY'S SALES",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    color = Color.White.copy(alpha = 0.8f)
-                )
-                Text(
-                    text = "₹${"%,.2f".format(revenue)}",
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Text(
+                            text = "TODAY'S SALES",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "₹${"%,.2f".format(revenue)}",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.22f))
+                            .clickable(onClick = onCollectedAmountClick)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .testTag("dashboard_amount_in_hand_badge")
+                    ) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "AMOUNT IN HAND",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "₹${"%,.2f".format(collectedAmount)}",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            if (pendingAmount > 0.0) {
+                                Text(
+                                    text = "Pending: -₹${"%,.2f".format(pendingAmount)}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -3429,6 +3717,8 @@ data class DashboardStats(
     val totalProducts: Int,
     val todaySalesCount: Int,
     val todayRevenue: Double,
+    val todayCollectedAmount: Double = 0.0,
+    val todayPendingAmount: Double = 0.0,
     val todayProfit: Double,
     val monthlyProfit: Double,
     val pendingCollections: Double,
@@ -3445,7 +3735,9 @@ data class DashboardStats(
     val todayCustomPriceReduction: Double,
     val todayReturnedEntries: List<SalesEntry>,
     val todayCustomPriceEntries: List<SalesEntry>,
-    val todaySoldEntries: List<SalesEntry>
+    val todaySoldEntries: List<SalesEntry>,
+    val todayPaidEntries: List<SalesEntry> = emptyList(),
+    val todayPendingEntries: List<SalesEntry> = emptyList()
 )
 
 @Composable
