@@ -78,7 +78,7 @@ object UnitConverter {
         if (t1 > 0L && t2 > 0L) {
             val d1Str = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t1))
             val d2Str = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t2))
-            return t1 <= t2 || d1Str <= d2Str
+            return d1Str <= d2Str
         }
         return dateStr.trim() <= targetDateStr.trim()
     }
@@ -104,11 +104,10 @@ object UnitConverter {
         if (candidate != null) return candidate
 
         // 2. Fallback: If no purchase was strictly on or before effectiveDate,
-        // use the earliest available purchase or most recent available purchase
-        // so that existing purchases are never ignored.
-        return ingredientPurchases.minByOrNull { parseDateMillis(it.purchaseDate) }
-            ?: ingredientPurchases.maxByOrNull { parseDateMillis(it.purchaseDate) }
-            ?: ingredientPurchases.firstOrNull()
+        // use the most recent available purchase so valid prices are always used
+        return ingredientPurchases.maxWithOrNull(
+            compareBy<IngredientPurchase> { parseDateMillis(it.purchaseDate) }.thenBy { it.purchaseId }
+        ) ?: ingredientPurchases.firstOrNull()
     }
 
     fun getUnitType(unit: String): String {
@@ -534,6 +533,7 @@ fun CalculateCostTabContent(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var typedUsages by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var showInspectionDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(ingredientUsages) {
         if (ingredientUsages.isEmpty()) {
@@ -928,6 +928,7 @@ fun CalculateCostTabContent(
                             onValueChange = { },
                             readOnly = true,
                             label = { Text("Cost Calculation Effective Date*") },
+                            supportingText = { Text("Ingredient purchase prices active on or before this date are applied", fontSize = 11.sp, color = Color.Gray) },
                             modifier = Modifier.fillMaxWidth().testTag("input_effective_date"),
                             trailingIcon = {
                                 IconButton(onClick = {
@@ -1104,24 +1105,87 @@ fun CalculateCostTabContent(
 
         // --- INGREDIENT USAGES SHEET (Step 5) ---
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Step 2: Define Usages",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                TextButton(
-                    onClick = { onIsProceededChange(false) },
-                    modifier = Modifier.testTag("btn_back_to_step1")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Back to Step 1")
+                    Text(
+                        "Step 2: Define Usages",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    TextButton(
+                        onClick = { onIsProceededChange(false) },
+                        modifier = Modifier.testTag("btn_back_to_step1")
+                    ) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Back to Step 1")
+                    }
+                }
+
+                // Interactive Date Box Bar in Step 2
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        val parts = effectiveDate.split("-")
+                        val cal = Calendar.getInstance()
+                        val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                        val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                        val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                        DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                            val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                            onEffectiveDateChange(formattedDate)
+                        }, y, m, d).show()
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = "Date", tint = MaterialTheme.colorScheme.secondary)
+                            Column {
+                                Text(
+                                    text = "Calculation Date: $effectiveDate",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Text(
+                                    text = "Applying purchase rates on or before $effectiveDate",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f)
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val parts = effectiveDate.split("-")
+                                val cal = Calendar.getInstance()
+                                val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                    val formattedDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                    onEffectiveDateChange(formattedDate)
+                                }, y, m, d).show()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("btn_change_effective_date_step2")
+                        ) {
+                            Text("Change Date", fontSize = 11.sp)
+                        }
+                    }
                 }
             }
         }
@@ -1351,12 +1415,24 @@ fun CalculateCostTabContent(
                                     " / divided by ${latestPurchase.largeCoverDistribution} packets"
                                 } else ""
 
-                                Text(
-                                    text = "Latest Purchase: ${latestPurchase.purchaseQuantity} ${latestPurchase.unit} for ₹${latestPurchase.purchasePrice}$packagingExtrasText$dividedText. Effective Cost: ₹${String.format("%.4f", costPerUsageUnit)} per $usageUnit",
-                                    fontSize = 10.sp,
-                                    color = Color.Gray,
-                                    modifier = Modifier.padding(horizontal = 4.dp)
-                                )
+                                Column(modifier = Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "Effective Purchase on $effectiveDate: ${latestPurchase.purchaseQuantity} ${latestPurchase.unit} for ₹${latestPurchase.purchasePrice}$packagingExtrasText$dividedText (Date: ${latestPurchase.purchaseDate}). Rate: ₹${String.format("%.4f", costPerUsageUnit)} per $usageUnit",
+                                        fontSize = 10.sp,
+                                        color = Color.Gray
+                                    )
+                                    val masterNewest = purchases.filter { it.ingredientId == ingredient.id }.maxWithOrNull(
+                                        compareBy<IngredientPurchase> { UnitConverter.parseDateMillis(it.purchaseDate) }.thenBy { it.purchaseId }
+                                    )
+                                    if (masterNewest != null && masterNewest.purchaseId != latestPurchase.purchaseId && masterNewest.purchaseDate > effectiveDate) {
+                                        Text(
+                                            text = "ℹ️ Master has newer purchase: ₹${masterNewest.purchasePrice} on ${masterNewest.purchaseDate} (Select a date ≥ ${masterNewest.purchaseDate} to apply)",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.tertiary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
                             } else {
                                 Text(
                                     text = "⚠️ No purchases added for this ingredient yet! Cost calculated as ₹0.00.",
@@ -1380,6 +1456,17 @@ fun CalculateCostTabContent(
             var totalProductionCost = 0.0
             val formulasList = mutableListOf<String>()
 
+            data class BreakdownItem(
+                val name: String,
+                val variety: String,
+                val usageQty: Double,
+                val usageUnit: String,
+                val purchaseDate: String,
+                val costPerUsageUnit: Double,
+                val itemCost: Double
+            )
+            val breakdownList = mutableListOf<BreakdownItem>()
+
             checkedIngredients.forEach { id ->
                 val ingredientObj = ingredients.find { it.id == id } ?: return@forEach
                 val purchaseObj = UnitConverter.getEffectivePurchase(purchases, id, effectiveDate)
@@ -1402,6 +1489,17 @@ fun CalculateCostTabContent(
                 if (itemCost > 0) {
                     formulasList.add("${ingredientObj.name} (₹${String.format("%.2f", itemCost)})")
                 }
+                breakdownList.add(
+                    BreakdownItem(
+                        name = ingredientObj.name,
+                        variety = ingredientObj.variety,
+                        usageQty = qty,
+                        usageUnit = unit,
+                        purchaseDate = purchaseObj?.purchaseDate ?: "N/A",
+                        costPerUsageUnit = costPerUsageUnit,
+                        itemCost = itemCost
+                    )
+                )
             }
 
             val sellingPrice = selectedPriceObj.sellingPrice
@@ -1412,12 +1510,27 @@ fun CalculateCostTabContent(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Step 3: Formula & Profit Summary",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Step 3: Formula & Profit Summary",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        OutlinedButton(
+                            onClick = { showInspectionDialog = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("btn_inspect_by_date")
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Check by Date", fontSize = 11.sp)
+                        }
+                    }
 
                     Divider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
 
@@ -1431,6 +1544,50 @@ fun CalculateCostTabContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                     )
+
+                    // Detailed Each Ingredient Amount Table
+                    if (breakdownList.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Each Ingredient Cost Breakdown (Date: $effectiveDate):",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                breakdownList.forEach { item ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1.2f)) {
+                                            Text(
+                                                text = item.name + if (item.variety.isNotEmpty()) " (${item.variety})" else "",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = "${item.usageQty} ${item.usageUnit} @ ₹${String.format("%.4f", item.costPerUsageUnit)}/${item.usageUnit}",
+                                                fontSize = 10.sp,
+                                                color = Color.Gray
+                                            )
+                                        }
+                                        Text(
+                                            text = "₹${String.format("%.2f", item.itemCost)}",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1730,6 +1887,358 @@ fun CalculateCostTabContent(
             }
         )
     }
+
+    // --- DATE-WISE COST INSPECTION DIALOG (Checking purpose) ---
+    if (showInspectionDialog) {
+        DateCostInspectionDialog(
+            productName = selectedProductObj?.productName ?: "Product",
+            varietyName = "",
+            categoryName = selectedCategory,
+            sellingPrice = selectedPriceObj?.sellingPrice ?: 0.0,
+            checkedIngredients = checkedIngredients,
+            ingredientUsages = ingredientUsages,
+            ingredientUnits = ingredientUnits,
+            ingredients = ingredients,
+            purchases = purchases,
+            initialDate = effectiveDate,
+            onDismiss = { showInspectionDialog = false }
+        )
+    }
+}
+
+// ============================================
+// DATE-WISE COST INSPECTION DIALOG
+// ============================================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DateCostInspectionDialog(
+    productName: String,
+    varietyName: String,
+    categoryName: String,
+    sellingPrice: Double,
+    checkedIngredients: Set<Int>,
+    ingredientUsages: Map<Int, Double>,
+    ingredientUnits: Map<Int, String>,
+    ingredients: List<Ingredient>,
+    purchases: List<IngredientPurchase>,
+    initialDate: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var inspectDate by remember { mutableStateOf(initialDate) }
+
+    // Quick historical dates from relevant purchases
+    val relevantPurchaseDates = remember(checkedIngredients, purchases) {
+        purchases.filter { checkedIngredients.contains(it.ingredientId) }
+            .map { it.purchaseDate }
+            .distinct()
+            .sortedDescending()
+            .take(4)
+    }
+
+    data class InspectIngredientRow(
+        val name: String,
+        val variety: String,
+        val usageQty: Double,
+        val usageUnit: String,
+        val appliedPurchase: IngredientPurchase?,
+        val costPerUsageUnit: Double,
+        val itemAmount: Double
+    )
+
+    val rows = remember(inspectDate, checkedIngredients, ingredientUsages, ingredientUnits, purchases, ingredients) {
+        checkedIngredients.mapNotNull { id ->
+            val ing = ingredients.find { it.id == id } ?: return@mapNotNull null
+            val p = UnitConverter.getEffectivePurchase(purchases, id, inspectDate)
+            val qty = ingredientUsages[id] ?: 0.0
+            val u = ingredientUnits[id] ?: UnitConverter.getDefaultUsageUnit(p?.unit)
+            val unitCost = p?.let {
+                UnitConverter.calculateCostPerUsageUnit(
+                    purchasePrice = p.purchasePrice,
+                    purchaseQty = p.purchaseQuantity,
+                    purchaseUnit = p.unit,
+                    usageUnit = u,
+                    sealCost = p.sealCost,
+                    printingCost = p.printingCost,
+                    largeCoverDistribution = p.largeCoverDistribution
+                )
+            } ?: 0.0
+            InspectIngredientRow(
+                name = ing.name,
+                variety = ing.variety,
+                usageQty = qty,
+                usageUnit = u,
+                appliedPurchase = p,
+                costPerUsageUnit = unitCost,
+                itemAmount = unitCost * qty
+            )
+        }
+    }
+
+    val totalInspectionCost = rows.sumOf { it.itemAmount }
+    val calculatedProfit = sellingPrice - totalInspectionCost
+    val marginPct = if (sellingPrice > 0) (calculatedProfit / sellingPrice) * 100.0 else 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DateRange,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Date-wise Cost Inspector", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .sizeIn(maxHeight = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Testing Mode Notice
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            text = "Checking Purpose Only: Pick any date to see ingredient rates & total cost active on that date.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+
+                // Product summary banner
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = productName.ifEmpty { "Selected Product" },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            if (varietyName.isNotEmpty() || categoryName.isNotEmpty()) {
+                                Text(
+                                    text = "Category: $categoryName • Variety: $varietyName",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Selling Price: ₹${String.format("%.2f", sellingPrice)}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // Date Picker Input Box
+                OutlinedTextField(
+                    value = inspectDate,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Selected Check Date*") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val parts = inspectDate.split("-")
+                            val cal = Calendar.getInstance()
+                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                inspectDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                            }, y, m, d).show()
+                        },
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            val parts = inspectDate.split("-")
+                            val cal = Calendar.getInstance()
+                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                inspectDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                            }, y, m, d).show()
+                        }) {
+                            Icon(Icons.Default.DateRange, contentDescription = "Pick Date")
+                        }
+                    }
+                )
+
+                // Quick Date selector chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                    AssistChip(
+                        onClick = { inspectDate = todayStr },
+                        label = { Text("Today", fontSize = 10.sp) }
+                    )
+                    relevantPurchaseDates.forEach { pDate ->
+                        if (pDate != todayStr) {
+                            AssistChip(
+                                onClick = { inspectDate = pDate },
+                                label = { Text(pDate, fontSize = 10.sp) }
+                            )
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Ingredients List Table
+                Text(
+                    text = "Ingredient Breakdown on $inspectDate:",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (rows.isEmpty()) {
+                        item {
+                            Text("No ingredients configured or selected for this product.", fontSize = 12.sp, color = Color.Gray)
+                        }
+                    } else {
+                        items(rows) { r ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1.2f)) {
+                                            Text(
+                                                text = r.name + if (r.variety.isNotEmpty()) " (${r.variety})" else "",
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 12.sp
+                                            )
+                                            Text(
+                                                text = "${r.usageQty} ${r.usageUnit} @ ₹${String.format("%.4f", r.costPerUsageUnit)}/${r.usageUnit}",
+                                                fontSize = 10.sp,
+                                                color = Color.Gray
+                                            )
+                                        }
+                                        Text(
+                                            text = "₹${String.format("%.2f", r.itemAmount)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    if (r.appliedPurchase != null) {
+                                        Text(
+                                            text = "Applied rate from purchase on ${r.appliedPurchase.purchaseDate} (₹${r.appliedPurchase.purchasePrice} for ${r.appliedPurchase.purchaseQuantity} ${r.appliedPurchase.unit})",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "No purchase prior to $inspectDate",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Total Summary Card
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Total Production Cost on $inspectDate:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                text = "₹${String.format("%.2f", totalInspectionCost)}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Selling Price:", fontSize = 12.sp)
+                            Text("₹${String.format("%.2f", sellingPrice)}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Resulting Profit:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "₹${String.format("%.2f", calculatedProfit)} (${String.format("%.1f", marginPct)}%)",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (calculatedProfit >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 // ============================================
