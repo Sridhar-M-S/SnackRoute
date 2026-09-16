@@ -6,6 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -104,8 +107,8 @@ object UnitConverter {
         if (candidate != null) return candidate
 
         // 2. Fallback: If no purchase was strictly on or before effectiveDate,
-        // use the most recent available purchase so valid prices are always used
-        return ingredientPurchases.maxWithOrNull(
+        // use the earliest purchase (chronologically closest future purchase)
+        return ingredientPurchases.minWithOrNull(
             compareBy<IngredientPurchase> { parseDateMillis(it.purchaseDate) }.thenBy { it.purchaseId }
         ) ?: ingredientPurchases.firstOrNull()
     }
@@ -1901,6 +1904,11 @@ fun CalculateCostTabContent(
             ingredients = ingredients,
             purchases = purchases,
             initialDate = effectiveDate,
+            onApplyDate = { appliedDate ->
+                onEffectiveDateChange(appliedDate)
+                showInspectionDialog = false
+                Toast.makeText(context, "Applied calculation date: $appliedDate", Toast.LENGTH_SHORT).show()
+            },
             onDismiss = { showInspectionDialog = false }
         )
     }
@@ -1922,6 +1930,7 @@ fun DateCostInspectionDialog(
     ingredients: List<Ingredient>,
     purchases: List<IngredientPurchase>,
     initialDate: String,
+    onApplyDate: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1931,9 +1940,10 @@ fun DateCostInspectionDialog(
     val relevantPurchaseDates = remember(checkedIngredients, purchases) {
         purchases.filter { checkedIngredients.contains(it.ingredientId) }
             .map { it.purchaseDate }
+            .filter { it.isNotBlank() }
             .distinct()
             .sortedDescending()
-            .take(4)
+            .take(5)
     }
 
     data class InspectIngredientRow(
@@ -1943,7 +1953,8 @@ fun DateCostInspectionDialog(
         val usageUnit: String,
         val appliedPurchase: IngredientPurchase?,
         val costPerUsageUnit: Double,
-        val itemAmount: Double
+        val itemAmount: Double,
+        val isFallback: Boolean
     )
 
     val rows = remember(inspectDate, checkedIngredients, ingredientUsages, ingredientUnits, purchases, ingredients) {
@@ -1963,6 +1974,7 @@ fun DateCostInspectionDialog(
                     largeCoverDistribution = p.largeCoverDistribution
                 )
             } ?: 0.0
+            val isFallback = p != null && !UnitConverter.isDateOnOrBefore(p.purchaseDate, inspectDate)
             InspectIngredientRow(
                 name = ing.name,
                 variety = ing.variety,
@@ -1970,7 +1982,8 @@ fun DateCostInspectionDialog(
                 usageUnit = u,
                 appliedPurchase = p,
                 costPerUsageUnit = unitCost,
-                itemAmount = unitCost * qty
+                itemAmount = unitCost * qty,
+                isFallback = isFallback
             )
         }
     }
@@ -1979,170 +1992,225 @@ fun DateCostInspectionDialog(
     val calculatedProfit = sellingPrice - totalInspectionCost
     val marginPct = if (sellingPrice > 0) (calculatedProfit / sellingPrice) * 100.0 else 0.0
 
-    AlertDialog(
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DateRange,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Date-wise Cost Inspector", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .sizeIn(maxHeight = 480.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Testing Mode Notice
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(8.dp)
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.92f),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header (Fixed)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            Icons.Default.Info,
+                            imageVector = Icons.Default.DateRange,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.secondary
+                            tint = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Checking Purpose Only: Pick any date to see ingredient rates & total cost active on that date.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                            text = "Date-wise Cost Inspector",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
                         )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
                     }
                 }
 
-                // Product summary banner
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp)
+                HorizontalDivider()
+
+                // Scrollable Content
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // Notice banner
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                            Text(
+                                text = "Pick any date to inspect ingredient rates and total cost active on that date.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+
+                    // Product summary banner
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = productName.ifEmpty { "Selected Product" },
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                if (categoryName.isNotEmpty()) {
+                                    Text(
+                                        text = "Category: $categoryName" + if (varietyName.isNotEmpty()) " • Variety: $varietyName" else "",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Selling Price: ₹${String.format("%.2f", sellingPrice)}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    // Date Picker Input Box
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = inspectDate,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Selected Check Date*") },
+                            supportingText = { Text("Ingredient rates on or before $inspectDate are active", fontSize = 11.sp, color = Color.Gray) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("input_inspect_date"),
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    val parts = inspectDate.split("-")
+                                    val cal = Calendar.getInstance()
+                                    val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                    val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                    val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                    DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                        inspectDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                    }, y, m, d).show()
+                                }) {
+                                    Icon(Icons.Default.DateRange, contentDescription = "Pick Date")
+                                }
+                            }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable {
+                                    val parts = inspectDate.split("-")
+                                    val cal = Calendar.getInstance()
+                                    val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
+                                    val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                                    val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                                    DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                        inspectDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                    }, y, m, d).show()
+                                }
+                        )
+                    }
+
+                    // Quick Date Chips
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = productName.ifEmpty { "Selected Product" },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            if (varietyName.isNotEmpty() || categoryName.isNotEmpty()) {
-                                Text(
-                                    text = "Category: $categoryName • Variety: $varietyName",
-                                    fontSize = 11.sp,
-                                    color = Color.Gray
+                        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                        FilterChip(
+                            selected = inspectDate == todayStr,
+                            onClick = { inspectDate = todayStr },
+                            label = { Text("Today ($todayStr)", fontSize = 11.sp) }
+                        )
+                        relevantPurchaseDates.forEach { pDate ->
+                            if (pDate != todayStr) {
+                                FilterChip(
+                                    selected = inspectDate == pDate,
+                                    onClick = { inspectDate = pDate },
+                                    label = { Text(pDate, fontSize = 11.sp) }
                                 )
                             }
                         }
+                    }
+
+                    HorizontalDivider()
+
+                    // Ingredients List Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Selling Price: ₹${String.format("%.2f", sellingPrice)}",
+                            text = "Ingredient Breakdown on $inspectDate:",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        Text(
+                            text = "${rows.size} ingredients",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
                     }
-                }
 
-                // Date Picker Input Box
-                OutlinedTextField(
-                    value = inspectDate,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Selected Check Date*") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            val parts = inspectDate.split("-")
-                            val cal = Calendar.getInstance()
-                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
-                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
-                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
-                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
-                                inspectDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
-                            }, y, m, d).show()
-                        },
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            val parts = inspectDate.split("-")
-                            val cal = Calendar.getInstance()
-                            val y = parts.getOrNull(0)?.toIntOrNull() ?: cal.get(Calendar.YEAR)
-                            val m = (parts.getOrNull(1)?.toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
-                            val d = parts.getOrNull(2)?.toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
-                            DatePickerDialog(context, { _, year, month, dayOfMonth ->
-                                inspectDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
-                            }, y, m, d).show()
-                        }) {
-                            Icon(Icons.Default.DateRange, contentDescription = "Pick Date")
-                        }
-                    }
-                )
-
-                // Quick Date selector chips
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                    AssistChip(
-                        onClick = { inspectDate = todayStr },
-                        label = { Text("Today", fontSize = 10.sp) }
-                    )
-                    relevantPurchaseDates.forEach { pDate ->
-                        if (pDate != todayStr) {
-                            AssistChip(
-                                onClick = { inspectDate = pDate },
-                                label = { Text(pDate, fontSize = 10.sp) }
+                    if (rows.isEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "No ingredients selected or configured for this product.",
+                                modifier = Modifier.padding(16.dp),
+                                fontSize = 12.sp,
+                                color = Color.Gray
                             )
                         }
-                    }
-                }
-
-                Divider()
-
-                // Ingredients List Table
-                Text(
-                    text = "Ingredient Breakdown on $inspectDate:",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                LazyColumn(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (rows.isEmpty()) {
-                        item {
-                            Text("No ingredients configured or selected for this product.", fontSize = 12.sp, color = Color.Gray)
-                        }
                     } else {
-                        items(rows) { r ->
+                        rows.forEach { r ->
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(6.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2152,31 +2220,37 @@ fun DateCostInspectionDialog(
                                             Text(
                                                 text = r.name + if (r.variety.isNotEmpty()) " (${r.variety})" else "",
                                                 fontWeight = FontWeight.SemiBold,
-                                                fontSize = 12.sp
+                                                fontSize = 13.sp
                                             )
                                             Text(
                                                 text = "${r.usageQty} ${r.usageUnit} @ ₹${String.format("%.4f", r.costPerUsageUnit)}/${r.usageUnit}",
-                                                fontSize = 10.sp,
+                                                fontSize = 11.sp,
                                                 color = Color.Gray
                                             )
                                         }
                                         Text(
                                             text = "₹${String.format("%.2f", r.itemAmount)}",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
+                                            fontSize = 14.sp,
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                     if (r.appliedPurchase != null) {
+                                        val p = r.appliedPurchase
+                                        val rateNote = if (r.isFallback) {
+                                            "ℹ️ Date is prior to first purchase. Initial purchase rate applied: ₹${p.purchasePrice} on ${p.purchaseDate}"
+                                        } else {
+                                            "Active Purchase: ₹${p.purchasePrice} for ${p.purchaseQuantity} ${p.unit} on ${p.purchaseDate}"
+                                        }
                                         Text(
-                                            text = "Applied rate from purchase on ${r.appliedPurchase.purchaseDate} (₹${r.appliedPurchase.purchasePrice} for ${r.appliedPurchase.purchaseQuantity} ${r.appliedPurchase.unit})",
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = rateNote,
+                                            fontSize = 10.sp,
+                                            color = if (r.isFallback) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     } else {
                                         Text(
-                                            text = "No purchase prior to $inspectDate",
-                                            fontSize = 9.sp,
+                                            text = "⚠️ No purchase found in master",
+                                            fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.error
                                         )
                                     }
@@ -2184,61 +2258,89 @@ fun DateCostInspectionDialog(
                             }
                         }
                     }
-                }
 
-                Divider()
+                    HorizontalDivider()
 
-                // Total Summary Card
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    // Total Summary Card
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("Total Production Cost on $inspectDate:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            Text(
-                                text = "₹${String.format("%.2f", totalInspectionCost)}",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Selling Price:", fontSize = 12.sp)
-                            Text("₹${String.format("%.2f", sellingPrice)}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Resulting Profit:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = "₹${String.format("%.2f", calculatedProfit)} (${String.format("%.1f", marginPct)}%)",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (calculatedProfit >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Total Production Cost on $inspectDate:",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "₹${String.format("%.2f", totalInspectionCost)}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Selling Price:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text("₹${String.format("%.2f", sellingPrice)}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Resulting Profit:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text(
+                                    text = "₹${String.format("%.2f", calculatedProfit)} (${String.format("%.1f", marginPct)}%)",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (calculatedProfit >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Close")
+
+                HorizontalDivider()
+
+                // Actions Footer (Fixed)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("btn_close_inspect_dialog")
+                    ) {
+                        Text("Close")
+                    }
+                    Button(
+                        onClick = { onApplyDate(inspectDate) },
+                        modifier = Modifier.testTag("btn_apply_inspect_date")
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Apply Date ($inspectDate)")
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 // ============================================
